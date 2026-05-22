@@ -1,0 +1,590 @@
+import React, { useState, useRef, useEffect } from "react";
+import {
+  X,
+  Eye,
+  EyeOff,
+  Plug,
+  Image as ImageIcon,
+  Download,
+  Upload,
+  Save,
+  ChevronDown,
+  RefreshCw,
+  AlertTriangle,
+} from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  ApiSettings,
+  LlmProviderKind,
+  ImageProviderKind,
+} from "../types";
+import {
+  saveApiSettings,
+  exportApiSettings,
+  validateApiSettingsJson,
+  normalizeCustomBaseUrl,
+} from "../lib/apiSettings";
+import {
+  LlmProviderIcon,
+  ImageProviderIcon,
+  LLM_PROVIDER_LABELS,
+  IMAGE_PROVIDER_LABELS,
+} from "./icons/providerIcons";
+
+interface ApiSettingsPanelProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSaved: (settings: ApiSettings) => void;
+  initial: ApiSettings;
+}
+
+const LLM_PROVIDERS: LlmProviderKind[] = [
+  "qiny",
+  "custom",
+  "gemini",
+  "anthropic",
+  "grok",
+  "deepseek",
+];
+const IMAGE_PROVIDERS: ImageProviderKind[] = ["qiny"];
+
+export default function ApiSettingsPanel({
+  isOpen,
+  onClose,
+  onSaved,
+  initial,
+}: ApiSettingsPanelProps) {
+  const [settings, setSettings] = useState<ApiSettings>(initial);
+  const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (isOpen) setSettings(initial);
+  }, [isOpen, initial]);
+
+  const showToast = (kind: "ok" | "err", text: string) => {
+    setToast({ kind, text });
+    setTimeout(() => setToast(null), 2800);
+  };
+
+  const handleLlmProviderChange = (p: LlmProviderKind) => {
+    setSettings((s) => ({ ...s, llm: { ...s.llm, provider: p } }));
+  };
+
+  const handleImageProviderChange = (p: ImageProviderKind) => {
+    setSettings((s) => ({ ...s, image: { ...s.image, provider: p } }));
+  };
+
+  const handleExport = () => {
+    exportApiSettings(settings);
+    showToast("ok", "设置已导出。");
+  };
+
+  const handleImportClick = () => fileInputRef.current?.click();
+
+  const handleFileChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = ev.target?.result as string;
+        const data = JSON.parse(text);
+        if (validateApiSettingsJson(data)) {
+          setSettings(data);
+          showToast("ok", "配置已导入，未保存前可继续修改。");
+        } else {
+          showToast("err", "这并非有效的虚空连接配置。");
+        }
+      } catch {
+        showToast("err", "文件无法解析为 JSON。");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  const handleSave = () => {
+    const final: ApiSettings =
+      settings.llm.provider === "custom"
+        ? {
+            ...settings,
+            llm: {
+              ...settings.llm,
+              customBaseUrl: normalizeCustomBaseUrl(settings.llm.customBaseUrl ?? ""),
+            },
+          }
+        : settings;
+    saveApiSettings(final);
+    onSaved(final);
+    onClose();
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+        >
+          <motion.div
+            className="relative w-full max-w-2xl max-h-[90vh] bg-[#111213]/95 border border-[#c1a067]/35 rounded-lg shadow-2xl shadow-emerald-500/10 flex flex-col overflow-hidden"
+            initial={{ scale: 0.95, y: 12 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.95, y: 12 }}
+            transition={{ type: "spring", stiffness: 320, damping: 28 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[#183022] bg-[#0c1410]">
+              <div className="flex items-center gap-2">
+                <Plug className="w-4 h-4 text-[#10b981]" />
+                <h2 className="text-sm font-bold text-[#10b981] tracking-widest font-mono">
+                  虚空连接的设置
+                </h2>
+              </div>
+              <button
+                onClick={onClose}
+                className="p-1 text-gray-500 hover:text-gray-200 transition-colors"
+                aria-label="关闭"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-6">
+              <SectionHeader icon={<Plug className="w-3.5 h-3.5" />} title="对话模型" />
+
+              <ProviderDropdown<LlmProviderKind>
+                label="对话模型供应商"
+                value={settings.llm.provider}
+                options={LLM_PROVIDERS}
+                renderIcon={(k) => <LlmProviderIcon kind={k} size={18} />}
+                renderLabel={(k) => LLM_PROVIDER_LABELS[k]}
+                onChange={handleLlmProviderChange}
+              />
+
+              {settings.llm.provider === "custom" && (
+                <Field label="Base URL" hint="OpenAI 兼容路径，会自动归一为 .../v1 形式">
+                  <input
+                    type="text"
+                    value={settings.llm.customBaseUrl ?? ""}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        llm: { ...s.llm, customBaseUrl: e.target.value },
+                      }))
+                    }
+                    onBlur={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        llm: {
+                          ...s.llm,
+                          customBaseUrl: normalizeCustomBaseUrl(e.target.value),
+                        },
+                      }))
+                    }
+                    placeholder="https://your-endpoint.com"
+                    className="w-full bg-black/40 border border-[#183022] focus:border-[#10b981] outline-none rounded px-3 py-2 text-xs text-gray-200 font-mono"
+                  />
+                </Field>
+              )}
+
+              <ApiKeyField
+                label="对话 API Key"
+                value={settings.llm.apiKey}
+                onChange={(v) =>
+                  setSettings((s) => ({ ...s, llm: { ...s.llm, apiKey: v } }))
+                }
+              />
+
+              <ModelField
+                label="对话模型"
+                value={settings.llm.model}
+                onChange={(v) =>
+                  setSettings((s) => ({ ...s, llm: { ...s.llm, model: v } }))
+                }
+                provider={settings.llm.provider}
+                apiKey={settings.llm.apiKey}
+                customBaseUrl={settings.llm.customBaseUrl}
+              />
+
+              <div className="border-t border-[#183022] pt-5">
+                <SectionHeader
+                  icon={<ImageIcon className="w-3.5 h-3.5" />}
+                  title="画图模型"
+                />
+              </div>
+
+              <ProviderDropdown<ImageProviderKind>
+                label="画图模型供应商"
+                value={settings.image.provider}
+                options={IMAGE_PROVIDERS}
+                renderIcon={(k) => <ImageProviderIcon kind={k} size={18} />}
+                renderLabel={(k) => IMAGE_PROVIDER_LABELS[k]}
+                onChange={handleImageProviderChange}
+              />
+
+              <ApiKeyField
+                label="画图 API Key"
+                value={settings.image.apiKey}
+                onChange={(v) =>
+                  setSettings((s) => ({ ...s, image: { ...s.image, apiKey: v } }))
+                }
+              />
+
+              <ModelField
+                label="画图模型"
+                value={settings.image.model}
+                onChange={(v) =>
+                  setSettings((s) => ({ ...s, image: { ...s.image, model: v } }))
+                }
+                provider="qiny-image"
+                apiKey={settings.image.apiKey}
+              />
+            </div>
+
+            {/* Footer actions */}
+            <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-[#183022] bg-[#0c1410]">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={handleFileChosen}
+              />
+              <button
+                onClick={handleImportClick}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-black/40 border border-gray-800 hover:border-[#10b981]/40 hover:text-gray-200 text-gray-400 rounded transition-all font-sans"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                导入设置
+              </button>
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-black/40 border border-gray-800 hover:border-[#10b981]/40 hover:text-gray-200 text-gray-400 rounded transition-all font-sans"
+              >
+                <Download className="w-3.5 h-3.5" />
+                导出设置
+              </button>
+              <div className="flex-1" />
+              <button
+                onClick={handleSave}
+                className="flex items-center gap-1.5 px-4 py-1.5 text-xs bg-[#c1a067]/20 hover:bg-[#c1a067]/30 border border-[#c1a067] text-[#10b981] rounded transition-all font-bold tracking-widest font-sans"
+              >
+                <Save className="w-3.5 h-3.5" />
+                保存设置
+              </button>
+            </div>
+
+            {/* Toast */}
+            <AnimatePresence>
+              {toast && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  className={`absolute top-3 left-1/2 -translate-x-1/2 px-4 py-2 rounded text-xs font-sans flex items-center gap-2 shadow-2xl z-50 ${
+                    toast.kind === "ok"
+                      ? "bg-black/90 border border-[#10b981]/60 text-[#10b981]"
+                      : "bg-black/90 border border-red-500/60 text-red-400"
+                  }`}
+                >
+                  {toast.kind === "ok" ? (
+                    <span className="w-2 h-2 rounded-full bg-[#10b981] animate-pulse" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                  )}
+                  {toast.text}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <div className="flex items-center gap-2 text-[#10b981]">
+      {icon}
+      <span className="text-xs font-bold tracking-widest font-mono">{title}</span>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="text-[11px] font-semibold text-gray-300 tracking-wider font-sans">
+          {label}
+        </label>
+        {hint && <span className="text-[10px] text-gray-500 font-sans">{hint}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+interface ProviderDropdownProps<K extends string> {
+  label: string;
+  value: K;
+  options: K[];
+  renderIcon: (k: K) => React.ReactNode;
+  renderLabel: (k: K) => string;
+  onChange: (k: K) => void;
+}
+
+function ProviderDropdown<K extends string>({
+  label,
+  value,
+  options,
+  renderIcon,
+  renderLabel,
+  onChange,
+}: ProviderDropdownProps<K>) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    if (open) document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  return (
+    <Field label={label}>
+      <div ref={ref} className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className={`w-full flex items-center justify-between gap-2 bg-black/40 border rounded px-3 py-2 text-xs text-gray-200 transition-all ${
+            open ? "border-[#10b981]" : "border-[#183022] hover:border-[#10b981]/40"
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            {renderIcon(value)}
+            <span className="font-sans">{renderLabel(value)}</span>
+          </span>
+          <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              className="absolute z-30 left-0 right-0 mt-1 bg-[#0c1410] border border-[#183022] rounded shadow-2xl shadow-black/60 overflow-hidden"
+            >
+              <div className="max-h-60 overflow-y-auto custom-scrollbar">
+                {options.map((opt) => {
+                  const active = opt === value;
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => {
+                        onChange(opt);
+                        setOpen(false);
+                      }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors ${
+                        active
+                          ? "bg-[#c1a067]/20 text-[#10b981]"
+                          : "text-gray-300 hover:bg-[#121f18]"
+                      }`}
+                    >
+                      {renderIcon(opt)}
+                      <span className="font-sans">{renderLabel(opt)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </Field>
+  );
+}
+
+function ApiKeyField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [reveal, setReveal] = useState(false);
+
+  // mousedown reveals, mouseup/leave hides — matches SillyTavern's "press to peek" pattern
+  return (
+    <Field label={label}>
+      <div className="relative">
+        <input
+          type={reveal ? "text" : "password"}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="sk-..."
+          className="w-full bg-black/40 border border-[#183022] focus:border-[#10b981] outline-none rounded px-3 py-2 pr-10 text-xs text-gray-200 font-mono"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <button
+          type="button"
+          onMouseDown={() => setReveal(true)}
+          onMouseUp={() => setReveal(false)}
+          onMouseLeave={() => setReveal(false)}
+          onTouchStart={() => setReveal(true)}
+          onTouchEnd={() => setReveal(false)}
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-[#10b981] transition-colors"
+          aria-label={reveal ? "隐藏 Key" : "按住显示 Key"}
+          title="按住显示"
+        >
+          {reveal ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+        </button>
+      </div>
+    </Field>
+  );
+}
+
+interface ModelFieldProps {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  provider: LlmProviderKind | "qiny-image";
+  apiKey: string;
+  customBaseUrl?: string;
+}
+
+function ModelField({ label, value, onChange, provider, apiKey, customBaseUrl }: ModelFieldProps) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [models, setModels] = useState<string[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapperRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    if (open) document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const fetchModels = async () => {
+    setOpen(true);
+    setLoading(true);
+    setErr(null);
+    try {
+      const params = new URLSearchParams({ provider, apiKey });
+      if (provider === "custom" && customBaseUrl) {
+        params.set("customBaseUrl", customBaseUrl);
+      }
+      const resp = await fetch(`/api/models?${params.toString()}`);
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        throw new Error(data?.error || `获取模型列表失败 (${resp.status})`);
+      }
+      const list: string[] = Array.isArray(data.models) ? data.models : [];
+      setModels(list);
+      if (list.length === 0) setErr("空列表：检查 Key 是否正确。");
+    } catch (e: any) {
+      setErr(e.message || "未知错误");
+      setModels([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Field label={label}>
+      <div ref={wrapperRef} className="relative">
+        <div className="relative">
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onFocus={() => setOpen(false)}
+            placeholder="例如 gpt-4o-mini / gemini-2.5-flash / claude-sonnet-4-5"
+            className="w-full bg-black/40 border border-[#183022] focus:border-[#10b981] outline-none rounded px-3 py-2 pr-10 text-xs text-gray-200 font-mono"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <button
+            type="button"
+            onClick={fetchModels}
+            disabled={!apiKey || loading}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-[#10b981] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="获取模型列表"
+            aria-label="获取模型列表"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
+
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              className="absolute z-30 left-0 right-0 bottom-full mb-1 bg-[#0c1410] border border-[#183022] rounded shadow-2xl shadow-black/60 overflow-hidden"
+            >
+              <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                {loading ? (
+                  <div className="px-3 py-3 text-xs text-gray-400 flex items-center gap-2 font-sans">
+                    <span className="w-2 h-2 rounded-full bg-[#10b981] animate-pulse" />
+                    正在向虚空查询模型清单…
+                  </div>
+                ) : err ? (
+                  <div className="px-3 py-3 text-xs text-red-400 flex items-center gap-2 font-sans">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    {err}
+                  </div>
+                ) : (
+                  models.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => {
+                        onChange(m);
+                        setOpen(false);
+                      }}
+                      className={`w-full px-3 py-2 text-xs text-left transition-colors font-mono truncate ${
+                        m === value
+                          ? "bg-[#c1a067]/20 text-[#10b981]"
+                          : "text-gray-300 hover:bg-[#121f18]"
+                      }`}
+                    >
+                      {m}
+                    </button>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </Field>
+  );
+}

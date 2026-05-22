@@ -1,0 +1,1097 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useRef } from "react";
+import {
+  CharacterSheet,
+  ChatMessage,
+  ClueItem,
+  RollRequest,
+  SanityCheckRequest,
+  RollResult,
+  KeeperResponse,
+} from "./types";
+import CharacterCreator from "./components/CharacterCreator";
+import RollDiceModal from "./components/RollDiceModal";
+import CharacterSheetPanel from "./components/CharacterSheetPanel";
+import CluesNotebook from "./components/CluesNotebook";
+import {
+  Shield,
+  MessageSquare,
+  BookOpen,
+  Plug,
+  RotateCcw,
+  Database,
+  Sparkles,
+  Send,
+  HelpCircle,
+  AlertCircle,
+  Dices,
+  Skull,
+  Compass,
+  Eye,
+  Activity,
+  Download,
+  LogOut,
+} from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+
+import StartScreen from "./components/StartScreen";
+import {
+  saveGame,
+  generateTimestamp,
+  downloadSaveAsJson,
+  getAllSaves,
+} from "./lib/saveManager";
+import { loadApiSettings, isApiConfigured } from "./lib/apiSettings";
+import ApiSettingsPanel from "./components/ApiSettingsPanel";
+import { WebGameSave, ApiSettings } from "./types";
+
+export default function App() {
+  const initialMode =
+    (sessionStorage.getItem("keeper_app_mode") as any) || "start";
+  const initialSaveId = sessionStorage.getItem("keeper_active_save_id");
+  const saves = initialSaveId ? getAllSaves() : [];
+  const initialSave = initialSaveId
+    ? saves.find((s) => s.id === initialSaveId)
+    : null;
+
+  // Game states
+  const [appMode, setAppMode] = useState<"start" | "creation" | "game">(
+    initialMode,
+  );
+  const [activeSaveId, setActiveSaveId] = useState<string | null>(
+    initialSave ? initialSave.id : null,
+  );
+  const [saveTimestamp, setSaveTimestamp] = useState<string>(
+    initialSave ? initialSave.timestamp : "",
+  );
+  const [gameModuleName, setGameModuleName] = useState<string>(
+    initialSave ? initialSave.moduleName : "克苏鲁的呼唤神秘冒险",
+  );
+
+  const [character, setCharacter] = useState<CharacterSheet | null>(
+    initialSave ? initialSave.character : null,
+  );
+  const [messages, setMessages] = useState<ChatMessage[]>(
+    initialSave ? initialSave.messages : [],
+  );
+  const [clues, setClues] = useState<ClueItem[]>(
+    initialSave ? initialSave.clues : [],
+  );
+  const [enabledFeatures, setEnabledFeatures] = useState<{
+    typemoon: boolean;
+    scp: boolean;
+  }>(initialSave ? initialSave.enabledFeatures : { typemoon: true, scp: true });
+
+  // UI states
+  const [inputText, setInputText] = useState<string>("");
+  const [isKeeperLoading, setIsKeeperLoading] = useState<boolean>(false);
+  const [showConfigPanel, setShowConfigPanel] = useState<
+    "sheet" | "notebook" | null
+  >(null);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showApiSettings, setShowApiSettings] = useState<boolean>(false);
+  const [apiSettings, setApiSettings] = useState<ApiSettings>(() => loadApiSettings());
+
+  // Active Interactive Requests
+  const [activeRoll, setActiveRoll] = useState<RollRequest | null>(null);
+  const [activeSanity, setActiveSanity] = useState<SanityCheckRequest | null>(
+    null,
+  );
+  const [pendingKeeperResponse, setPendingKeeperResponse] =
+    useState<KeeperResponse | null>(null);
+
+  // Variable values changes animations trackers
+  const [hpDiff, setHpDiff] = useState<number>(0);
+  const [sanDiff, setSanDiff] = useState<number>(0);
+  const [mpDiff, setMpDiff] = useState<number>(0);
+
+  // Scenery parameters from keeper
+  const [currentLocation, setCurrentLocation] =
+    useState<string>("古木教堂的隐秘密道");
+  const [dangerLevel, setDangerLevel] = useState<number>(1);
+
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Scroll to bottom of message thread
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isKeeperLoading]);
+
+  // Handle game launcher start with chosen Investigator
+  const handleGameStart = (
+    chosenChar: CharacterSheet,
+    features: { typemoon: boolean; scp: boolean },
+  ) => {
+    setCharacter(chosenChar);
+    setEnabledFeatures(features);
+    setAppMode("game");
+    setCurrentLocation("游戏准备舱 (调查室)");
+    setDangerLevel(1);
+
+    const newSaveId = `save_${Date.now()}`;
+    const newTimestamp = generateTimestamp();
+    setActiveSaveId(newSaveId);
+    setSaveTimestamp(newTimestamp);
+
+    const activeMods = ["【固件】经典CoC"];
+    if (features.typemoon) activeMods.push("【附加】Type-MOON要素");
+    if (features.scp) activeMods.push("【附加】SCP要素");
+
+    const initialSystemMsg: ChatMessage = {
+      id: "sys_init_0",
+      sender: "system",
+      timestamp: new Date().toLocaleTimeString(),
+      text: `已成功创建调查员档案：\n- **姓名** ↬ ${chosenChar.name}\n- **职业** ↬ ${chosenChar.occupation}\n- **生命(HP)** ↬ ${chosenChar.hp}/${chosenChar.maxHp} | **理智(SAN)** ↬ ${chosenChar.san}/${chosenChar.maxSanLimit} | **幸运** ↬ ${chosenChar.attributes.luck}%\n- **内容模块** ↬ ${activeMods.join(", ")}\n\n联结世界已加载。正在为您秘密连接守密人(Keeper)...`,
+    };
+
+    setMessages([initialSystemMsg]);
+    triggerKeeperNarration([initialSystemMsg], chosenChar, features);
+  };
+
+  // Perform auto save
+  const doSaveGame = (st: {
+    messages: ChatMessage[];
+    clues: ClueItem[];
+    char: CharacterSheet;
+    loc: string;
+    dlvl: number;
+    tS: string;
+    sId: string;
+    mName: string;
+  }) => {
+    if (!st.sId) return;
+    const saveObj: WebGameSave = {
+      id: st.sId,
+      moduleName: st.mName,
+      timestamp: st.tS,
+      lastUpdated: Date.now(),
+      messages: st.messages,
+      character: st.char,
+      clues: st.clues,
+      enabledFeatures,
+      currentLocation: st.loc,
+      dangerLevel: st.dlvl,
+    };
+    saveGame(saveObj);
+  };
+
+  // Send player speech or automated roll outcome back to keeper
+  const handleSendPlayerMessage = async (
+    textToSend: string,
+    isSystemReport: boolean = false,
+  ) => {
+    if (!textToSend.trim() || isKeeperLoading) return;
+
+    const playerMsg: ChatMessage = {
+      id: `player_${Date.now()}`,
+      sender: isSystemReport ? "system" : "player",
+      timestamp: new Date().toLocaleTimeString(),
+      text: textToSend,
+    };
+
+    const updated = [...messages, playerMsg];
+    setMessages(updated);
+    setInputText("");
+
+    // Trigger Keeper Call
+    triggerKeeperNarration(updated, character!, enabledFeatures);
+  };
+
+  const triggerKeeperNarration = async (
+    currentHistory: ChatMessage[],
+    activeChar: CharacterSheet,
+    featuresToUse: { typemoon: boolean; scp: boolean } = enabledFeatures,
+  ) => {
+    setIsKeeperLoading(true);
+
+    try {
+      const response = await fetch("/api/keeper/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: currentHistory,
+          features: {
+            typemoon: featuresToUse?.typemoon !== false,
+            scp: featuresToUse?.scp !== false,
+          },
+          apiSettings,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("与守密人虚无连接断开，请检查网络或刷新");
+      }
+
+      const raw = await response.json();
+      if (!raw.success || !raw.data) {
+        throw new Error(raw.error || "守密人低语失败，返回格式有误");
+      }
+
+      const keeperData: KeeperResponse = raw.data;
+
+      if (keeperData.keeperRoll) {
+        setPendingKeeperResponse(keeperData);
+        setActiveRoll({
+          skillName: keeperData.keeperRoll.skillName,
+          targetValue: keeperData.keeperRoll.targetValue,
+          difficulty: keeperData.keeperRoll.difficulty,
+          reason: keeperData.keeperRoll.reason,
+          isKeeperRoll: true,
+          isSecret: keeperData.keeperRoll.isSecret,
+        });
+      } else {
+        applyKeeperResponse(keeperData);
+      }
+    } catch (error: any) {
+      console.error(error);
+      const errCard: ChatMessage = {
+        id: `err_${Date.now()}`,
+        sender: "system",
+        timestamp: new Date().toLocaleTimeString(),
+        text: `【异常低语阻断】⚠️ ${error.message || "连接终点异常失效，请检查您的 API 配置。"}`,
+      };
+      setMessages((prev) => [...prev, errCard]);
+    } finally {
+      setIsKeeperLoading(false);
+    }
+  };
+
+  const applyKeeperResponse = (
+    keeperData: KeeperResponse,
+    keeperRollReport?: string,
+  ) => {
+    // Check for GameState updates
+    if (keeperData.gameState) {
+      if (keeperData.gameState.moduleName) {
+        setGameModuleName(keeperData.gameState.moduleName);
+      }
+      setCurrentLocation(keeperData.gameState.currentLocation || "未知禁区");
+      setDangerLevel(keeperData.gameState.dangerLevel || 1);
+    }
+
+    // Check for Character Attributes updates (HP / SAN / MP)
+    if (keeperData.characterUpdates) {
+      const updates = keeperData.characterUpdates;
+      let finalHp = character!.hp;
+      let finalMp = character!.mp;
+      let finalSan = character!.san;
+      let finalMythos = character!.mythos;
+      let finalMaxSanLimit = character!.maxSanLimit;
+
+      if (updates.hpChange) {
+        finalHp = Math.max(
+          0,
+          Math.min(character!.maxHp, character!.hp + updates.hpChange),
+        );
+        setHpDiff(updates.hpChange);
+        setTimeout(() => setHpDiff(0), 3000);
+      }
+
+      if (updates.mpChange) {
+        finalMp = Math.max(
+          0,
+          Math.min(character!.maxMp, character!.mp + updates.mpChange),
+        );
+        setMpDiff(updates.mpChange);
+        setTimeout(() => setMpDiff(0), 3000);
+      }
+
+      if (updates.sanChange) {
+        finalSan = Math.max(
+          0,
+          Math.min(character!.maxSanLimit, character!.san + updates.sanChange),
+        );
+        setSanDiff(updates.sanChange);
+        setTimeout(() => setSanDiff(0), 3000);
+      }
+
+      if (updates.sanitySkillGain) {
+        finalMythos = character!.mythos + updates.sanitySkillGain;
+        finalMaxSanLimit = Math.max(0, 99 - finalMythos);
+        finalSan = Math.min(finalSan, finalMaxSanLimit);
+      }
+
+      const nextCharState = {
+        ...character!,
+        hp: finalHp,
+        mp: finalMp,
+        san: finalSan,
+        mythos: finalMythos,
+        maxSanLimit: finalMaxSanLimit,
+      };
+
+      setCharacter(nextCharState);
+    }
+
+    const newMsgs: ChatMessage[] = [];
+
+    // Prior narrative roll report (Keeper action text) if provided
+    if (keeperRollReport) {
+      newMsgs.push({
+        id: `sys_keeper_roll_${Date.now()}`,
+        sender: "system",
+        timestamp: new Date().toLocaleTimeString(),
+        text: keeperRollReport,
+      });
+    }
+
+    // Create main message card with KeeperResponse
+    newMsgs.push({
+      id: `keeper_${Date.now()}`,
+      sender: "keeper",
+      timestamp: new Date().toLocaleTimeString(),
+      text: keeperData.narrative,
+      parsedResponse: keeperData,
+    });
+
+    setMessages((prev) => [...prev, ...newMsgs]);
+
+    // Handle roll triggers or Sanity check triggers in response
+    // ALWAYS clear active roll state so player can click to trigger manually
+    setActiveRoll(null);
+
+    if (keeperData.sanityCheck) {
+      setActiveSanity(keeperData.sanityCheck);
+    } else {
+      setActiveSanity(null);
+    }
+
+    // Handle custom discovered CLUES items visually and add to local Notebook
+    if (keeperData.clue) {
+      const cluePayload = keeperData.clue;
+
+      // Request Imagen image for the clue in background
+      const nextClueItem: ClueItem = {
+        id: `clue_${Date.now()}`,
+        title: cluePayload.title,
+        type: cluePayload.type,
+        description: cluePayload.description,
+        prompt: cluePayload.prompt,
+        discoveredAt: keeperData.gameState?.currentLocation || currentLocation,
+      };
+
+      // Try to generate clue photo with imagen asynchronously to avoid blocking chat narrative flow!
+      triggerClueImageGeneration(nextClueItem);
+    }
+  };
+
+  // Asynchronous wrapper for generating clue photography visual cards
+  const triggerClueImageGeneration = async (clue: ClueItem) => {
+    // Temporarily add with no image to list
+    setClues((p) => [...p, clue]);
+
+    try {
+      const resp = await fetch("/api/image/generate-clue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: clue.prompt,
+          title: clue.title,
+          type: clue.type,
+          apiSettings,
+        }),
+      });
+
+      if (resp.ok) {
+        const body = await resp.json();
+        if (body.success && body.imageUrl) {
+          // Update clue with generated base64 photo
+          setClues((prev) =>
+            prev.map((c) =>
+              c.id === clue.id ? { ...c, imageUrl: body.imageUrl } : c,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "Occult sketch generation failed asynchronously, clue stays as procedural card:",
+        e,
+      );
+    }
+  };
+
+  // Dice roll complete callback from specialized Roll Modal
+  const handleRollComplete = (result: RollResult, messageReport: string) => {
+    setActiveRoll(null);
+    handleSendPlayerMessage(messageReport, true);
+  };
+
+  // Keeper's automatic roll complete callback
+  const handleKeeperRollComplete = (
+    result: RollResult,
+    messageReport: string,
+  ) => {
+    setActiveRoll(null);
+    if (pendingKeeperResponse) {
+      applyKeeperResponse(pendingKeeperResponse, messageReport);
+      setPendingKeeperResponse(null);
+    }
+  };
+
+  // Sanity check complete callback
+  const handleSanityCheckComplete = (result: RollResult) => {
+    const sanityReq = activeSanity!;
+    setActiveSanity(null);
+
+    let lossFormula =
+      result.successType !== "failure" && result.successType !== "fumble"
+        ? sanityReq.lossOnSuccess
+        : sanityReq.lossOnFailure;
+
+    // Roll loss points
+    const rolledLoss = parseAndRollDice(lossFormula);
+
+    const nextSan = Math.max(0, character!.san - rolledLoss);
+    setSanDiff(-rolledLoss);
+    setTimeout(() => setSanDiff(0), 3000);
+
+    const updatedChar = {
+      ...character!,
+      san: nextSan,
+    };
+    setCharacter(updatedChar);
+
+    // Build the report text
+    let stateStr = "理智受到剧烈压迫，脑叶产生诡异轰鸣";
+    if (rolledLoss === 0) {
+      stateStr = "意志在绝望中维持了坚韧，未受到创伤";
+    } else if (rolledLoss >= 5) {
+      stateStr =
+        "【临时性精神失常 (Temporary Insanity)】：你目睹了超出三维常识之物，大脑防御崩溃！陷入了短暂的狂乱幻想、歇斯底里！";
+    }
+
+    const reportMsg = `[系统的理智SAN值判定 - 意志: 投出 ${result.total} / 目标 ${result.targetValue} (${result.successType === "failure" || result.successType === "fumble" ? "失败" : "成功"}) -> 扣减 SAN 值 ${rolledLoss} 点 (公式 ${lossFormula})。当前理智值：${nextSan}/${character!.maxSanLimit}。\n异常行为状态：${stateStr}]`;
+
+    handleSendPlayerMessage(reportMsg, true);
+  };
+
+  const parseAndRollDice = (formula: string): number => {
+    const f = formula.trim().toLowerCase();
+    if (!f || f === "0") return 0;
+    if (/^\d+$/.test(f)) return parseInt(f);
+
+    const match = f.match(/^(\d+)d(\d+)$/);
+    if (match) {
+      const num = parseInt(match[1]);
+      const sides = parseInt(match[2]);
+      let sum = 0;
+      for (let i = 0; i < num; i++) {
+        sum += Math.floor(Math.random() * sides) + 1;
+      }
+      return sum;
+    }
+    return 1;
+  };
+
+  useEffect(() => {
+    if (
+      appMode === "game" &&
+      activeSaveId &&
+      character &&
+      messages.length > 0
+    ) {
+      saveGame({
+        id: activeSaveId,
+        moduleName: gameModuleName,
+        timestamp: saveTimestamp,
+        lastUpdated: Date.now(),
+        messages,
+        character,
+        clues,
+        enabledFeatures,
+        currentLocation,
+        dangerLevel,
+      });
+    }
+  }, [
+    appMode,
+    activeSaveId,
+    gameModuleName,
+    saveTimestamp,
+    character,
+    messages,
+    clues,
+    enabledFeatures,
+    currentLocation,
+    dangerLevel,
+  ]);
+
+  useEffect(() => {
+    sessionStorage.setItem("keeper_app_mode", appMode);
+  }, [appMode]);
+
+  useEffect(() => {
+    if (activeSaveId) {
+      sessionStorage.setItem("keeper_active_save_id", activeSaveId);
+    } else {
+      sessionStorage.removeItem("keeper_active_save_id");
+    }
+  }, [activeSaveId]);
+
+  const handleDownloadSave = () => {
+    if (appMode === "game" && activeSaveId && character) {
+      const saveObj: WebGameSave = {
+        id: activeSaveId,
+        moduleName: gameModuleName,
+        timestamp: saveTimestamp,
+        lastUpdated: Date.now(),
+        messages,
+        character,
+        clues,
+        enabledFeatures,
+        currentLocation,
+        dangerLevel,
+      };
+      downloadSaveAsJson(saveObj);
+    }
+  };
+
+  const handleExitInvestigation = () => {
+    setShowExitConfirm(true);
+  };
+
+  const confirmExitInvestigation = () => {
+    setActiveSaveId(null);
+    setCharacter(null);
+    setMessages([]);
+    setClues([]);
+    setAppMode("start");
+    setShowExitConfirm(false);
+  };
+
+  const handleLoadGame = (save: WebGameSave) => {
+    setActiveSaveId(save.id);
+    setSaveTimestamp(save.timestamp);
+    setGameModuleName(save.moduleName);
+    setCharacter(save.character);
+    setMessages(save.messages);
+    setClues(save.clues);
+    setEnabledFeatures(save.enabledFeatures);
+    setCurrentLocation(save.currentLocation || "未知禁区");
+    setDangerLevel(save.dangerLevel || 1);
+    setAppMode("game");
+  };
+
+  return (
+    <div
+      id="application-container"
+      className="w-screen h-screen bg-[#0d0e10] flex select-none overflow-hidden text-gray-200"
+    >
+      {/* Background Flickering candle light effect */}
+      <div
+        className="absolute inset-0 bg-radial from-orange-950/5 to-transparent pointer-events-none z-0 mix-blend-color-dodge animate-pulse"
+        style={{ animationDuration: "4s" }}
+      />
+
+      {appMode === "start" ? (
+        <StartScreen
+          onNewGame={() => setAppMode("creation")}
+          onLoadGame={handleLoadGame}
+          onOpenApiSettings={() => setShowApiSettings(true)}
+          apiConfigured={isApiConfigured(apiSettings)}
+        />
+      ) : appMode === "creation" ? (
+        <div
+          id="setup-launcher-screen"
+          className="w-full h-full flex flex-col items-center justify-start py-8 px-4 overflow-y-auto custom-scrollbar z-10"
+        >
+          <CharacterCreator onComplete={handleGameStart} apiSettings={apiSettings} />
+        </div>
+      ) : (
+        /* Main Interactive Game Board View */
+        <div
+          id="game-board-layout"
+          className="w-full h-full flex flex-col md:flex-row relative z-10 overflow-hidden"
+        >
+          {/* Active Overlay for SAN loss static CRT lines */}
+          {sanDiff < 0 && (
+            <div
+              id="san-loss-screen-glitch"
+              className="fixed inset-0 bg-purple-950/15 pointer-events-none z-50 animate-glitch"
+            />
+          )}
+
+          {/* Left panel: Narrative feed / Chat body */}
+          <div className="flex-1 height-full flex flex-col bg-[#0e1011] border-r border-[#c1a067]/15 relative overflow-hidden">
+            {/* Header Status Bar (Danger Level, Location, Character Quick Status) */}
+            <div className="h-14 bg-[#131516] border-b border-gray-950 px-4 flex items-center justify-between shadow-md">
+              <div className="flex items-center gap-2">
+                <Compass className="w-4 h-4 text-[#c1a067]" />
+                <span
+                  id="header-location-title"
+                  className="text-xs font-bold text-[#c1a067] font-mono tracking-wider"
+                >
+                  [{gameModuleName}] {currentLocation.toUpperCase()}
+                </span>
+                <span className="text-[10px] text-gray-500">•</span>
+                <div
+                  id="header-danger-meter"
+                  className="flex items-center gap-1 hidden sm:flex"
+                >
+                  <span className="text-[9px] text-gray-500 uppercase font-mono">
+                    DANGER
+                  </span>
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={`w-1 h-3 rounded-full ${i < dangerLevel ? "bg-red-500/80 animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.5)]" : "bg-gray-800"}`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  id="download-save-btn"
+                  type="button"
+                  onClick={handleDownloadSave}
+                  className="p-1 px-2 border border-gray-800 bg-black/30 rounded text-gray-500 hover:text-[#c1a067] transition-colors"
+                  title="下载调查日志"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  id="exit-investigation-btn"
+                  type="button"
+                  onClick={handleExitInvestigation}
+                  className="p-1 px-2 border border-gray-800 bg-black/30 rounded text-gray-500 hover:text-red-500 transition-colors"
+                  title="退出调查"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+
+                {/* Character Sidebar Toggle Shortcut */}
+                <button
+                  id="toggle-sheet-btn"
+                  type="button"
+                  onClick={() =>
+                    setShowConfigPanel(
+                      showConfigPanel === "sheet" ? null : "sheet",
+                    )
+                  }
+                  className={`flex items-center gap-1.5 px-3 py-1 text-xs border rounded transition-all font-sans ${
+                    showConfigPanel === "sheet"
+                      ? "bg-[#c1a067]/20 border-[#c1a067] text-[#c1a067]"
+                      : "bg-black/40 border-gray-800 text-gray-400 hover:text-gray-200"
+                  }`}
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">调查员面板</span>
+                </button>
+
+                {/* Clue Panel Toggle Shortcut */}
+                <button
+                  id="toggle-notebook-btn"
+                  type="button"
+                  onClick={() =>
+                    setShowConfigPanel(
+                      showConfigPanel === "notebook" ? null : "notebook",
+                    )
+                  }
+                  className={`flex items-center gap-1.5 px-3 py-1 text-xs border rounded transition-all font-sans relative ${
+                    showConfigPanel === "notebook"
+                      ? "bg-[#c1a067]/20 border-[#c1a067] text-[#c1a067]"
+                      : "bg-black/40 border-gray-800 text-gray-400 hover:text-gray-200"
+                  }`}
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">线索册</span>
+                  {clues.length > 0 && (
+                    <span className="absolute -top-1.5 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-650 text-[9px] font-black text-white">
+                      {clues.length}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  id="api-settings-btn"
+                  type="button"
+                  onClick={() => setShowApiSettings(!showApiSettings)}
+                  className={`p-1 px-2 border rounded transition-all ${
+                    showApiSettings
+                      ? "bg-[#c1a067]/20 border-[#c1a067] text-[#c1a067]"
+                      : "bg-black/40 border-gray-800 text-gray-400 hover:text-gray-200"
+                  }`}
+                  title="API 设置"
+                  aria-label="API 设置"
+                >
+                  <Plug className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Conversation Timeline Log */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar bg-[radial-gradient(ellipse_at_bottom,_var(--tw-gradient-stops))] from-[#131517]/40 via-[#0e1011] to-[#0d0e10]">
+              {messages.map((m) => (
+                <div
+                  key={m.id}
+                  className={`flex ${m.sender === "player" ? "justify-end" : m.sender === "system" ? "justify-center" : "justify-start"}`}
+                >
+                  {m.sender === "system" ? (
+                    /* SYSTEM / ROLL EVENTS BANNER */
+                    <div
+                      id={`msg-${m.id}`}
+                      className="w-full max-w-2xl bg-black/60 border border-gray-900 rounded p-3 text-xs text-gray-400 border-l-4 border-l-[#c1a067] font-mono leading-relaxed whitespace-pre-wrap shadow-inner"
+                    >
+                      {m.text}
+                    </div>
+                  ) : m.sender === "player" ? (
+                    /* PLAYER DIALOGUE */
+                    <div
+                      id={`msg-${m.id}`}
+                      className="max-w-xl bg-[#c1a067]/10 border border-[#c1a067]/45 rounded-lg rounded-tr-none p-3.5 text-xs text-gray-100 font-sans shadow-lg leading-relaxed shadow-yellow-500/5"
+                    >
+                      <div className="font-semibold text-[#c1a067] mb-1 font-sans text-right">
+                        调查员: {character?.name}
+                      </div>
+                      <div className="whitespace-pre-wrap font-sans">
+                        {m.text}
+                      </div>
+                    </div>
+                  ) : (
+                    /* KEEPER / GM STORY NARRATIVE */
+                    <div
+                      id={`msg-${m.id}`}
+                      className="w-full max-w-3xl bg-[#141617]/50 border border-[#c1a067]/10 rounded-lg p-5 shadow-2xl space-y-4"
+                    >
+                      {/* Avatar descriptor */}
+                      <div className="flex items-center gap-2 border-b border-[#c1a067]/10 pb-2">
+                        <Dices className="w-4 h-4 text-[#c1a067]" />
+                        <span className="text-xs font-bold text-[#c1a067] uppercase tracking-widest font-mono">
+                          KEEPER 守密人
+                        </span>
+                        <span className="text-[10px] text-gray-650 font-mono">
+                          {m.timestamp}
+                        </span>
+                      </div>
+
+                      {/* Main prose */}
+                      <div className="typewriter-text text-sm whitespace-pre-wrap select-text leading-relaxed font-sans text-gray-300">
+                        {m.text}
+                      </div>
+
+                      {/* NPC Specific Dialogue display */}
+                      {m.parsedResponse?.npcDialogue && (
+                        <div
+                          id={`npc-dialogue-box-${m.id}`}
+                          className="bg-[#c1a067]/5 border-l-2 border-l-[#c1a067] p-3 rounded text-xs"
+                        >
+                          <span className="font-bold text-[#c1a067] block mb-1">
+                            【角色对话】{m.parsedResponse.npcDialogue.name}:
+                          </span>
+                          <span className="text-gray-300 italic font-sans font-medium">
+                            " {m.parsedResponse.npcDialogue.text} "
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Discovered item card visual directly within message */}
+                      {m.parsedResponse?.clue && (
+                        <div
+                          id="clue-secured-card"
+                          className="border border-dashed border-[#c1a067]/40 p-4 bg-black/50 rounded flex items-center justify-between gap-4 mt-2"
+                        >
+                          <div>
+                            <span className="text-[10px] uppercase font-mono tracking-widest text-[#c1a067] block mb-1">
+                              ★ 找到线索 / DISCOVERED EVIDENCE ★
+                            </span>
+                            <h4 className="text-sm font-black text-gray-100">
+                              {m.parsedResponse.clue.title}
+                            </h4>
+                            <p className="text-xs text-gray-500 font-sans mt-0.5 max-w-md">
+                              {m.parsedResponse.clue.description}
+                            </p>
+                          </div>
+                          <div>
+                            <button
+                              id="view-clue-shortcut-btn"
+                              type="button"
+                              onClick={() => setShowConfigPanel("notebook")}
+                              className="px-3 py-1.5 bg-black border border-[#c1a067]/30 hover:border-[#c1a067]/90 text-xs text-[#c1a067] rounded font-semibold transition"
+                            >
+                              翻阅调查本
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Action trigger: Required Skill Roll Button */}
+                      {m.parsedResponse?.rollRequest && (
+                        <div
+                          id="roll-request-banner"
+                          className="bg-[#1c1a17] border border-amber-950 p-4 rounded-lg flex items-center justify-between gap-4 mt-4 animate-pulse"
+                        >
+                          <div>
+                            <div className="text-[10px] uppercase text-[#c1a067] font-mono tracking-widest">
+                              REQUIRES DESTINY ROLL
+                            </div>
+                            <div
+                              id="roll-request-desc"
+                              className="text-xs text-gray-300 font-sans mt-0.5"
+                            >
+                              请尝试通过进行一次{" "}
+                              <span className="font-semibold text-[#c1a067]">
+                                {m.parsedResponse.rollRequest.skillName}
+                              </span>{" "}
+                              判定。({m.parsedResponse.rollRequest.reason})
+                            </div>
+                          </div>
+                          <button
+                            id="roll-prompt-action-btn"
+                            type="button"
+                            onClick={() =>
+                              setActiveRoll(m.parsedResponse!.rollRequest!)
+                            }
+                            className="bg-gradient-to-r from-[#c1a067] to-[#dcb77c] text-black hover:scale-105 active:scale-95 transition-all text-xs font-bold px-4 py-2 rounded-full flex items-center gap-1.5 font-sans"
+                          >
+                            <Dices className="w-4 h-4" /> 投掷 D100 (
+                            {m.parsedResponse.rollRequest.targetValue}%)
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Action trigger: Required Sanity check banner */}
+                      {m.parsedResponse?.sanityCheck && (
+                        <div
+                          id="sanity-request-banner"
+                          className="bg-[#1b1216] border border-purple-950 p-4 rounded-lg flex items-center justify-between gap-4 mt-4 animate-pulse"
+                        >
+                          <div>
+                            <div className="text-[10px] uppercase text-purple-400 font-mono tracking-widest">
+                              理智惊狂危机 (SANITY THREAT)
+                            </div>
+                            <div
+                              id="san-request-desc"
+                              className="text-xs text-gray-300 font-sans mt-0.5"
+                            >
+                              直面不可名状冲击！原因:{" "}
+                              <span className="text-[#c1a067] font-sans font-semibold">
+                                {m.parsedResponse.sanityCheck.reason}
+                              </span>{" "}
+                              (失神可能损 $
+                              {m.parsedResponse.sanityCheck.lossOnFailure})
+                            </div>
+                          </div>
+                          <button
+                            id="sanity-prompt-action-btn"
+                            type="button"
+                            onClick={() => {
+                              setActiveRoll({
+                                skillName: "理智意志 (SAN)",
+                                targetValue: character!.san,
+                                difficulty: "regular",
+                                reason: m.parsedResponse!.sanityCheck!.reason,
+                              });
+                            }}
+                            className="bg-purple-950 border border-purple-500 hover:bg-purple-900 text-purple-200 hover:border-purple-300 text-xs font-bold px-4 py-2 rounded-full flex items-center gap-1.5 transition active:scale-95 font-sans"
+                          >
+                            <Skull className="w-4 h-4 text-purple-400" />{" "}
+                            进行理智判定 ({character?.san}%)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {isKeeperLoading && (
+                <div
+                  id="chat-keeper-typing-indicator"
+                  className="flex justify-start"
+                >
+                  <div className="bg-[#141617]/50 border border-gray-900 rounded-lg p-4 max-w-md w-full flex items-center gap-3">
+                    <img
+                      src="https://picsum.photos/seed/creepy/100/100?blur=4"
+                      alt="Typing..."
+                      className="w-8 h-8 rounded-full border border-red-500/20 object-cover opacity-50 pointer-events-none"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div>
+                      <div className="text-[10px] font-mono text-gray-500 uppercase tracking-widest">
+                        守密人正在撰写现场低语 ...
+                      </div>
+                      <div className="flex gap-1.5 mt-2">
+                        <span
+                          className="w-1.5 h-1.5 rounded-full bg-[#c1a067] animate-bounce"
+                          style={{ animationDelay: "0ms" }}
+                        />
+                        <span
+                          className="w-1.5 h-1.5 rounded-full bg-[#c1a067] animate-bounce"
+                          style={{ animationDelay: "150ms" }}
+                        />
+                        <span
+                          className="w-1.5 h-1.5 rounded-full bg-[#c1a067] animate-bounce"
+                          style={{ animationDelay: "300ms" }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Bottom dialogue user prompt input console */}
+            <div className="p-4 bg-[#111314] border-t border-gray-950 z-10 flex gap-2">
+              <input
+                id="main-player-chat-input"
+                type="text"
+                disabled={isKeeperLoading}
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    handleSendPlayerMessage(inputText);
+                  }
+                }}
+                placeholder={
+                  isKeeperLoading
+                    ? "守密人沉浸叙述中，请稍候..."
+                    : activeRoll
+                      ? "【强制检定状态】：请在上面点击掷骰子投点，以继续生成故事"
+                      : "叙言你的侦查与侦测意图（如：我拿出魔术提灯、潜行走前去检查...）"
+                }
+                className="flex-1 bg-black/50 border border-gray-800 rounded px-4 py-2.5 text-sm placeholder-gray-650 focus:outline-[#c1a067]/40 focus:outline-1 focus:border-[#c1a067] text-gray-200 outline-none disabled:opacity-40"
+              />
+              <button
+                id="main-player-send-btn"
+                type="button"
+                disabled={isKeeperLoading || !inputText.trim()}
+                onClick={() => handleSendPlayerMessage(inputText)}
+                className="px-5 bg-black hover:bg-neutral-900 border border-gray-800 hover:border-[#c1a067] transition text-gray-300 font-semibold text-xs uppercase rounded flex items-center justify-center gap-1.5 disabled:opacity-30"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>宣誓</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Right Floating collapsible configuration sub-panel (Sheet vs Notebook) */}
+          <div
+            className={`
+            ${showConfigPanel === null ? "hidden md:flex" : "flex absolute top-14 bottom-0 left-0 right-0 z-40 md:static"}
+            md:w-[350px] w-full border-[#c1a067]/15 md:border-l bg-[#121415] overflow-hidden flex-col md:h-full shrink-0
+          `}
+          >
+            <AnimatePresence mode="wait">
+              {showConfigPanel === "notebook" ? (
+                <motion.div
+                  key="notebook"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="w-full h-full"
+                >
+                  <CluesNotebook clues={clues} />
+                </motion.div>
+              ) : (
+                /* Defaults to active Character sheet dashboard */
+                <motion.div
+                  key="sheet"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="w-full h-full"
+                >
+                  <CharacterSheetPanel
+                    sheet={character!}
+                    hpDiff={hpDiff}
+                    sanDiff={sanDiff}
+                    mpDiff={mpDiff}
+                    onSkillCheckTrigger={(skill, val) => {
+                      if (isKeeperLoading) return;
+                      setActiveRoll({
+                        skillName: skill,
+                        targetValue: val,
+                        difficulty: "regular",
+                        reason: `玩家主动测试 [${skill}] 的技能应对`,
+                      });
+                    }}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Core dynamic modal trigger for dice animations */}
+          <AnimatePresence>
+            {activeRoll && (
+              <RollDiceModal
+                key="modal_dice_check"
+                request={activeRoll}
+                isSanityCheck={activeRoll.skillName.includes("SAN")}
+                isKeeperRoll={activeRoll.isKeeperRoll}
+                isSecret={activeRoll.isSecret}
+                onComplete={(result, outcomeMessage) => {
+                  if (activeRoll.isKeeperRoll) {
+                    handleKeeperRollComplete(result, outcomeMessage);
+                  } else if (activeRoll.skillName.includes("SAN")) {
+                    handleSanityCheckComplete(result);
+                  } else {
+                    handleRollComplete(result, outcomeMessage);
+                  }
+                }}
+              />
+            )}
+
+            {showExitConfirm && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 font-sans"
+              >
+                <motion.div
+                  initial={{ scale: 0.95 }}
+                  animate={{ scale: 1 }}
+                  exit={{ scale: 0.95 }}
+                  className="bg-[#181a1c] border border-gray-800 rounded-lg p-6 max-w-sm w-full shadow-2xl relative"
+                >
+                  <h3 className="text-xl font-bold text-red-500 mb-2 font-mono">
+                    退出调查
+                  </h3>
+                  <p className="text-gray-300 text-sm mb-6">
+                    确定要退出当前的调查吗？进度已自动保留在你的记录中。
+                  </p>
+                  <div className="flex justify-end gap-3">
+                    <button
+                      onClick={() => setShowExitConfirm(false)}
+                      className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded transition-colors"
+                    >
+                      取消 (Cancel)
+                    </button>
+                    <button
+                      onClick={confirmExitInvestigation}
+                      className="px-4 py-2 bg-red-900/80 hover:bg-red-700 border border-red-800 text-white font-bold text-sm rounded transition-colors"
+                    >
+                      确认退出
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
+      <ApiSettingsPanel
+        isOpen={showApiSettings}
+        onClose={() => setShowApiSettings(false)}
+        onSaved={(s) => setApiSettings(s)}
+        initial={apiSettings}
+      />
+    </div>
+  );
+}

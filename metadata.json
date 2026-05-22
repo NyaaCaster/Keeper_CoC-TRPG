@@ -1,0 +1,5 @@
+{
+  "name": "Keeper_CoC-TRPG",
+  "description": "基于LLM互动的克苏鲁的呼唤(CoC 7th) TRPG跑团游戏，由AI扮演守密人(Keeper)并集成了型月及SCP世界观、双十面骰判定与角色变动面板动画。",
+  "requestFramePermissions": []
+}

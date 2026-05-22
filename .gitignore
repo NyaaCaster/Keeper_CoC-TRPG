@@ -1,0 +1,16 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+
+# Environment / secrets
+.env*
+!.env.example
+
+# Private campaign content (per-user, never commit)
+.docs/
+
+# Local Claude harness state (per-user permissions etc.)
+.claude/settings.local.json

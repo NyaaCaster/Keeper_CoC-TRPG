@@ -1,0 +1,23 @@
+services:
+  keeper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: keeper-coc-trpg:latest
+    container_name: keeper-coc-trpg
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      # NyaaChat-MCP token for objective CoC dice rolling.
+      # Leave empty to fall back to the in-process local roll implementation.
+      NYAACHAT_MCP_TOKEN: "${NYAACHAT_MCP_TOKEN:-}"
+    ports:
+      # host:container — host port 3093 was selected by the user from the
+      # free slots in 3090-3099. Container always listens on 3000.
+      - "3093:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
