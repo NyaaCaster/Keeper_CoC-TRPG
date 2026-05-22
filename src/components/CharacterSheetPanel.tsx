@@ -114,7 +114,7 @@ export default function CharacterSheetPanel({
       )}
 
       {/* Header Panel */}
-      <div className="p-4 bg-gradient-to-b from-[#181a1c] to-[#111213] border-b border-[#c1a067]/15 flex items-center justify-between">
+      <div className="p-4 bg-gradient-to-b from-[#181a1c] to-[#111213] border-b border-[#c1a067]/15 flex items-center">
         <div className="flex items-center gap-3">
           {sheet.avatar ? (
             <img src={sheet.avatar} className="w-10 h-10 rounded-full border border-[#c1a067]/40 object-cover shadow-[0_0_8px_rgba(193,160,103,0.15)] bg-black/40" referrerPolicy="no-referrer" />
@@ -129,13 +129,13 @@ export default function CharacterSheetPanel({
               <span>{sheet.name}</span>
               <span className="text-xs text-gray-405 font-normal">({sheet.gender || "男"} • {sheet.age || 30}岁)</span>
             </h2>
-            <p id="cs-job-display" className="text-xs text-gray-400 font-sans mt-0.5">{sheet.occupation}</p>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <p id="cs-job-display" className="text-xs text-gray-400 font-sans">{sheet.occupation}</p>
+              <span className="text-[9px] bg-[#c1a067]/10 text-[#c1a067] border border-[#c1a067]/25 px-1.5 py-0.5 rounded font-mono uppercase tracking-widest">
+                {sheet.background === "1920s" ? "1920s Jazz Era" : "Modern Science/Magic"}
+              </span>
+            </div>
           </div>
-        </div>
-        <div className="text-right">
-          <span className="text-[9px] bg-[#c1a067]/10 text-[#c1a067] border border-[#c1a067]/25 px-1.5 py-0.5 rounded font-mono uppercase tracking-widest">
-            {sheet.background === "1920s" ? "1920s Jazz Era" : "Modern Science/Magic"}
-          </span>
         </div>
       </div>
 
@@ -266,37 +266,36 @@ export default function CharacterSheetPanel({
       </div>
 
       {/* Tab Panels */}
-      <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+      <div className="overflow-y-auto p-4 custom-scrollbar max-h-[390px] flex-shrink-0">
         {activeTab === "attributes" ? (
           <div className="grid grid-cols-2 gap-3">
             {[
-              { name: "力量 STR", val: sheet.attributes.str, desc: "肌肉、物理爆发力和推重物。影响对抗属性判定" },
-              { name: "体质 CON", val: sheet.attributes.con, desc: "新陈代谢率、抵抗痛苦和毒素。承伤恢复的硬指标" },
-              { name: "体型 SIZ", val: sheet.attributes.siz, desc: "调查员的骨架与身高。直接决定初始HP上限" },
-              { name: "敏捷 DEX", val: sheet.attributes.dex, desc: "速度与神经反射。决定敏捷规避时的成功标准" },
-              { name: "外貌 APP", val: sheet.attributes.app, desc: "相貌、社交风仪。在欺骗或说服时带来暗增值" },
-              { name: "智力 INT", val: sheet.attributes.int, desc: "理解力、脑力记忆与灵感。在调查中获取魔术回路" },
-              { name: "意志 POW", val: sheet.attributes.pow, desc: "心智防护阀门。POW直接等于玩家初始的SAN理智" },
-              { name: "教育 EDU", val: sheet.attributes.edu, desc: "科学及神代学识积累。影响探索和破译古老教典" }
+              { name: "力量 STR", val: sheet.attributes.str },
+              { name: "体质 CON", val: sheet.attributes.con },
+              { name: "体型 SIZ", val: sheet.attributes.siz },
+              { name: "敏捷 DEX", val: sheet.attributes.dex },
+              { name: "外貌 APP", val: sheet.attributes.app },
+              { name: "智力 INT", val: sheet.attributes.int },
+              { name: "意志 POW", val: sheet.attributes.pow },
+              { name: "教育 EDU", val: sheet.attributes.edu }
             ].map((attr) => (
-              <div 
+              <div
                 id={`cs-attr-row-${attr.name.split(' ')[1]}`}
                 key={attr.name}
                 onClick={() => onSkillCheckTrigger?.(attr.name.split(" ")[0], attr.val)}
                 className="bg-black/20 border border-gray-800/60 p-2.5 rounded hover:border-[#c1a067]/45 cursor-pointer transition group"
               >
-                <div className="flex justify-between items-center mb-1">
+                <div className="flex justify-between items-center">
                   <span className="text-[11px] font-semibold text-gray-400 group-hover:text-[#c1a067] transition font-sans">{attr.name}</span>
                   <span className="font-mono text-base font-bold text-gray-100">{attr.val}%</span>
                 </div>
-                <div className="text-[10px] text-gray-500 font-sans leading-tight hidden group-hover:block">{attr.desc}</div>
               </div>
             ))}
           </div>
         ) : (
           <div className="space-y-1.5">
             {Object.entries(sheet.skills).map(([skill, val]) => (
-              <div 
+              <div
                 id={`cs-skill-row-${skill}`}
                 key={skill}
                 onClick={() => onSkillCheckTrigger?.(skill, val)}
@@ -317,6 +316,20 @@ export default function CharacterSheetPanel({
             ))}
           </div>
         )}
+      </div>
+
+      {/* Investigator Background Panel */}
+      <div className="flex-1 min-h-0 flex flex-col border-t border-gray-900 bg-[#101112]">
+        <div className="px-4 pt-3 pb-1 text-[10px] uppercase tracking-widest font-mono text-[#c1a067]/70">
+          调查员背景
+        </div>
+        <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-3 text-xs text-gray-400 leading-relaxed font-sans whitespace-pre-wrap">
+          {sheet.backgroundStory?.trim() ? (
+            sheet.backgroundStory
+          ) : (
+            <span className="text-gray-600 italic">尚未记录调查员背景概述。</span>
+          )}
+        </div>
       </div>
 
       {/* Occult Warning sign at footer */}

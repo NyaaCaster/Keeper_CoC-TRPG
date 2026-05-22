@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 # ---------- Stage 1: deps ----------
 # Install the full dependency tree (including devDependencies) so that
 # Vite + esbuild + the React toolchain are available for the build stage.
@@ -16,6 +14,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json tsconfig.json vite.config.ts index.html ./
+COPY public ./public
 COPY src ./src
 COPY server.ts ./
 RUN npm run build
@@ -31,9 +30,6 @@ WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000
 
-# tini gives us proper PID 1 signal handling so `docker stop` exits cleanly
-RUN apk add --no-cache tini
-
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund \
  && npm cache clean --force
@@ -42,5 +38,4 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
-ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "dist/server.cjs"]

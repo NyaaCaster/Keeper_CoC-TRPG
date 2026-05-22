@@ -30,6 +30,15 @@
 - 画图当前只支持 `qiny` 一家（OpenAI 兼容的 `/v1/images/generations`）。
 - 新增供应商时务必同步更新：`src/types.ts` 的 `LlmProviderKind` / `ImageProviderKind`、`src/lib/apiSettings.ts` 的校验枚举、`src/components/icons/providerIcons.tsx` 的图标与中文标签、`server.ts` 的 `resolveOpenAiBaseUrl` 与 `dispatchLlm`，以及 `/api/models` 的兜底逻辑。
 
+### 画图统一规范
+
+所有画图路径必须遵守以下铁律，新增端点和供应商时禁止绕过。
+
+- 所有画图调用必须走 `server.ts` 的 `generateImageAndPublish`（内部 = `dispatchImage` 供应商分发 + `persistAndPublish` 内容寻址落盘）。**禁止**在路由里直接 `fetch` 上游画图 API，也**禁止**把 b64 / 第三方域名 URL 透传给前端。
+- 服务端缓存固定在 `cache/images/<sha256>.png`，30 天滚动 TTL（每次复用自动刷新 mtime），统一通过 `/cache/images/*` 同源回放；公网根由 `IMAGE_PUBLIC_BASE_URL` 环境变量决定，未设时回退到请求 origin。
+- 客户端 localStorage **只允许**保存以 `/api/public-config` 返回的 `imagePublicBaseUrl` 为前缀的 URL；任何不符前缀的 `imageUrl` 必须丢弃并打 warn，不得直接写入存档。
+- 新增画图供应商时：扩展 `src/types.ts` 的 `ImageProviderKind` → 在 `dispatchImage` 加分支返回 `{ b64?, url? }` → 同步更新 `src/lib/apiSettings.ts` 校验枚举与 `providerIcons.tsx` 标签；**不要**新增独立的画图路由。
+
 ## Docker 部署约定
 
 - 镜像采用**多阶段构建**保证体积最小：`node:20-alpine` 作为 builder 跑 `npm ci` + `npm run build`，再 copy 到一个干净的 `node:20-alpine` runtime，运行时只装生产依赖。

@@ -12,6 +12,7 @@ import {
   SanityCheckRequest,
   RollResult,
   KeeperResponse,
+  LogEntry,
 } from "./types";
 import CharacterCreator from "./components/CharacterCreator";
 import RollDiceModal from "./components/RollDiceModal";
@@ -32,13 +33,15 @@ import {
   Skull,
   Compass,
   Eye,
-  Activity,
+  User,
   Download,
   LogOut,
+  Terminal,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 import StartScreen from "./components/StartScreen";
+import MarkdownText from "./components/MarkdownText";
 import {
   saveGame,
   generateTimestamp,
@@ -47,7 +50,9 @@ import {
 } from "./lib/saveManager";
 import { loadApiSettings, isApiConfigured } from "./lib/apiSettings";
 import ApiSettingsPanel from "./components/ApiSettingsPanel";
+import { ConsoleLogPanel } from "./components/ConsoleLogPanel";
 import { WebGameSave, ApiSettings } from "./types";
+import { getImagePublicPrefix } from "./lib/publicConfig";
 
 export default function App() {
   const initialMode =
@@ -94,7 +99,49 @@ export default function App() {
   >(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showApiSettings, setShowApiSettings] = useState<boolean>(false);
+  const [showConsoleLog, setShowConsoleLog] = useState<boolean>(false);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => loadApiSettings());
+
+  // Ring buffer for console logs — cap at 500 entries to avoid render slowdowns.
+  const addLog = React.useCallback(
+    (
+      draft:
+        | Omit<LogEntry, "id" | "timestamp">
+        | Array<Omit<LogEntry, "id" | "timestamp">>,
+    ) => {
+      const drafts = Array.isArray(draft) ? draft : [draft];
+      if (drafts.length === 0) return;
+      setLogs((prev) => {
+        const now = Date.now();
+        const incoming: LogEntry[] = drafts.map((d, i) => ({
+          ...d,
+          id: `log_${now}_${i}_${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: now + i,
+        }));
+        const next = [...prev, ...incoming];
+        if (next.length <= 500) return next;
+        return next.slice(next.length - 500);
+      });
+    },
+    [],
+  );
+
+  // Inject ids/timestamps into server-returned _serverLogs and push them in.
+  const ingestServerLogs = React.useCallback(
+    (entries: unknown) => {
+      if (!Array.isArray(entries) || entries.length === 0) return;
+      const sanitized = entries
+        .filter((e) => e && typeof e === "object")
+        .map((e: any) => ({
+          direction: (e.direction as LogEntry["direction"]) ?? "info",
+          content: typeof e.content === "string" ? e.content : "",
+          meta: e.meta,
+        }));
+      addLog(sanitized);
+    },
+    [addLog],
+  );
 
   // Active Interactive Requests
   const [activeRoll, setActiveRoll] = useState<RollRequest | null>(null);
@@ -212,6 +259,20 @@ export default function App() {
   ) => {
     setIsKeeperLoading(true);
 
+    const startedAt = Date.now();
+    addLog({
+      direction: "request",
+      content: `POST /api/keeper/chat → ${apiSettings.llm.provider} ${apiSettings.llm.model || "(default)"}`,
+      meta: {
+        url: "/api/keeper/chat",
+        msgCount: currentHistory.length,
+        features: {
+          typemoon: featuresToUse?.typemoon !== false,
+          scp: featuresToUse?.scp !== false,
+        },
+      },
+    });
+
     try {
       const response = await fetch("/api/keeper/chat", {
         method: "POST",
@@ -227,15 +288,40 @@ export default function App() {
       });
 
       if (!response.ok) {
+        let bodyText = "";
+        try { bodyText = await response.text(); } catch {}
+        addLog({
+          direction: "error",
+          content: `POST /api/keeper/chat ← HTTP ${response.status}`,
+          meta: { status: response.status, durationMs: Date.now() - startedAt, body: bodyText.slice(0, 400) },
+        });
         throw new Error("与守密人虚无连接断开，请检查网络或刷新");
       }
 
       const raw = await response.json();
+      ingestServerLogs(raw?._serverLogs);
       if (!raw.success || !raw.data) {
+        addLog({
+          direction: "error",
+          content: `POST /api/keeper/chat ← invalid payload`,
+          meta: { durationMs: Date.now() - startedAt, error: raw?.error },
+        });
         throw new Error(raw.error || "守密人低语失败，返回格式有误");
       }
 
       const keeperData: KeeperResponse = raw.data;
+      addLog({
+        direction: "response",
+        content: `POST /api/keeper/chat ← narrative ${(keeperData.narrative || "").length} chars`,
+        meta: {
+          durationMs: Date.now() - startedAt,
+          hasRollRequest: !!keeperData.rollRequest,
+          hasKeeperRoll: !!keeperData.keeperRoll,
+          hasSanityCheck: !!keeperData.sanityCheck,
+          hasClue: !!keeperData.clue,
+          dangerLevel: keeperData.gameState?.dangerLevel,
+        },
+      });
 
       if (keeperData.keeperRoll) {
         setPendingKeeperResponse(keeperData);
@@ -252,6 +338,11 @@ export default function App() {
       }
     } catch (error: any) {
       console.error(error);
+      addLog({
+        direction: "error",
+        content: `POST /api/keeper/chat exception`,
+        meta: { durationMs: Date.now() - startedAt, message: error?.message },
+      });
       const errCard: ChatMessage = {
         id: `err_${Date.now()}`,
         sender: "system",
@@ -376,6 +467,7 @@ export default function App() {
         description: cluePayload.description,
         prompt: cluePayload.prompt,
         discoveredAt: keeperData.gameState?.currentLocation || currentLocation,
+        read: false,
       };
 
       // Try to generate clue photo with imagen asynchronously to avoid blocking chat narrative flow!
@@ -387,6 +479,18 @@ export default function App() {
   const triggerClueImageGeneration = async (clue: ClueItem) => {
     // Temporarily add with no image to list
     setClues((p) => [...p, clue]);
+
+    const startedAt = Date.now();
+    addLog({
+      direction: "request",
+      content: `POST /api/image/generate-clue → "${clue.title}"`,
+      meta: {
+        url: "/api/image/generate-clue",
+        clueId: clue.id,
+        type: clue.type,
+        promptPreview: (clue.prompt || "").slice(0, 200),
+      },
+    });
 
     try {
       const resp = await fetch("/api/image/generate-clue", {
@@ -402,16 +506,62 @@ export default function App() {
 
       if (resp.ok) {
         const body = await resp.json();
-        if (body.success && body.imageUrl) {
-          // Update clue with generated base64 photo
+        ingestServerLogs(body?._serverLogs);
+        const prefix = getImagePublicPrefix();
+        if (
+          body.success &&
+          typeof body.imageUrl === "string" &&
+          prefix &&
+          body.imageUrl.startsWith(prefix)
+        ) {
+          addLog({
+            direction: "response",
+            content: `POST /api/image/generate-clue ← imageUrl ok`,
+            meta: { durationMs: Date.now() - startedAt, imageUrl: body.imageUrl },
+          });
           setClues((prev) =>
             prev.map((c) =>
               c.id === clue.id ? { ...c, imageUrl: body.imageUrl } : c,
             ),
           );
+        } else if (body.success) {
+          addLog({
+            direction: "error",
+            content: `POST /api/image/generate-clue ← rejected non-whitelisted imageUrl`,
+            meta: { durationMs: Date.now() - startedAt, imageUrl: String(body.imageUrl).slice(0, 200) },
+          });
+          console.warn(
+            "[clue-image] rejected non-whitelisted imageUrl:",
+            String(body.imageUrl).slice(0, 80),
+          );
+        } else {
+          addLog({
+            direction: "error",
+            content: `POST /api/image/generate-clue ← success=false`,
+            meta: { durationMs: Date.now() - startedAt, error: body?.error },
+          });
         }
+      } else {
+        let bodyText = "";
+        try {
+          const json = await resp.clone().json();
+          ingestServerLogs(json?._serverLogs);
+          bodyText = JSON.stringify(json).slice(0, 400);
+        } catch {
+          try { bodyText = (await resp.text()).slice(0, 400); } catch {}
+        }
+        addLog({
+          direction: "error",
+          content: `POST /api/image/generate-clue ← HTTP ${resp.status}`,
+          meta: { status: resp.status, durationMs: Date.now() - startedAt, body: bodyText },
+        });
       }
-    } catch (e) {
+    } catch (e: any) {
+      addLog({
+        direction: "error",
+        content: `POST /api/image/generate-clue exception`,
+        meta: { durationMs: Date.now() - startedAt, message: e?.message },
+      });
       console.warn(
         "Occult sketch generation failed asynchronously, clue stays as procedural card:",
         e,
@@ -537,6 +687,14 @@ export default function App() {
     }
   }, [activeSaveId]);
 
+  const markClueRead = (id: string) => {
+    setClues((prev) =>
+      prev.map((c) => (c.id === id && !c.read ? { ...c, read: true } : c)),
+    );
+  };
+
+  const hasUnreadClue = clues.some((c) => !c.read);
+
   const handleDownloadSave = () => {
     if (appMode === "game" && activeSaveId && character) {
       const saveObj: WebGameSave = {
@@ -604,7 +762,12 @@ export default function App() {
           id="setup-launcher-screen"
           className="w-full h-full flex flex-col items-center justify-start py-8 px-4 overflow-y-auto custom-scrollbar z-10"
         >
-          <CharacterCreator onComplete={handleGameStart} apiSettings={apiSettings} />
+          <CharacterCreator
+            onComplete={handleGameStart}
+            onBackToStart={() => setAppMode("start")}
+            apiSettings={apiSettings}
+            onAddLog={addLog}
+          />
         </div>
       ) : (
         /* Main Interactive Game Board View */
@@ -679,14 +842,15 @@ export default function App() {
                       showConfigPanel === "sheet" ? null : "sheet",
                     )
                   }
-                  className={`flex items-center gap-1.5 px-3 py-1 text-xs border rounded transition-all font-sans ${
+                  className={`p-1 px-2 border rounded transition-all ${
                     showConfigPanel === "sheet"
                       ? "bg-[#c1a067]/20 border-[#c1a067] text-[#c1a067]"
                       : "bg-black/40 border-gray-800 text-gray-400 hover:text-gray-200"
                   }`}
+                  title="调查员面板"
+                  aria-label="调查员面板"
                 >
-                  <Activity className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">调查员面板</span>
+                  <User className="w-3.5 h-3.5" />
                 </button>
 
                 {/* Clue Panel Toggle Shortcut */}
@@ -698,19 +862,38 @@ export default function App() {
                       showConfigPanel === "notebook" ? null : "notebook",
                     )
                   }
-                  className={`flex items-center gap-1.5 px-3 py-1 text-xs border rounded transition-all font-sans relative ${
+                  className={`p-1 px-2 border rounded transition-all relative ${
                     showConfigPanel === "notebook"
                       ? "bg-[#c1a067]/20 border-[#c1a067] text-[#c1a067]"
                       : "bg-black/40 border-gray-800 text-gray-400 hover:text-gray-200"
                   }`}
+                  title="线索册"
+                  aria-label="线索册"
                 >
                   <BookOpen className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">线索册</span>
-                  {clues.length > 0 && (
-                    <span className="absolute -top-1.5 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-650 text-[9px] font-black text-white">
-                      {clues.length}
-                    </span>
+                  {hasUnreadClue && (
+                    <span
+                      className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#10b981] animate-pulse"
+                      title="有未阅读的线索"
+                      aria-label="有未阅读的线索"
+                    />
                   )}
+                </button>
+
+                {/* Console Log Toggle */}
+                <button
+                  id="toggle-console-log-btn"
+                  type="button"
+                  onClick={() => setShowConsoleLog(true)}
+                  className={`p-1 px-2 border rounded transition-all ${
+                    showConsoleLog
+                      ? "bg-[#c1a067]/20 border-[#c1a067] text-[#c1a067]"
+                      : "bg-black/40 border-gray-800 text-gray-400 hover:text-gray-200"
+                  }`}
+                  title="控制台日志"
+                  aria-label="控制台日志"
+                >
+                  <Terminal className="w-3.5 h-3.5" />
                 </button>
 
                 <button
@@ -741,9 +924,9 @@ export default function App() {
                     /* SYSTEM / ROLL EVENTS BANNER */
                     <div
                       id={`msg-${m.id}`}
-                      className="w-full max-w-2xl bg-black/60 border border-gray-900 rounded p-3 text-xs text-gray-400 border-l-4 border-l-[#c1a067] font-mono leading-relaxed whitespace-pre-wrap shadow-inner"
+                      className="w-full max-w-2xl bg-black/60 border border-gray-900 rounded p-3 text-xs text-gray-400 border-l-4 border-l-[#c1a067] font-mono leading-relaxed shadow-inner"
                     >
-                      {m.text}
+                      <MarkdownText text={m.text} />
                     </div>
                   ) : m.sender === "player" ? (
                     /* PLAYER DIALOGUE */
@@ -776,9 +959,10 @@ export default function App() {
                       </div>
 
                       {/* Main prose */}
-                      <div className="typewriter-text text-sm whitespace-pre-wrap select-text leading-relaxed font-sans text-gray-300">
-                        {m.text}
-                      </div>
+                      <MarkdownText
+                        text={m.text}
+                        className="typewriter-text text-sm select-text leading-relaxed font-sans text-gray-300"
+                      />
 
                       {/* NPC Specific Dialogue display */}
                       {m.parsedResponse?.npcDialogue && (
@@ -970,10 +1154,11 @@ export default function App() {
                 type="button"
                 disabled={isKeeperLoading || !inputText.trim()}
                 onClick={() => handleSendPlayerMessage(inputText)}
-                className="px-5 bg-black hover:bg-neutral-900 border border-gray-800 hover:border-[#c1a067] transition text-gray-300 font-semibold text-xs uppercase rounded flex items-center justify-center gap-1.5 disabled:opacity-30"
+                className="px-5 bg-black hover:bg-neutral-900 border border-gray-800 hover:border-[#c1a067] transition text-gray-300 font-semibold text-xs uppercase rounded flex items-center justify-center disabled:opacity-30"
+                title="发送"
+                aria-label="发送"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>宣誓</span>
               </button>
             </div>
           </div>
@@ -994,7 +1179,7 @@ export default function App() {
                   exit={{ opacity: 0 }}
                   className="w-full h-full"
                 >
-                  <CluesNotebook clues={clues} />
+                  <CluesNotebook clues={clues} onMarkClueRead={markClueRead} />
                 </motion.div>
               ) : (
                 /* Defaults to active Character sheet dashboard */
@@ -1091,6 +1276,13 @@ export default function App() {
         onClose={() => setShowApiSettings(false)}
         onSaved={(s) => setApiSettings(s)}
         initial={apiSettings}
+      />
+
+      <ConsoleLogPanel
+        isOpen={showConsoleLog}
+        onClose={() => setShowConsoleLog(false)}
+        logs={logs}
+        onClearLogs={() => setLogs([])}
       />
     </div>
   );

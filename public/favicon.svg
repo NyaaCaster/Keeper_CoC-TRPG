@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Iris ring -->
+  <circle cx="32" cy="32" r="11" stroke="#10b981" stroke-width="2.5" fill="none"/>
+  <!-- Vertical slit pupil -->
+  <ellipse cx="32" cy="32" rx="2.2" ry="5.5" fill="#10b981"/>
+  <!-- Six curling tentacles, S-shaped to feel organic -->
+  <g stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M45 32 q9 0 11 -4 t-2 -6"/>
+    <path d="M38.5 43.3 q4.5 7.8 1.5 11.4 t-7 2.5"/>
+    <path d="M25.5 43.3 q-4.5 7.8 -1.5 11.4 t7 2.5"/>
+    <path d="M19 32 q-9 0 -11 -4 t2 -6"/>
+    <path d="M25.5 20.7 q-4.5 -7.8 -1.5 -11.4 t7 -2.5"/>
+    <path d="M38.5 20.7 q4.5 -7.8 1.5 -11.4 t-7 -2.5"/>
+  </g>
+</svg>

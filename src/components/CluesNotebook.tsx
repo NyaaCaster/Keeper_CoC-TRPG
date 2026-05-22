@@ -24,9 +24,14 @@ import { motion, AnimatePresence } from "motion/react";
 interface CluesNotebookProps {
   clues: ClueItem[];
   onClose?: () => void;
+  onMarkClueRead?: (id: string) => void;
 }
 
-export default function CluesNotebook({ clues, onClose }: CluesNotebookProps) {
+export default function CluesNotebook({
+  clues,
+  onClose,
+  onMarkClueRead,
+}: CluesNotebookProps) {
   const [selectedClueId, setSelectedClueId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{
     url: string;
@@ -34,6 +39,14 @@ export default function CluesNotebook({ clues, onClose }: CluesNotebookProps) {
   } | null>(null);
 
   const selectedClue = clues.find((c) => c.id === selectedClueId) || null;
+
+  const openClue = (id: string) => {
+    setSelectedClueId(id);
+    const target = clues.find((c) => c.id === id);
+    if (target && !target.read) {
+      onMarkClueRead?.(id);
+    }
+  };
 
   return (
     <div
@@ -45,11 +58,8 @@ export default function CluesNotebook({ clues, onClose }: CluesNotebookProps) {
         <div className="flex items-center gap-2">
           <BookOpen className="w-5 h-5 text-[#c1a067]" />
           <h2 className="text-md font-bold text-gray-100 font-sans">
-            调查笔记本 (Clue Logbook)
+            调查笔记本
           </h2>
-        </div>
-        <div className="text-xs text-[#c1a067] font-mono">
-          已收集: {clues.length} 个线索
         </div>
       </div>
 
@@ -68,15 +78,22 @@ export default function CluesNotebook({ clues, onClose }: CluesNotebookProps) {
             {clues.map((clue) => (
               <button
                 key={clue.id}
-                onClick={() => setSelectedClueId(clue.id)}
+                onClick={() => openClue(clue.id)}
                 className="w-full p-4 flex items-center justify-between font-sans border border-gray-800 bg-black/40 rounded transition hover:bg-white/5 hover:border-[#c1a067]/40 text-left"
               >
                 <div>
                   <div className="text-[10px] uppercase font-mono tracking-widest text-[#c1a067] mb-1">
                     TYPE: {clue.type}
                   </div>
-                  <div className="text-sm font-bold text-gray-200">
-                    {clue.title}
+                  <div className="text-sm font-bold text-gray-200 flex items-center gap-2">
+                    {!clue.read && (
+                      <span
+                        className="inline-block w-2 h-2 rounded-full bg-[#10b981] animate-pulse shrink-0"
+                        title="未阅读"
+                        aria-label="未阅读"
+                      />
+                    )}
+                    <span>{clue.title}</span>
                   </div>
                   <div className="text-[10px] text-gray-500 font-mono mt-1">
                     {clue.discoveredAt}

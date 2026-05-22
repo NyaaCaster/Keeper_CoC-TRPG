@@ -4,34 +4,41 @@
  */
 
 import React, { useState } from "react";
-import { CharacterSheet, CharacterAttributes, CharacterSkills, ApiSettings } from "../types";
+import { CharacterSheet, CharacterAttributes, CharacterSkills, ApiSettings, LogEntry } from "../types";
 import { TEMPLATE_PRESETS } from "../data/presets";
 import { AnimatePresence, motion } from "motion/react";
-import { 
-  Sparkles, 
-  HelpCircle, 
-  Shield, 
-  FileText, 
-  Check, 
-  BookOpen, 
-  User, 
-  RotateCcw, 
-  ArrowLeft, 
-  Heart, 
-  Zap, 
-  Eye, 
-  Activity, 
-  Compass, 
+import {
+  Sparkles,
+  HelpCircle,
+  Shield,
+  FileText,
+  Check,
+  BookOpen,
+  User,
+  RotateCcw,
+  ArrowLeft,
+  Heart,
+  Zap,
+  Eye,
+  Activity,
+  Compass,
   AlertCircle,
   Upload,
   X,
   FileUp,
-  Download
+  Download,
+  Home
 } from "lucide-react";
 
 interface CharacterCreatorProps {
   onComplete: (character: CharacterSheet, features: { typemoon: boolean; scp: boolean }) => void;
+  onBackToStart: () => void;
   apiSettings: ApiSettings;
+  onAddLog?: (
+    draft:
+      | Omit<LogEntry, "id" | "timestamp">
+      | Array<Omit<LogEntry, "id" | "timestamp">>,
+  ) => void;
 }
 
 // Preset Investigators
@@ -72,7 +79,7 @@ const PRESET_OVERVIEWS: Record<string, string> = {
   "柳濑真一 (Prof. Yanase)": "著名民俗学及考古学家，毕生致力于考据大洋洲古神庙和禁忌教典。经验博大精深，拥有非凡的古代文献解读直觉与神秘事物抗性。"
 };
 
-export default function CharacterCreator({ onComplete, apiSettings }: CharacterCreatorProps) {
+export default function CharacterCreator({ onComplete, onBackToStart, apiSettings, onAddLog }: CharacterCreatorProps) {
   // 3-step preparation flow: 1 = Choose Era & Generate Module Outline, 2 = Select / Customize PC, 3 = Double verify Dossier & Module Intro
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
 
@@ -585,6 +592,25 @@ export default function CharacterCreator({ onComplete, apiSettings }: CharacterC
     setIsGeneratingModule(true);
     setModuleGenerationError(null);
 
+    const startedAt = Date.now();
+    const pushServerLogs = (raw: any) => {
+      if (!onAddLog || !Array.isArray(raw?._serverLogs)) return;
+      onAddLog(
+        raw._serverLogs
+          .filter((e: any) => e && typeof e === "object")
+          .map((e: any) => ({
+            direction: (e.direction as LogEntry["direction"]) ?? "info",
+            content: typeof e.content === "string" ? e.content : "",
+            meta: e.meta,
+          })),
+      );
+    };
+    onAddLog?.({
+      direction: "request",
+      content: `POST /api/keeper/generate-module-outline → ${apiSettings.llm.provider} ${apiSettings.llm.model || "(default)"}`,
+      meta: { era: selectedEra, typemoon: featureTypeMoon, scp: featureScp },
+    });
+
     try {
       const response = await fetch("/api/keeper/generate-module-outline", {
         method: "POST",
@@ -598,17 +624,46 @@ export default function CharacterCreator({ onComplete, apiSettings }: CharacterC
       });
 
       if (!response.ok) {
+        let bodyText = "";
+        try {
+          const json = await response.clone().json();
+          pushServerLogs(json);
+          bodyText = JSON.stringify(json).slice(0, 400);
+        } catch {
+          try { bodyText = (await response.text()).slice(0, 400); } catch {}
+        }
+        onAddLog?.({
+          direction: "error",
+          content: `POST /api/keeper/generate-module-outline ← HTTP ${response.status}`,
+          meta: { status: response.status, durationMs: Date.now() - startedAt, body: bodyText },
+        });
         throw new Error("HTTP connection error or API issue when generating module outline.");
       }
 
       const resData = await response.json();
+      pushServerLogs(resData);
       if (resData.success && resData.data) {
+        onAddLog?.({
+          direction: "response",
+          content: `POST /api/keeper/generate-module-outline ← outline ok`,
+          meta: { durationMs: Date.now() - startedAt, moduleName: resData.data?.moduleName },
+        });
         setModuleOutline(resData.data);
       } else {
+        onAddLog?.({
+          direction: "error",
+          content: `POST /api/keeper/generate-module-outline ← invalid payload`,
+          meta: { durationMs: Date.now() - startedAt, error: resData?.error },
+        });
         throw new Error(resData.error || "获取模组信息失败");
       }
     } catch (err: any) {
       console.error("Failed to generate module outline:", err);
+      onAddLog?.({
+        direction: "error",
+        content: `POST /api/keeper/generate-module-outline exception`,
+        meta: { durationMs: Date.now() - startedAt, message: err?.message },
+      });
       setModuleGenerationError(err.message || "由于未知的异度力场干扰，模组生成失败。请重试。");
     } finally {
       setIsGeneratingModule(false);
@@ -620,6 +675,25 @@ export default function CharacterCreator({ onComplete, apiSettings }: CharacterC
     if (!customOverview.trim()) return;
     setIsGeneratingStats(true);
     setGenerationError(null);
+
+    const startedAt = Date.now();
+    const pushServerLogs = (raw: any) => {
+      if (!onAddLog || !Array.isArray(raw?._serverLogs)) return;
+      onAddLog(
+        raw._serverLogs
+          .filter((e: any) => e && typeof e === "object")
+          .map((e: any) => ({
+            direction: (e.direction as LogEntry["direction"]) ?? "info",
+            content: typeof e.content === "string" ? e.content : "",
+            meta: e.meta,
+          })),
+      );
+    };
+    onAddLog?.({
+      direction: "request",
+      content: `POST /api/keeper/generate-stats → ${apiSettings.llm.provider} ${apiSettings.llm.model || "(default)"}`,
+      meta: { era: selectedEra, name: customName || undefined, descPreview: (customOverview || "").slice(0, 160) },
+    });
 
     try {
       const response = await fetch("/api/keeper/generate-stats", {
@@ -634,11 +708,30 @@ export default function CharacterCreator({ onComplete, apiSettings }: CharacterC
       });
 
       if (!response.ok) {
+        let bodyText = "";
+        try {
+          const json = await response.clone().json();
+          pushServerLogs(json);
+          bodyText = JSON.stringify(json).slice(0, 400);
+        } catch {
+          try { bodyText = (await response.text()).slice(0, 400); } catch {}
+        }
+        onAddLog?.({
+          direction: "error",
+          content: `POST /api/keeper/generate-stats ← HTTP ${response.status}`,
+          meta: { status: response.status, durationMs: Date.now() - startedAt, body: bodyText },
+        });
         throw new Error("HTTP connection error or API issue when generating attributes.");
       }
 
       const resData = await response.json();
+      pushServerLogs(resData);
       if (resData.success && resData.data) {
+        onAddLog?.({
+          direction: "response",
+          content: `POST /api/keeper/generate-stats ← stats ok`,
+          meta: { durationMs: Date.now() - startedAt, occupation: resData.data?.occupation, skillsCount: Array.isArray(resData.data?.skills) ? resData.data.skills.length : undefined },
+        });
         const charData = resData.data;
         if (charData.name && !customName.trim()) {
           setCustomName(charData.name);
@@ -669,10 +762,20 @@ export default function CharacterCreator({ onComplete, apiSettings }: CharacterC
           setCustomSkills(mappedSkills);
         }
       } else {
+        onAddLog?.({
+          direction: "error",
+          content: `POST /api/keeper/generate-stats ← invalid payload`,
+          meta: { durationMs: Date.now() - startedAt, error: resData?.error },
+        });
         throw new Error(resData.error || "获取属性失败");
       }
     } catch (err: any) {
       console.error("Failed to generate character stats:", err);
+      onAddLog?.({
+        direction: "error",
+        content: `POST /api/keeper/generate-stats exception`,
+        meta: { durationMs: Date.now() - startedAt, message: err?.message },
+      });
       setGenerationError(err.message || "生成属性失败，请稍后重试。");
     } finally {
       setIsGeneratingStats(false);
@@ -697,7 +800,8 @@ export default function CharacterCreator({ onComplete, apiSettings }: CharacterC
     const finalChar: CharacterSheet = {
       ...preset,
       background: selectedEra,
-      avatar: customAvatar || undefined
+      avatar: customAvatar || undefined,
+      backgroundStory: (preset as any).overview || undefined,
     } as any;
     setReviewCharacter(finalChar);
     setCurrentStep(3);
@@ -726,7 +830,8 @@ export default function CharacterCreator({ onComplete, apiSettings }: CharacterC
       maxSan: calculatedSan,
       maxSanLimit: 99,
       mythos: 0,
-      avatar: customAvatar || undefined
+      avatar: customAvatar || undefined,
+      backgroundStory: customOverview.trim() || undefined,
     };
 
     setReviewCharacter(newChar);
@@ -741,7 +846,23 @@ export default function CharacterCreator({ onComplete, apiSettings }: CharacterC
 
   return (
     <div id="character-creator-root" className="w-full max-w-4xl mx-auto bg-[#121415]/95 border border-[#c1a067]/45 rounded-lg shadow-2xl p-6 md:p-8 backdrop-blur text-gray-200 font-sans select-none my-6">
-      
+
+      {/* Top-bar: Return to start screen (available across all three preparation steps) */}
+      <div className="flex items-center justify-between mb-4">
+        <button
+          id="back-to-start-btn"
+          type="button"
+          onClick={onBackToStart}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-black/40 border border-[#c1a067]/30 text-[#c1a067]/80 hover:text-[#c1a067] hover:border-[#c1a067]/70 hover:bg-[#c1a067]/10 text-xs font-sans rounded transition active:scale-95"
+        >
+          <Home className="w-3.5 h-3.5" />
+          <span>返回首页</span>
+        </button>
+        <span className="text-[10px] text-gray-500 font-mono tracking-widest uppercase">
+          KEEPER · INVESTIGATOR PREPARATION
+        </span>
+      </div>
+
       {/* 3 Steps Progress bar */}
       <div id="preparation-steps-indicator" className="grid grid-cols-3 gap-2 mb-8 border-b border-[#c1a067]/10 pb-4 text-center font-sans">
         <div className={`p-2 rounded text-xs tracking-wider transition-all duration-300 ${currentStep === 1 ? "bg-[#c1a067]/20 border border-[#c1a067] text-[#c1a067] font-semibold" : "text-gray-500"}`}>
@@ -1502,7 +1623,7 @@ export default function CharacterCreator({ onComplete, apiSettings }: CharacterC
               
               {/* Left Column: Module Details */}
               <div className="md:col-span-4 bg-[#141617] border border-[#c1a067]/20 rounded-lg p-5 flex flex-col justify-between font-sans">
-                <div className="space-y-4">
+                <div className="space-y-4 flex flex-col flex-1 min-h-0">
                   <div className="border-b border-gray-800 pb-2">
                     <span className="text-[10px] text-[#c1a067]/60 font-mono tracking-wider uppercase block">背景时空 · 年代纪元</span>
                     <span className="text-xs font-bold text-gray-200 uppercase mt-0.5 block">
@@ -1517,11 +1638,11 @@ export default function CharacterCreator({ onComplete, apiSettings }: CharacterC
                     </div>
                   </div>
 
-                  <div className="space-y-1 bg-black/30 p-3 rounded.lg border border-gray-850 text-xs text-gray-300 leading-relaxed font-sans">
+                  <div className="space-y-1 bg-black/30 p-3 rounded.lg border border-gray-850 text-xs text-gray-300 leading-relaxed font-sans flex flex-col flex-1 min-h-0">
                     <span className="text-[9px] font-mono font-bold text-[#c1a067] block uppercase border-b border-gray-800 pb-1 mb-1.5">
                       模组不剧透序幕 (Background Hint)
                     </span>
-                    <div className="italic text-gray-350 select-text max-h-[160px] overflow-y-auto pr-1">
+                    <div className="italic text-gray-350 select-text overflow-y-auto custom-scrollbar pr-1 flex-1 min-h-0">
                       {moduleOutline?.intro || "在世界阴暗潮湿的边缘，不可名状之神秘开始剧烈渗透，时钟塔与SCP基金会的目光都已被这诡谲的核心场景吸引。"}
                     </div>
                   </div>

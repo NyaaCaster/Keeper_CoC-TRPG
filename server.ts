@@ -10,6 +10,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "fs";
+import crypto from "crypto";
 
 dotenv.config();
 
@@ -19,7 +20,111 @@ app.use(express.json({ limit: "10mb" }));
 const DEV_MODE = process.env.NODE_ENV !== "production";
 const PORT = 3000;
 
-const QINY_BASE_URL = "https://openai.chatnewai.com/v1";
+const QINY_BASE_URLS = {
+  com: "https://openai.chatnewai.com/v1",
+  icu: "https://love.qinyan.icu/v1",
+} as const;
+type QinyHostKind = keyof typeof QINY_BASE_URLS;
+function resolveQinyBaseUrl(host: QinyHostKind | string | undefined): string {
+  return QINY_BASE_URLS[(host as QinyHostKind) in QINY_BASE_URLS ? (host as QinyHostKind) : "com"];
+}
+
+// ----- Image Cache (content-addressed, 30-day rolling) -----
+// Generated images are persisted to disk under cache/images/<sha256>.png and
+// served from /cache/images/<filename>. Same content -> same hash -> dedup.
+// localStorage on the client only ever stores public URLs, never base64.
+const IMAGE_CACHE_DIR = path.join(process.cwd(), "cache", "images");
+const IMAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Resolve the public base URL used to mint cache image URLs.
+//   1. If IMAGE_PUBLIC_BASE_URL is set in the environment, use it as-is. This
+//      is the recommended setup for any deployment that wants generated
+//      clue images to remain reachable from other devices/networks.
+//   2. Otherwise, derive it from the incoming request's origin so a
+//      community user can still run the project on localhost without any
+//      configuration. The trade-off is that those URLs only work from the
+//      same machine they were generated on.
+function resolveImagePublicBaseUrl(req: express.Request): string {
+  const fromEnv = (process.env.IMAGE_PUBLIC_BASE_URL || "").trim();
+  if (fromEnv) return fromEnv.replace(/\/+$/, "");
+  const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "http";
+  const host = (req.headers["x-forwarded-host"] as string) || req.get("host") || `127.0.0.1:${PORT}`;
+  return `${proto}://${host}`;
+}
+
+fs.mkdirSync(IMAGE_CACHE_DIR, { recursive: true });
+
+function pruneExpiredImages() {
+  try {
+    const now = Date.now();
+    const files = fs.readdirSync(IMAGE_CACHE_DIR);
+    let removed = 0;
+    for (const f of files) {
+      try {
+        const fp = path.join(IMAGE_CACHE_DIR, f);
+        const st = fs.statSync(fp);
+        if (now - st.mtimeMs > IMAGE_CACHE_TTL_MS) {
+          fs.unlinkSync(fp);
+          removed++;
+        }
+      } catch {
+        /* ignore single-file errors */
+      }
+    }
+    if (removed) console.log(`[image-cache] pruned ${removed} expired files`);
+  } catch (e) {
+    console.error("[image-cache] prune failed:", e);
+  }
+}
+pruneExpiredImages();
+setInterval(pruneExpiredImages, 24 * 60 * 60 * 1000).unref();
+
+async function persistAndPublish(
+  req: express.Request,
+  input: { b64?: string; url?: string }
+): Promise<string> {
+  let bytes: Buffer;
+  if (input.b64) {
+    bytes = Buffer.from(input.b64, "base64");
+  } else if (input.url) {
+    const r = await fetch(input.url);
+    if (!r.ok) throw new Error(`下载远端图片失败 (${r.status})`);
+    bytes = Buffer.from(await r.arrayBuffer());
+  } else {
+    throw new Error("画图返回中既无 b64_json 也无 url");
+  }
+  const sha = crypto.createHash("sha256").update(bytes).digest("hex");
+  const filename = `${sha}.png`;
+  const fullPath = path.join(IMAGE_CACHE_DIR, filename);
+  if (!fs.existsSync(fullPath)) {
+    fs.writeFileSync(fullPath, bytes);
+  } else {
+    // Refresh mtime so the 30-day window restarts on every reuse
+    const now = new Date();
+    try {
+      fs.utimesSync(fullPath, now, now);
+    } catch {
+      /* ignore */
+    }
+  }
+  return `${resolveImagePublicBaseUrl(req)}/cache/images/${filename}`;
+}
+
+app.use(
+  "/cache/images",
+  express.static(IMAGE_CACHE_DIR, {
+    maxAge: IMAGE_CACHE_TTL_MS,
+    immutable: true,
+    fallthrough: false,
+    index: false,
+  })
+);
+
+// Public runtime config — exposes the image-cache base URL so the SPA can
+// build a same-origin allowlist for what's allowed into localStorage.
+app.get("/api/public-config", (req, res) => {
+  res.json({ imagePublicBaseUrl: resolveImagePublicBaseUrl(req) });
+});
 
 type LlmProviderKind = "qiny" | "custom" | "gemini" | "anthropic" | "grok" | "deepseek";
 type ImageProviderKind = "qiny";
@@ -30,12 +135,112 @@ interface ApiSettings {
     apiKey: string;
     model: string;
     customBaseUrl?: string;
+    qinyHost?: QinyHostKind;
   };
   image: {
     provider: ImageProviderKind;
     apiKey: string;
     model: string;
+    qinyHost?: QinyHostKind;
   };
+}
+
+// ----- Server-side log capture -----
+// Each handler creates a local logs[] and attaches it to the response as
+// `_serverLogs`. The frontend ConsoleLogPanel merges these into its own buffer.
+// No id/timestamp here — the client injects those when ingesting.
+type ServerLogDraft = {
+  direction: "request" | "response" | "error" | "info";
+  content: string;
+  meta?: any;
+};
+type LogPush = (entry: ServerLogDraft) => void;
+const NOOP_LOG: LogPush = () => {};
+
+function previewText(s: string | undefined | null, n = 240): string | undefined {
+  if (!s) return undefined;
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+// ----- Image generation dispatcher -----
+// `dispatchImage` is the provider-routing layer (analogous to `dispatchLlm`):
+// it calls the upstream image API and returns the raw payload as `{ b64?, url? }`.
+// `generateImageAndPublish` is the full pipeline: dispatch → persistAndPublish
+// → public URL on the cache origin. Any new image endpoint MUST go through it
+// so caching, deduplication, TTL refresh and the localStorage-whitelist origin
+// stay consistent.
+interface ImagePayload { b64?: string; url?: string }
+
+interface DispatchImageInput {
+  apiSettings: ApiSettings;
+  prompt: string;
+  size?: string;
+  onLog?: LogPush;
+}
+
+async function dispatchImage({ apiSettings, prompt, size = "1024x1024", onLog }: DispatchImageInput): Promise<ImagePayload> {
+  const log = onLog ?? NOOP_LOG;
+  const provider = apiSettings.image.provider;
+  const apiKey = apiSettings.image.apiKey;
+  const model = apiSettings.image.model;
+
+  if (!apiKey) throw new Error("画图 API Key 未配置：请在`虚空连接的设置`中填入画图 API Key。");
+  if (!model) throw new Error("画图模型未配置：请在`虚空连接的设置`中填入画图模型名。");
+
+  if (provider === "qiny") {
+    const qinyBaseUrl = resolveQinyBaseUrl(apiSettings.image.qinyHost);
+    const upstreamUrl = `${qinyBaseUrl}/images/generations`;
+    log({
+      direction: "request",
+      content: `IMG qiny ${model} size=${size}`,
+      meta: { upstreamUrl, model, size, n: 1, qinyHost: apiSettings.image.qinyHost ?? "com", promptPreview: previewText(prompt) }
+    });
+    const t0 = Date.now();
+    const resp = await fetch(upstreamUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, prompt, n: 1, size, response_format: "b64_json" })
+    });
+    const durationMs = Date.now() - t0;
+    if (!resp.ok) {
+      const errText = await resp.text();
+      log({
+        direction: "error",
+        content: `IMG qiny ${model} 返回 ${resp.status}`,
+        meta: { durationMs, status: resp.status, upstreamError: previewText(errText, 600) }
+      });
+      throw new Error(`Qiny 返回 ${resp.status}：${errText.slice(0, 300)}`);
+    }
+    const data: any = await resp.json();
+    const item = data?.data?.[0];
+    if (!item?.b64_json && !item?.url) {
+      log({
+        direction: "error",
+        content: `IMG qiny ${model} 返回结构异常`,
+        meta: { durationMs, dataPreview: previewText(JSON.stringify(data), 400) }
+      });
+      throw new Error("画图返回结构异常，未找到 b64_json/url。");
+    }
+    log({
+      direction: "response",
+      content: `IMG qiny ${model} → ${item?.b64_json ? "b64" : "url"}`,
+      meta: { durationMs, hasB64: !!item?.b64_json, hasUrl: !!item?.url }
+    });
+    return { b64: item?.b64_json, url: item?.url };
+  }
+
+  throw new Error(`画图供应商 ${provider} 暂不支持。`);
+}
+
+async function generateImageAndPublish(
+  req: express.Request,
+  apiSettings: ApiSettings,
+  prompt: string,
+  size?: string,
+  onLog?: LogPush
+): Promise<string> {
+  const payload = await dispatchImage({ apiSettings, prompt, size, onLog });
+  return persistAndPublish(req, payload);
 }
 
 function normalizeCustomBaseUrl(input: string): string {
@@ -46,9 +251,13 @@ function normalizeCustomBaseUrl(input: string): string {
   return v;
 }
 
-function resolveOpenAiBaseUrl(provider: LlmProviderKind, customBaseUrl?: string): string {
+function resolveOpenAiBaseUrl(
+  provider: LlmProviderKind,
+  customBaseUrl?: string,
+  qinyHost?: QinyHostKind | string,
+): string {
   switch (provider) {
-    case "qiny": return QINY_BASE_URL;
+    case "qiny": return resolveQinyBaseUrl(qinyHost);
     case "custom": return normalizeCustomBaseUrl(customBaseUrl || "");
     case "grok": return "https://api.x.ai/v1";
     case "deepseek": return "https://api.deepseek.com/v1";
@@ -193,7 +402,7 @@ const GENERATE_MODULE_SCHEMA = {
       items: {
         type: Type.OBJECT,
         properties: {
-          name: { type: Type.STRING, description: "调查员姓名（中英文）" },
+          name: { type: Type.STRING, description: "调查员姓名，仅中文汉字，禁止任何英文译名、括号注音或拼音" },
           occupation: { type: Type.STRING, description: "职业" },
           gender: { type: Type.STRING, description: "男 或 女" },
           age: { type: Type.INTEGER, description: "年龄 23-55" },
@@ -231,7 +440,7 @@ const GENERATE_MODULE_SCHEMA = {
 const GENERATE_STATS_SCHEMA = {
   type: Type.OBJECT,
   properties: {
-    name: { type: Type.STRING, description: "角色姓名" },
+    name: { type: Type.STRING, description: "调查员中文姓名，仅汉字，禁止任何英文译名、括号注音或拼音" },
     occupation: { type: Type.STRING, description: "职业" },
     attributes: {
       type: Type.OBJECT,
@@ -270,9 +479,11 @@ interface DispatchInput {
   schema: any;
   temperature: number;
   topP?: number;
+  onLog?: LogPush;
 }
 
-async function dispatchLlm({ apiSettings, systemInstruction, userText, schema, temperature, topP }: DispatchInput): Promise<string> {
+async function dispatchLlm({ apiSettings, systemInstruction, userText, schema, temperature, topP, onLog }: DispatchInput): Promise<string> {
+  const log = onLog ?? NOOP_LOG;
   const provider = apiSettings.llm.provider;
   const apiKey = apiSettings.llm.apiKey;
   const model = apiSettings.llm.model;
@@ -280,65 +491,94 @@ async function dispatchLlm({ apiSettings, systemInstruction, userText, schema, t
   if (!apiKey) throw new Error("API Key 未配置：请在`虚空连接的设置`中填入对话 API Key。");
   if (!model) throw new Error("模型未配置：请在`虚空连接的设置`中填入对话模型名。");
 
-  if (provider === "gemini") {
-    const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { "User-Agent": "aistudio-build" } } });
-    const response = await ai.models.generateContent({
-      model,
-      contents: userText,
-      config: {
-        systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: schema,
-        temperature,
-        ...(topP !== undefined ? { topP } : {})
-      }
-    });
-    const text = response.text;
-    if (!text) throw new Error("Gemini 返回空内容。");
-    return text;
-  }
-
-  if (provider === "anthropic") {
-    const client = new Anthropic({ apiKey });
-    const schemaPrompt = schemaToPromptDescription(schema);
-    const msg = await client.messages.create({
-      model,
-      max_tokens: 8192,
-      temperature,
-      system: systemInstruction + schemaPrompt,
-      messages: [{ role: "user", content: userText }]
-    });
-    const block = msg.content.find((b: any) => b.type === "text") as any;
-    if (!block?.text) throw new Error("Anthropic 返回空内容。");
-    return stripCodeFence(block.text);
-  }
-
-  // OpenAI 兼容: qiny, custom, grok, deepseek
-  const baseUrl = resolveOpenAiBaseUrl(provider, apiSettings.llm.customBaseUrl);
-  if (!baseUrl) throw new Error(`不支持的供应商：${provider}`);
-  const schemaPrompt = schemaToPromptDescription(schema);
-  const resp = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemInstruction + schemaPrompt },
-        { role: "user", content: userText }
-      ],
-      response_format: { type: "json_object" },
-      temperature,
-      ...(topP !== undefined ? { top_p: topP } : {})
-    })
+  log({
+    direction: "request",
+    content: `LLM ${provider} ${model}`,
+    meta: {
+      provider, model, temperature, topP,
+      systemInstructionLen: systemInstruction.length,
+      userTextLen: userText.length,
+      userTextPreview: previewText(userText),
+      systemInstructionPreview: previewText(systemInstruction)
+    }
   });
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`供应商 ${provider} 返回 ${resp.status}：${errText.slice(0, 500)}`);
+  const t0 = Date.now();
+
+  try {
+    let text: string;
+
+    if (provider === "gemini") {
+      const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { "User-Agent": "aistudio-build" } } });
+      const response = await ai.models.generateContent({
+        model,
+        contents: userText,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: schema,
+          temperature,
+          ...(topP !== undefined ? { topP } : {})
+        }
+      });
+      const raw = response.text;
+      if (!raw) throw new Error("Gemini 返回空内容。");
+      text = raw;
+    } else if (provider === "anthropic") {
+      const client = new Anthropic({ apiKey });
+      const schemaPrompt = schemaToPromptDescription(schema);
+      const msg = await client.messages.create({
+        model,
+        max_tokens: 8192,
+        temperature,
+        system: systemInstruction + schemaPrompt,
+        messages: [{ role: "user", content: userText }]
+      });
+      const block = msg.content.find((b: any) => b.type === "text") as any;
+      if (!block?.text) throw new Error("Anthropic 返回空内容。");
+      text = stripCodeFence(block.text);
+    } else {
+      // OpenAI 兼容: qiny, custom, grok, deepseek
+      const baseUrl = resolveOpenAiBaseUrl(provider, apiSettings.llm.customBaseUrl, apiSettings.llm.qinyHost);
+      if (!baseUrl) throw new Error(`不支持的供应商：${provider}`);
+      const schemaPrompt = schemaToPromptDescription(schema);
+      const resp = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemInstruction + schemaPrompt },
+            { role: "user", content: userText }
+          ],
+          response_format: { type: "json_object" },
+          temperature,
+          ...(topP !== undefined ? { top_p: topP } : {})
+        })
+      });
+      if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`供应商 ${provider} 返回 ${resp.status}：${errText.slice(0, 500)}`);
+      }
+      const data: any = await resp.json();
+      const raw: string | undefined = data?.choices?.[0]?.message?.content;
+      if (!raw) throw new Error(`供应商 ${provider} 返回结构异常。`);
+      text = stripCodeFence(raw);
+    }
+
+    log({
+      direction: "response",
+      content: `LLM ${provider} ${model} → ${text.length} chars`,
+      meta: { durationMs: Date.now() - t0, charsOut: text.length, outputPreview: previewText(text) }
+    });
+    return text;
+  } catch (e: any) {
+    log({
+      direction: "error",
+      content: `LLM ${provider} ${model} 失败`,
+      meta: { durationMs: Date.now() - t0, error: e?.message || String(e) }
+    });
+    throw e;
   }
-  const data: any = await resp.json();
-  const text: string | undefined = data?.choices?.[0]?.message?.content;
-  if (!text) throw new Error(`供应商 ${provider} 返回结构异常。`);
-  return stripCodeFence(text);
 }
 
 function stripCodeFence(s: string): string {
@@ -355,12 +595,14 @@ function buildKeeperContext(messages: Array<{ sender: string; text: string }>): 
 // 1. API - Keeper Chat Completion
 app.post("/api/keeper/chat", async (req, res) => {
   const { messages, features, apiSettings } = req.body;
+  const logs: ServerLogDraft[] = [];
+  const push: LogPush = (e) => logs.push(e);
 
   if (!messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: "Messages array is required." });
+    return res.status(400).json({ error: "Messages array is required.", _serverLogs: logs });
   }
   if (!apiSettings) {
-    return res.status(400).json({ error: "缺少 apiSettings：请先完成`虚空连接的设置`。" });
+    return res.status(400).json({ error: "缺少 apiSettings：请先完成`虚空连接的设置`。", _serverLogs: logs });
   }
 
   const tmEnabled = features?.typemoon !== false;
@@ -379,72 +621,56 @@ app.post("/api/keeper/chat", async (req, res) => {
     const systemInstruction = SYSTEM_INSTRUCTION + dynamicInstructions + elementSandboxLimiter;
     const userText = buildKeeperContext(messages);
 
+    push({ direction: "info", content: `/api/keeper/chat ← ${messages.length} messages`, meta: { msgCount: messages.length, tmEnabled, scpEnabled } });
+
     const textOutput = await dispatchLlm({
       apiSettings,
       systemInstruction,
       userText,
       schema: KEEPER_RESPONSE_SCHEMA,
       temperature: 0.85,
-      topP: 0.95
+      topP: 0.95,
+      onLog: push
     });
 
     const parsed = JSON.parse(textOutput);
-    return res.json({ success: true, data: parsed });
+    return res.json({ success: true, data: parsed, _serverLogs: logs });
   } catch (error: any) {
     console.error("API Error in /api/keeper/chat:", error);
-    return res.status(500).json({ error: error.message || "Unknown error", details: error.stack });
+    push({ direction: "error", content: `/api/keeper/chat 失败`, meta: { error: error.message || "Unknown error" } });
+    return res.status(500).json({ error: error.message || "Unknown error", details: error.stack, _serverLogs: logs });
   }
 });
 
-// 2. API - Generate Clue Photo (image provider routing)
+// 2. API - Generate Clue Photo (thin wrapper over generateImageAndPublish)
 app.post("/api/image/generate-clue", async (req, res) => {
   const { prompt, apiSettings } = req.body;
+  const logs: ServerLogDraft[] = [];
+  const push: LogPush = (e) => logs.push(e);
 
-  if (!prompt) return res.status(400).json({ error: "Prompt is required." });
+  if (!prompt) return res.status(400).json({ error: "Prompt is required.", _serverLogs: logs });
   if (!apiSettings?.image?.apiKey || !apiSettings?.image?.model) {
-    return res.json({ success: false, fallback: true, error: "画图 API 未配置，使用占位图。" });
+    push({ direction: "info", content: `/api/image/generate-clue 画图未配置 → 占位图`, meta: {} });
+    return res.json({ success: false, fallback: true, error: "画图 API 未配置，使用占位图。", _serverLogs: logs });
   }
 
   try {
-    const provider: ImageProviderKind = apiSettings.image.provider;
-    if (provider === "qiny") {
-      const resp = await fetch(`${QINY_BASE_URL}/images/generations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiSettings.image.apiKey}` },
-        body: JSON.stringify({
-          model: apiSettings.image.model,
-          prompt,
-          n: 1,
-          size: "512x512",
-          response_format: "b64_json"
-        })
-      });
-      if (!resp.ok) {
-        const errText = await resp.text();
-        throw new Error(`Qiny 返回 ${resp.status}：${errText.slice(0, 300)}`);
-      }
-      const data: any = await resp.json();
-      const item = data?.data?.[0];
-      let imageUrl: string | null = null;
-      if (item?.b64_json) {
-        imageUrl = `data:image/png;base64,${item.b64_json}`;
-      } else if (item?.url) {
-        imageUrl = item.url;
-      }
-      if (!imageUrl) throw new Error("画图返回结构异常，未找到 b64_json/url。");
-      return res.json({ success: true, imageUrl });
-    }
-    return res.json({ success: false, fallback: true, error: `画图供应商 ${provider} 暂不支持。` });
+    const imageUrl = await generateImageAndPublish(req, apiSettings, prompt, undefined, push);
+    return res.json({ success: true, imageUrl, _serverLogs: logs });
   } catch (error: any) {
     console.warn("Image API call failed, fallback:", error.message || error);
-    return res.json({ success: false, fallback: true, error: error.message || "画图失败" });
+    push({ direction: "error", content: `/api/image/generate-clue 失败 → 占位图`, meta: { error: error.message || "画图失败" } });
+    return res.json({ success: false, fallback: true, error: error.message || "画图失败", _serverLogs: logs });
   }
 });
 
 // 3. API - Generate CoC Module Outline
 app.post("/api/keeper/generate-module-outline", async (req, res) => {
   const { era, typemoon, scp, apiSettings } = req.body;
-  if (!apiSettings) return res.status(400).json({ error: "缺少 apiSettings。" });
+  const logs: ServerLogDraft[] = [];
+  const push: LogPush = (e) => logs.push(e);
+
+  if (!apiSettings) return res.status(400).json({ error: "缺少 apiSettings。", _serverLogs: logs });
   const tmEnabled = typemoon !== false;
   const scpEnabled = scp !== false;
   const is1920s = era === "1920s";
@@ -459,29 +685,37 @@ app.post("/api/keeper/generate-module-outline", async (req, res) => {
       elementsRule += scpEnabled ? "2. 【SCP要素已开启】可融合MTF、收容站等。\n" : "2. 【SCP要素已禁用】绝不可提及。\n";
     }
 
-    const userText = `玩家选择的历史帷幕/背景纪元为："${eraStr}"。\n\n系统内容配置协议：\n${elementsRule}\n\n请构思一个独特的CoC TRPG 模组：标题、150-250字引子、3-4个推荐PC职业、正好3个预设调查员（每人正好8~9门核心技能）。`;
+    const userText = `玩家选择的历史帷幕/背景纪元为："${eraStr}"。\n\n系统内容配置协议：\n${elementsRule}\n\n请构思一个独特的CoC TRPG 模组：标题、150-250字引子、3-4个推荐PC职业、正好3个预设调查员（每人正好8~9门核心技能）。所有调查员姓名只能使用纯中文汉字，禁止出现任何英文译名、括号注音、拼音或外文别称。`;
     const systemInstruction = "你是一个殿堂级的克苏鲁TRPG（CoC 7e）跑团守密人与顶尖文学构架师。";
+
+    push({ direction: "info", content: `/api/keeper/generate-module-outline ← ${eraStr}`, meta: { era, tmEnabled, scpEnabled } });
 
     const textOutput = await dispatchLlm({
       apiSettings, systemInstruction, userText,
-      schema: GENERATE_MODULE_SCHEMA, temperature: 0.85
+      schema: GENERATE_MODULE_SCHEMA, temperature: 0.85,
+      onLog: push
     });
     const parsed = JSON.parse(textOutput);
-    return res.json({ success: true, data: parsed });
+    return res.json({ success: true, data: parsed, _serverLogs: logs });
   } catch (error: any) {
     console.error("API Error in /api/keeper/generate-module-outline:", error);
-    return res.status(500).json({ error: error.message || "Unknown error", details: error.stack });
+    push({ direction: "error", content: `/api/keeper/generate-module-outline 失败`, meta: { error: error.message || "Unknown error" } });
+    return res.status(500).json({ error: error.message || "Unknown error", details: error.stack, _serverLogs: logs });
   }
 });
 
 // 3.5. API - Objective Dice roll via NyaaChat-MCP (unchanged, no LLM)
 app.post("/api/keeper/roll", async (req, res) => {
   const { skill, bonus, penalty } = req.body;
-  if (skill === undefined) return res.status(400).json({ error: "skill value is required" });
+  const logs: ServerLogDraft[] = [];
+  const push: LogPush = (e) => logs.push(e);
+
+  if (skill === undefined) return res.status(400).json({ error: "skill value is required", _serverLogs: logs });
 
   const bearerToken = process.env.NYAACHAT_MCP_TOKEN;
   if (!bearerToken) {
-    return res.json({ success: true, text: localCocRoll(skill, bonus, penalty), fallback: true });
+    push({ direction: "info", content: `/api/keeper/roll → 本地兜底骰(MCP 未配置)`, meta: { skill, bonus, penalty } });
+    return res.json({ success: true, text: localCocRoll(skill, bonus, penalty), fallback: true, _serverLogs: logs });
   }
   const mcpUrl = "http://h.hony-wen.com:3094/mcp";
 
@@ -495,6 +729,12 @@ app.post("/api/keeper/roll", async (req, res) => {
         arguments: { skill: Number(skill), bonus: bonus ? Number(bonus) : undefined, penalty: penalty ? Number(penalty) : undefined }
       }
     };
+    push({
+      direction: "request",
+      content: `MCP roll_coc skill=${skill}${bonus ? ` bonus=${bonus}` : ""}${penalty ? ` penalty=${penalty}` : ""}`,
+      meta: { upstreamUrl: mcpUrl, payload: rpcPayload }
+    });
+    const t0 = Date.now();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
     const response = await fetch(mcpUrl, {
@@ -503,15 +743,26 @@ app.post("/api/keeper/roll", async (req, res) => {
       body: JSON.stringify(rpcPayload), signal: controller.signal
     });
     clearTimeout(timeoutId);
+    const durationMs = Date.now() - t0;
     if (!response.ok) throw new Error(`MCP Server responded with status ${response.status}`);
     const data: any = await response.json();
     if (data.error) throw new Error(`MCP Error: ${data.error.message || JSON.stringify(data.error)}`);
     const textContent = data.result?.content?.[0]?.text;
     if (!textContent) throw new Error("Invalid MCP response structure");
-    return res.json({ success: true, text: textContent });
+    push({
+      direction: "response",
+      content: `MCP roll_coc → ${previewText(textContent, 80)}`,
+      meta: { durationMs, textPreview: previewText(textContent, 400) }
+    });
+    return res.json({ success: true, text: textContent, _serverLogs: logs });
   } catch (error: any) {
     console.warn("MCP Roll API call failed, fallback:", error.message || error);
-    return res.json({ success: true, text: localCocRoll(skill, bonus, penalty), fallback: true });
+    push({
+      direction: "error",
+      content: `MCP roll_coc 失败 → 本地兜底`,
+      meta: { error: error.message || String(error) }
+    });
+    return res.json({ success: true, text: localCocRoll(skill, bonus, penalty), fallback: true, _serverLogs: logs });
   }
 });
 
@@ -560,19 +811,25 @@ app.post("/api/keeper/generate-stats", async (req, res) => {
   if (!description) return res.status(400).json({ error: "角色概述 (description) 为必填项。" });
   if (!apiSettings) return res.status(400).json({ error: "缺少 apiSettings。" });
 
+  const logs: ServerLogDraft[] = [];
+  const push: LogPush = (e) => logs.push(e);
+  push({ direction: "info", content: `POST /api/keeper/generate-stats`, meta: { era, name: name || undefined, descPreview: previewText(description, 160) } });
+
   try {
-    const userText = `根据玩家提供的角色故事或概述："${description}"\n姓名（若有）："${name || ''}"\n时代背景为："${era === '1920s' ? '1920年代' : '21世纪现代'}"\n\n请依据《克苏鲁的呼唤》第七版设定，为该角色生成属性（八维 15-99）和 5-8 个核心技能（值 20-95）。若无姓名则按描述设计中英文名。`;
+    const userText = `根据玩家提供的角色故事或概述："${description}"\n姓名（若有）："${name || ''}"\n时代背景为："${era === '1920s' ? '1920年代' : '21世纪现代'}"\n\n请依据《克苏鲁的呼唤》第七版设定，为该角色生成属性（八维 15-99）和 5-8 个核心技能（值 20-95）。若玩家未提供姓名，请仅使用纯中文汉字为其命名（不要附加任何英文译名、括号注音、拼音或外文别称）。`;
     const systemInstruction = "你是一个专业的《克苏鲁的呼唤》第七版TRPG跑团角色卡智脑。";
 
     const textOutput = await dispatchLlm({
       apiSettings, systemInstruction, userText,
-      schema: GENERATE_STATS_SCHEMA, temperature: 0.7
+      schema: GENERATE_STATS_SCHEMA, temperature: 0.7,
+      onLog: push,
     });
     const parsed = JSON.parse(textOutput);
-    return res.json({ success: true, data: parsed });
+    return res.json({ success: true, data: parsed, _serverLogs: logs });
   } catch (error: any) {
     console.error("API Error in /api/keeper/generate-stats:", error);
-    return res.status(500).json({ error: error.message || "Unknown error", details: error.stack });
+    push({ direction: "error", content: `generate-stats failed: ${error?.message ?? "unknown"}`, meta: { message: error?.message } });
+    return res.status(500).json({ error: error.message || "Unknown error", details: error.stack, _serverLogs: logs });
   }
 });
 
@@ -581,6 +838,7 @@ app.get("/api/models", async (req, res) => {
   const provider = String(req.query.provider || "") as LlmProviderKind | "qiny-image";
   const apiKey = String(req.query.apiKey || "");
   const customBaseUrl = String(req.query.customBaseUrl || "");
+  const qinyHost = String(req.query.qinyHost || "");
 
   if (!apiKey) return res.status(400).json({ error: "apiKey is required" });
 
@@ -608,8 +866,8 @@ app.get("/api/models", async (req, res) => {
     }
     // OpenAI 兼容
     const baseUrl = provider === "qiny-image"
-      ? QINY_BASE_URL
-      : resolveOpenAiBaseUrl(provider as LlmProviderKind, customBaseUrl);
+      ? resolveQinyBaseUrl(qinyHost)
+      : resolveOpenAiBaseUrl(provider as LlmProviderKind, customBaseUrl, qinyHost);
     if (!baseUrl) throw new Error(`不支持的供应商：${provider}`);
     const resp = await fetch(`${baseUrl}/models`, {
       headers: { Authorization: `Bearer ${apiKey}` }

@@ -36,6 +36,7 @@ export interface CharacterSheet {
   maxSanLimit: number; // 99 - 克苏鲁神话
   mythos: number; // 克苏鲁神话技能
   avatar?: string; // 角色头像 (Base64 data URI)
+  backgroundStory?: string; // 调查员背景介绍/生平概述
 }
 
 export interface ClueItem {
@@ -46,6 +47,7 @@ export interface ClueItem {
   imageUrl?: string;
   prompt: string;
   discoveredAt: string; // timestamp or scene name
+  read?: boolean;
 }
 
 export interface RollRequest {
@@ -150,6 +152,13 @@ export type LlmProviderKind =
 
 export type ImageProviderKind = "qiny";
 
+export type QinyHostKind = "com" | "icu";
+
+export const QINY_BASE_URLS: Record<QinyHostKind, string> = {
+  com: "https://openai.chatnewai.com/v1",
+  icu: "https://love.qinyan.icu/v1",
+};
+
 export type ModelCapability =
   | "vision"
   | "web"
@@ -164,17 +173,34 @@ export interface ApiSettings {
     apiKey: string;
     model: string;
     customBaseUrl?: string;
+    qinyHost?: QinyHostKind;
   };
   image: {
     provider: ImageProviderKind;
     apiKey: string;
     model: string;
+    qinyHost?: QinyHostKind;
   };
 }
 
 export const DEFAULT_API_SETTINGS: ApiSettings = {
-  llm: { provider: "qiny", apiKey: "", model: "", customBaseUrl: "" },
-  image: { provider: "qiny", apiKey: "", model: "" },
+  llm: { provider: "qiny", apiKey: "", model: "", customBaseUrl: "", qinyHost: "com" },
+  image: { provider: "qiny", apiKey: "", model: "", qinyHost: "com" },
 };
 
-export const QINY_BASE_URL = "https://openai.chatnewai.com/v1";
+// Kept for legacy imports. Defaults to the .com host.
+export const QINY_BASE_URL = QINY_BASE_URLS.com;
+
+export function resolveQinyBaseUrl(host: QinyHostKind | undefined): string {
+  return QINY_BASE_URLS[host ?? "com"];
+}
+
+export interface LogEntry {
+  id: string;
+  timestamp: number;
+  direction: "request" | "response" | "error" | "info";
+  content: string;
+  meta?: any;
+}
+
+export type ServerLogDraft = Omit<LogEntry, "id" | "timestamp">;

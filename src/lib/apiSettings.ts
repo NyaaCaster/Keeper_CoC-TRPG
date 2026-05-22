@@ -3,7 +3,8 @@ import {
   DEFAULT_API_SETTINGS,
   LlmProviderKind,
   ImageProviderKind,
-  QINY_BASE_URL,
+  QinyHostKind,
+  resolveQinyBaseUrl,
 } from "../types";
 import { generateTimestamp } from "./saveManager";
 
@@ -18,6 +19,7 @@ const LLM_KINDS: LlmProviderKind[] = [
   "deepseek",
 ];
 const IMAGE_KINDS: ImageProviderKind[] = ["qiny"];
+const QINY_HOSTS: QinyHostKind[] = ["com", "icu"];
 
 export function loadApiSettings(): ApiSettings {
   try {
@@ -68,8 +70,10 @@ export function validateApiSettingsJson(data: unknown): data is ApiSettings {
   if (typeof llm.provider !== "string" || !LLM_KINDS.includes(llm.provider as LlmProviderKind)) return false;
   if (typeof llm.apiKey !== "string" || typeof llm.model !== "string") return false;
   if (llm.customBaseUrl !== undefined && typeof llm.customBaseUrl !== "string") return false;
+  if (llm.qinyHost !== undefined && (typeof llm.qinyHost !== "string" || !QINY_HOSTS.includes(llm.qinyHost as QinyHostKind))) return false;
   if (typeof image.provider !== "string" || !IMAGE_KINDS.includes(image.provider as ImageProviderKind)) return false;
   if (typeof image.apiKey !== "string" || typeof image.model !== "string") return false;
+  if (image.qinyHost !== undefined && (typeof image.qinyHost !== "string" || !QINY_HOSTS.includes(image.qinyHost as QinyHostKind))) return false;
   return true;
 }
 
@@ -93,7 +97,7 @@ export function normalizeCustomBaseUrl(input: string): string {
 }
 
 export function resolveLlmBaseUrl(s: ApiSettings): string {
-  if (s.llm.provider === "qiny") return QINY_BASE_URL;
+  if (s.llm.provider === "qiny") return resolveQinyBaseUrl(s.llm.qinyHost);
   if (s.llm.provider === "custom") return normalizeCustomBaseUrl(s.llm.customBaseUrl ?? "");
   return "";
 }

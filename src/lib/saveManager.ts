@@ -1,6 +1,23 @@
 import { WebGameSave } from "../types";
+import { getImagePublicPrefix } from "./publicConfig";
 
 const SAVES_KEY = "keeper_game_saves";
+
+// localStorage 只允许存储白名单前缀的图片 URL（来自 /api/public-config）。
+// 任何 data:URI 或第三方地址（含已废弃的 base64 老存档）写入前都会被剔除，
+// 避免存档体积膨胀以及因 base64 撑爆 localStorage 配额。
+// 前缀为空（公网配置尚未拉到）时 fail-closed —— 同样剔除，保证不污染存档。
+function sanitizeForStorage(save: WebGameSave): WebGameSave {
+  const prefix = getImagePublicPrefix();
+  const cleanedClues = save.clues.map((c) => {
+    if (c.imageUrl && (!prefix || !c.imageUrl.startsWith(prefix))) {
+      const { imageUrl, ...rest } = c;
+      return rest;
+    }
+    return c;
+  });
+  return { ...save, clues: cleanedClues };
+}
 
 export function getAllSaves(): WebGameSave[] {
   try {
@@ -15,15 +32,16 @@ export function getAllSaves(): WebGameSave[] {
 }
 
 export function saveGame(save: WebGameSave) {
+  const cleaned = sanitizeForStorage(save);
   const saves = getAllSaves();
-  const existingIdx = saves.findIndex(s => s.id === save.id);
-  
+  const existingIdx = saves.findIndex((s) => s.id === cleaned.id);
+
   if (existingIdx >= 0) {
-    saves[existingIdx] = save;
+    saves[existingIdx] = cleaned;
   } else {
-    saves.push(save);
+    saves.push(cleaned);
   }
-  
+
   try {
     localStorage.setItem(SAVES_KEY, JSON.stringify(saves));
   } catch (e) {

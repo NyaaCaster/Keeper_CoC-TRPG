@@ -3,6 +3,9 @@ node_modules
 dist
 build
 
+# Runtime image cache (lives in a docker volume, not in the build context)
+cache
+
 # Local dev / IDE / VCS
 .git
 .gitignore

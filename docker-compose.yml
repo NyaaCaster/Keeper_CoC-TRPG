@@ -6,18 +6,36 @@ services:
     image: keeper-coc-trpg:latest
     container_name: keeper-coc-trpg
     restart: unless-stopped
+    # Use Docker's built-in init (docker-init) as PID 1 so `docker stop`
+    # delivers SIGTERM cleanly to node. Avoids needing to apk-install tini
+    # inside the image, which kept failing whenever Alpine's CDN was flaky.
+    init: true
     environment:
       NODE_ENV: production
       # NyaaChat-MCP token for objective CoC dice rolling.
       # Leave empty to fall back to the in-process local roll implementation.
       NYAACHAT_MCP_TOKEN: "${NYAACHAT_MCP_TOKEN:-}"
+      # Public-facing prefix used to mint clue-image URLs that survive in
+      # the client's localStorage. Read from the project root .env file
+      # (compose loads it automatically). Leave it empty in .env to fall
+      # back to the request origin — fine for localhost-only setups, but
+      # required if you want generated images to remain reachable from
+      # other devices/networks.
+      IMAGE_PUBLIC_BASE_URL: "${IMAGE_PUBLIC_BASE_URL:-}"
     ports:
       # host:container — host port 3093 was selected by the user from the
       # free slots in 3090-3099. Container always listens on 3000.
       - "3093:3000"
+    volumes:
+      # Persist the 30-day rolling image cache across container rebuilds so
+      # generated clue photos remain reachable for their full TTL.
+      - keeper_image_cache:/app/cache/images
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 15s
+
+volumes:
+  keeper_image_cache:

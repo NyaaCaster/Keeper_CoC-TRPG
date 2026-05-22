@@ -17,6 +17,7 @@ import {
   ApiSettings,
   LlmProviderKind,
   ImageProviderKind,
+  QinyHostKind,
 } from "../types";
 import {
   saveApiSettings,
@@ -168,6 +169,15 @@ export default function ApiSettingsPanel({
                 onChange={handleLlmProviderChange}
               />
 
+              {settings.llm.provider === "qiny" && (
+                <QinyHostRadio
+                  value={settings.llm.qinyHost ?? "com"}
+                  onChange={(host) =>
+                    setSettings((s) => ({ ...s, llm: { ...s.llm, qinyHost: host } }))
+                  }
+                />
+              )}
+
               {settings.llm.provider === "custom" && (
                 <Field label="Base URL" hint="OpenAI 兼容路径，会自动归一为 .../v1 形式">
                   <input
@@ -211,6 +221,7 @@ export default function ApiSettingsPanel({
                 provider={settings.llm.provider}
                 apiKey={settings.llm.apiKey}
                 customBaseUrl={settings.llm.customBaseUrl}
+                qinyHost={settings.llm.qinyHost}
               />
 
               <div className="border-t border-[#183022] pt-5">
@@ -229,6 +240,15 @@ export default function ApiSettingsPanel({
                 onChange={handleImageProviderChange}
               />
 
+              {settings.image.provider === "qiny" && (
+                <QinyHostRadio
+                  value={settings.image.qinyHost ?? "com"}
+                  onChange={(host) =>
+                    setSettings((s) => ({ ...s, image: { ...s.image, qinyHost: host } }))
+                  }
+                />
+              )}
+
               <ApiKeyField
                 label="画图 API Key"
                 value={settings.image.apiKey}
@@ -245,6 +265,7 @@ export default function ApiSettingsPanel({
                 }
                 provider="qiny-image"
                 apiKey={settings.image.apiKey}
+                qinyHost={settings.image.qinyHost}
               />
             </div>
 
@@ -316,6 +337,54 @@ function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }
       {icon}
       <span className="text-xs font-bold tracking-widest font-mono">{title}</span>
     </div>
+  );
+}
+
+const QINY_HOST_OPTIONS: Array<{ value: QinyHostKind; label: string; url: string }> = [
+  { value: "com", label: ".com", url: "https://openai.chatnewai.com/" },
+  { value: "icu", label: ".icu", url: "https://love.qinyan.icu/" },
+];
+
+function QinyHostRadio({
+  value,
+  onChange,
+}: {
+  value: QinyHostKind;
+  onChange: (host: QinyHostKind) => void;
+}) {
+  return (
+    <Field label="QinyAPI 接入点" hint="切换不同的虚空中继域名">
+      <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="QinyAPI 接入点">
+        {QINY_HOST_OPTIONS.map((opt) => {
+          const active = opt.value === value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => onChange(opt.value)}
+              className={`flex items-center justify-between gap-2 px-3 py-2 text-xs border rounded transition-all font-mono ${
+                active
+                  ? "bg-[#c1a067]/15 border-[#10b981] text-[#10b981]"
+                  : "bg-black/40 border-[#183022] text-gray-400 hover:border-[#10b981]/40 hover:text-gray-200"
+              }`}
+              title={opt.url}
+            >
+              <span className="flex items-center gap-1.5">
+                <span
+                  className={`inline-block w-2 h-2 rounded-full ${
+                    active ? "bg-[#10b981]" : "bg-gray-700"
+                  }`}
+                />
+                <span className="font-bold tracking-wider">{opt.label}</span>
+              </span>
+              <span className="text-[10px] text-gray-500 truncate">{opt.url}</span>
+            </button>
+          );
+        })}
+      </div>
+    </Field>
   );
 }
 
@@ -474,9 +543,10 @@ interface ModelFieldProps {
   provider: LlmProviderKind | "qiny-image";
   apiKey: string;
   customBaseUrl?: string;
+  qinyHost?: QinyHostKind;
 }
 
-function ModelField({ label, value, onChange, provider, apiKey, customBaseUrl }: ModelFieldProps) {
+function ModelField({ label, value, onChange, provider, apiKey, customBaseUrl, qinyHost }: ModelFieldProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState<string[]>([]);
@@ -499,6 +569,9 @@ function ModelField({ label, value, onChange, provider, apiKey, customBaseUrl }:
       const params = new URLSearchParams({ provider, apiKey });
       if (provider === "custom" && customBaseUrl) {
         params.set("customBaseUrl", customBaseUrl);
+      }
+      if ((provider === "qiny" || provider === "qiny-image") && qinyHost) {
+        params.set("qinyHost", qinyHost);
       }
       const resp = await fetch(`/api/models?${params.toString()}`);
       const data = await resp.json();
