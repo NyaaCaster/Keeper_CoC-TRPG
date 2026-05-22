@@ -152,61 +152,49 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
     });
 
     if (moduleOutline?.presets && moduleOutline.presets.length > 0) {
-      const selected = moduleOutline.presets.map((p) => {
-        if (typeof p === "string") {
-          // Find matching predefined template
-          const found = TEMPLATE_PRESETS.find(item => item.name === p || item.name.includes(p) || p.includes(item.name));
-          if (found) {
-            return {
-              ...found,
-              overview: found.backgroundText || "资深的前线秘仪探求者，协助解析现场古怪迹象。"
-            };
-          }
-          return null;
-        } else if (p && typeof p === "object") {
-          // Object fallback
-          const pObj = p as any;
-          const calculatedHp = Math.floor(((pObj.attributes?.con || 50) + (pObj.attributes?.siz || 50)) / 10);
-          const calculatedMp = Math.floor((pObj.attributes?.pow || 50) / 5);
-          const calculatedSan = pObj.attributes?.pow || 50;
+      const selected = moduleOutline.presets.map((pObj) => {
+        if (!pObj || typeof pObj !== "object") return null;
 
-          // Safe skills parser: maps Array<{name: string, value: number}> to Record<string, number>
-          let skillsObj: Record<string, number> = {};
-          if (pObj.skills && Array.isArray(pObj.skills)) {
-            pObj.skills.forEach((s: any) => {
-              if (s && typeof s === "object" && s.name && s.value !== undefined) {
-                skillsObj[s.name] = Number(s.value);
-              } else if (typeof s === "string") {
-                skillsObj[s] = 40;
-              }
-            });
-          } else if (pObj.skills && typeof pObj.skills === "object") {
-            skillsObj = pObj.skills;
-          } else {
-            skillsObj = { "神秘学": 60, "侦查": 60, "聆听": 50 };
-          }
+        const calculatedHp = Math.floor(((pObj.attributes?.con || 50) + (pObj.attributes?.siz || 50)) / 10);
+        const calculatedMp = Math.floor((pObj.attributes?.pow || 50) / 5);
+        const calculatedSan = pObj.attributes?.pow || 50;
 
-          return {
-            name: pObj.name,
-            occupation: pObj.occupation,
-            gender: pObj.gender || "男",
-            age: pObj.age || 30,
-            overview: pObj.overview || "此调查员被调遣协作对峙未知异常。",
-            attributes: pObj.attributes || { str: 50, con: 50, siz: 50, dex: 50, app: 50, int: 50, pow: 50, edu: 50, luck: 50 },
-            skills: skillsObj,
-            hp: calculatedHp,
-            maxHp: calculatedHp,
-            mp: calculatedMp,
-            maxMp: calculatedMp,
-            san: calculatedSan,
-            maxSan: calculatedSan,
-            maxSanLimit: 99,
-            mythos: 0,
-            background: selectedEra
-          };
+        // Safe skills parser: maps Array<{name: string, value: number}> to Record<string, number>
+        let skillsObj: Record<string, number> = {};
+        const rawSkills: any = (pObj as any).skills;
+        if (Array.isArray(rawSkills)) {
+          rawSkills.forEach((s: any) => {
+            if (s && typeof s === "object" && s.name && s.value !== undefined) {
+              skillsObj[s.name] = Number(s.value);
+            } else if (typeof s === "string") {
+              skillsObj[s] = 40;
+            }
+          });
+        } else if (rawSkills && typeof rawSkills === "object") {
+          skillsObj = rawSkills;
+        } else {
+          skillsObj = { "神秘学": 60, "侦查": 60, "聆听": 50 };
         }
-        return null;
-      }).filter((x): x is (CharacterSheet & { overview?: string }) => x !== null);
+
+        return {
+          name: pObj.name,
+          occupation: pObj.occupation,
+          gender: pObj.gender || "男",
+          age: pObj.age || 30,
+          overview: pObj.overview || "此调查员被调遣协作对峙未知异常。",
+          attributes: pObj.attributes || { str: 50, con: 50, siz: 50, dex: 50, app: 50, int: 50, pow: 50, edu: 50, luck: 50 },
+          skills: skillsObj,
+          hp: calculatedHp,
+          maxHp: calculatedHp,
+          mp: calculatedMp,
+          maxMp: calculatedMp,
+          san: calculatedSan,
+          maxSan: calculatedSan,
+          maxSanLimit: 99,
+          mythos: 0,
+          background: selectedEra
+        };
+      }).filter((x): x is CharacterSheet & { overview: string } => x !== null);
 
       if (selected.length > 0) {
         return selected;

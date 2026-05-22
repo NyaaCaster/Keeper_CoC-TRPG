@@ -7,7 +7,7 @@ echo "Stopping containers..."
 docker compose -p "$PROJECT" -f "$COMPOSE_FILE" down
 
 echo "Rebuilding image..."
-docker compose -p "$PROJECT" -f "$COMPOSE_FILE" build --no-cache
+docker compose -p "$PROJECT" -f "$COMPOSE_FILE" build
 
 echo "Removing dangling images..."
 DANGLING=$(docker images -f "dangling=true" -q)

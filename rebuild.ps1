@@ -6,7 +6,7 @@ Write-Host "Stopping containers..." -ForegroundColor Cyan
 docker compose -p $PROJECT -f $COMPOSE_FILE down
 
 Write-Host "Rebuilding image..." -ForegroundColor Cyan
-docker compose -p $PROJECT -f $COMPOSE_FILE build --no-cache
+docker compose -p $PROJECT -f $COMPOSE_FILE build
 
 Write-Host "Removing dangling images..." -ForegroundColor Cyan
 $dangling = docker images -f "dangling=true" -q

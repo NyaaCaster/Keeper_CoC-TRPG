@@ -30,7 +30,6 @@ import {
   HelpCircle,
   AlertCircle,
   Dices,
-  Skull,
   Compass,
   Eye,
   User,
@@ -236,6 +235,8 @@ export default function App() {
     isSystemReport: boolean = false,
   ) => {
     if (!textToSend.trim() || isKeeperLoading) return;
+    // CoC 7e 严格合规：SAN 检定挂起期间，玩家不可推进剧情。系统回报例外（SAN 检定结束后会以 system 身份发回）。
+    if (activeSanity && !isSystemReport) return;
 
     const playerMsg: ChatMessage = {
       id: `player_${Date.now()}`,
@@ -332,6 +333,8 @@ export default function App() {
           reason: keeperData.keeperRoll.reason,
           isKeeperRoll: true,
           isSecret: keeperData.keeperRoll.isSecret,
+          bonus: keeperData.keeperRoll.bonus,
+          penalty: keeperData.keeperRoll.penalty,
         });
       } else {
         applyKeeperResponse(keeperData);
@@ -450,7 +453,14 @@ export default function App() {
     setActiveRoll(null);
 
     if (keeperData.sanityCheck) {
+      // CoC 7e 严格合规：SAN 冲击是不可回避的——直接弹 modal，不走聊天卡片按钮。
       setActiveSanity(keeperData.sanityCheck);
+      setActiveRoll({
+        skillName: "理智意志 (SAN)",
+        targetValue: character!.san,
+        difficulty: "regular",
+        reason: keeperData.sanityCheck.reason,
+      });
     } else {
       setActiveSanity(null);
     }
@@ -591,6 +601,7 @@ export default function App() {
   const handleSanityCheckComplete = (result: RollResult) => {
     const sanityReq = activeSanity!;
     setActiveSanity(null);
+    setActiveRoll(null);
 
     let lossFormula =
       result.successType !== "failure" && result.successType !== "fumble"
@@ -1033,54 +1044,14 @@ export default function App() {
                           <button
                             id="roll-prompt-action-btn"
                             type="button"
+                            disabled={!!activeSanity}
                             onClick={() =>
                               setActiveRoll(m.parsedResponse!.rollRequest!)
                             }
-                            className="bg-gradient-to-r from-[#c1a067] to-[#dcb77c] text-black hover:scale-105 active:scale-95 transition-all text-xs font-bold px-4 py-2 rounded-full flex items-center gap-1.5 font-sans"
+                            className="bg-gradient-to-r from-[#c1a067] to-[#dcb77c] text-black hover:scale-105 active:scale-95 transition-all text-xs font-bold px-4 py-2 rounded-full flex items-center gap-1.5 font-sans disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
                           >
                             <Dices className="w-4 h-4" /> 投掷 D100 (
                             {m.parsedResponse.rollRequest.targetValue}%)
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Action trigger: Required Sanity check banner */}
-                      {m.parsedResponse?.sanityCheck && (
-                        <div
-                          id="sanity-request-banner"
-                          className="bg-[#1b1216] border border-purple-950 p-4 rounded-lg flex items-center justify-between gap-4 mt-4 animate-pulse"
-                        >
-                          <div>
-                            <div className="text-[10px] uppercase text-purple-400 font-mono tracking-widest">
-                              理智惊狂危机 (SANITY THREAT)
-                            </div>
-                            <div
-                              id="san-request-desc"
-                              className="text-xs text-gray-300 font-sans mt-0.5"
-                            >
-                              直面不可名状冲击！原因:{" "}
-                              <span className="text-[#c1a067] font-sans font-semibold">
-                                {m.parsedResponse.sanityCheck.reason}
-                              </span>{" "}
-                              (失神可能损 $
-                              {m.parsedResponse.sanityCheck.lossOnFailure})
-                            </div>
-                          </div>
-                          <button
-                            id="sanity-prompt-action-btn"
-                            type="button"
-                            onClick={() => {
-                              setActiveRoll({
-                                skillName: "理智意志 (SAN)",
-                                targetValue: character!.san,
-                                difficulty: "regular",
-                                reason: m.parsedResponse!.sanityCheck!.reason,
-                              });
-                            }}
-                            className="bg-purple-950 border border-purple-500 hover:bg-purple-900 text-purple-200 hover:border-purple-300 text-xs font-bold px-4 py-2 rounded-full flex items-center gap-1.5 transition active:scale-95 font-sans"
-                          >
-                            <Skull className="w-4 h-4 text-purple-400" />{" "}
-                            进行理智判定 ({character?.san}%)
                           </button>
                         </div>
                       )}
@@ -1132,7 +1103,7 @@ export default function App() {
               <input
                 id="main-player-chat-input"
                 type="text"
-                disabled={isKeeperLoading}
+                disabled={isKeeperLoading || !!activeSanity}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={(e) => {
@@ -1143,16 +1114,18 @@ export default function App() {
                 placeholder={
                   isKeeperLoading
                     ? "守密人沉浸叙述中，请稍候..."
-                    : activeRoll
-                      ? "【强制检定状态】：请在上面点击掷骰子投点，以继续生成故事"
-                      : "叙言你的侦查与侦测意图（如：我拿出魔术提灯、潜行走前去检查...）"
+                    : activeSanity
+                      ? "【理智冲击降临】请先完成理智检定，理智冲击不可回避..."
+                      : activeRoll
+                        ? "【强制检定状态】：请在上面点击掷骰子投点，以继续生成故事"
+                        : "叙言你的侦查与侦测意图（如：我拿出魔术提灯、潜行走前去检查...）"
                 }
                 className="flex-1 bg-black/50 border border-gray-800 rounded px-4 py-2.5 text-sm placeholder-gray-650 focus:outline-[#c1a067]/40 focus:outline-1 focus:border-[#c1a067] text-gray-200 outline-none disabled:opacity-40"
               />
               <button
                 id="main-player-send-btn"
                 type="button"
-                disabled={isKeeperLoading || !inputText.trim()}
+                disabled={isKeeperLoading || !!activeSanity || !inputText.trim()}
                 onClick={() => handleSendPlayerMessage(inputText)}
                 className="px-5 bg-black hover:bg-neutral-900 border border-gray-800 hover:border-[#c1a067] transition text-gray-300 font-semibold text-xs uppercase rounded flex items-center justify-center disabled:opacity-30"
                 title="发送"
@@ -1195,13 +1168,19 @@ export default function App() {
                     hpDiff={hpDiff}
                     sanDiff={sanDiff}
                     mpDiff={mpDiff}
-                    onSkillCheckTrigger={(skill, val) => {
+                    onSkillIntentDraft={(skill, val) => {
                       if (isKeeperLoading) return;
-                      setActiveRoll({
-                        skillName: skill,
-                        targetValue: val,
-                        difficulty: "regular",
-                        reason: `玩家主动测试 [${skill}] 的技能应对`,
+                      // SAN 挂起期间，禁止"声明意图"的预填动作；查看属性/技能仍可。
+                      if (activeSanity) return;
+                      const draft = `我想用【${skill}】(${val}%) 来`;
+                      setInputText((prev) => (prev.trim() ? `${prev.trimEnd()} ${draft}` : draft));
+                      requestAnimationFrame(() => {
+                        const el = document.getElementById("main-player-chat-input") as HTMLInputElement | null;
+                        if (el) {
+                          el.focus();
+                          const len = el.value.length;
+                          try { el.setSelectionRange(len, len); } catch { /* ignore */ }
+                        }
                       });
                     }}
                   />
@@ -1219,6 +1198,11 @@ export default function App() {
                 isSanityCheck={activeRoll.skillName.includes("SAN")}
                 isKeeperRoll={activeRoll.isKeeperRoll}
                 isSecret={activeRoll.isSecret}
+                sanityMeta={
+                  activeSanity
+                    ? { lossOnSuccess: activeSanity.lossOnSuccess, lossOnFailure: activeSanity.lossOnFailure }
+                    : undefined
+                }
                 onComplete={(result, outcomeMessage) => {
                   if (activeRoll.isKeeperRoll) {
                     handleKeeperRollComplete(result, outcomeMessage);
@@ -1228,6 +1212,11 @@ export default function App() {
                     handleRollComplete(result, outcomeMessage);
                   }
                 }}
+                onCancel={
+                  activeRoll.skillName.includes("SAN")
+                    ? undefined
+                    : () => setActiveRoll(null)
+                }
               />
             )}
 

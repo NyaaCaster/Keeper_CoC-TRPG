@@ -13,17 +13,17 @@ interface CharacterSheetPanelProps {
   hpDiff: number; // passed down to trigger animation
   sanDiff: number; // passed down to trigger animation
   mpDiff: number; // passed down to trigger animation
-  onSkillCheckTrigger?: (skillName: string, value: number) => void;
+  onSkillIntentDraft?: (skillName: string, value: number) => void;
   onClose?: () => void;
 }
 
 export default function CharacterSheetPanel({ 
   sheet, 
-  hpDiff, 
-  sanDiff, 
+  hpDiff,
+  sanDiff,
   mpDiff,
-  onSkillCheckTrigger,
-  onClose 
+  onSkillIntentDraft,
+  onClose
 }: CharacterSheetPanelProps) {
   const [activeTab, setActiveTab] = useState<"attributes" | "skills">("attributes");
   
@@ -282,7 +282,8 @@ export default function CharacterSheetPanel({
               <div
                 id={`cs-attr-row-${attr.name.split(' ')[1]}`}
                 key={attr.name}
-                onClick={() => onSkillCheckTrigger?.(attr.name.split(" ")[0], attr.val)}
+                onClick={() => onSkillIntentDraft?.(attr.name.split(" ")[0], attr.val)}
+                title="向守密人提议用此项检定（最终是否掷骰由守密人裁定）"
                 className="bg-black/20 border border-gray-800/60 p-2.5 rounded hover:border-[#c1a067]/45 cursor-pointer transition group"
               >
                 <div className="flex justify-between items-center">
@@ -298,7 +299,8 @@ export default function CharacterSheetPanel({
               <div
                 id={`cs-skill-row-${skill}`}
                 key={skill}
-                onClick={() => onSkillCheckTrigger?.(skill, val)}
+                onClick={() => onSkillIntentDraft?.(skill, val)}
+                title="向守密人提议用此项检定（最终是否掷骰由守密人裁定）"
                 className="flex items-center justify-between bg-black/20 border border-gray-900/40 rounded px-2.5 py-1.5 hover:border-[#c1a067]/35 cursor-pointer group transition text-xs"
               >
                 <div className="flex items-center gap-1.5">

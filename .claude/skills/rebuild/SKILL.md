@@ -45,10 +45,30 @@ description: Rebuild the Keeper_CoC-TRPG Docker image and restart its container.
 - 完整命令示例：
   - Windows: `powershell -ExecutionPolicy Bypass -File .\rebuild.ps1`
   - Linux/macOS: `bash ./rebuild.sh`
-- 脚本本身已包含：停止本项目容器 → 无缓存构建 → 清理 dangling 镜像 → 启动容器 → 列出运行中容器。不要再额外手动执行这些步骤。
+- 脚本本身已包含：停止本项目容器 → 按层缓存增量构建 → 清理 dangling 镜像 → 启动容器 → 列出运行中容器。不要再额外手动执行这些步骤。
 - 脚本通过 `-p keeper-coc-trpg` 显式锁定 compose 项目名，确保只影响本项目，不会动到同机器上的其它容器。
 - 执行前请确认工作目录是项目根目录（含 `docker-compose.yml`）。
 - 执行后向用户简要汇报：脚本是否成功结束、容器是否健康、对外端口与可访问 URL。
+
+## 关于缓存策略
+
+脚本默认走 Docker 的层缓存（不带 `--no-cache`），原因：
+
+- 多阶段 Dockerfile 第一层是 `COPY package.json package-lock.json ./` + `RUN npm ci`。只要 lockfile 没变，这一层会命中缓存，秒级跳过；改 `server.ts` / `src/**` 时不需要重新拉 `node_modules`。
+- 之前默认 `--no-cache` 是为了"绝对干净"，但代价是每次都要从 `registry.npmjs.org` 全量拉所有 tarball；遇到网络抖动（TLS 重置、连接超时）就会失败，整个流程白跑。
+- Docker 的层指纹按指令文本 + 上游层 + 被 COPY 进来的文件内容来算，所以**改源码自然会让对应层失效，不会出现"该重建却没重建"的情况**。
+
+什么时候确实需要全量重建：
+
+- 怀疑 base image 自身有脏状态（很少见）。
+- 改了 npm 镜像源 / 私有 registry 配置，担心旧缓存层里残留旧凭据。
+- 排查"为什么改了 X 镜像里没生效"——先确认 Dockerfile 里这一层应该被 invalidate，再考虑 `--no-cache`。
+
+需要时，临时手动加参数即可，**不要改脚本**：
+```powershell
+docker compose -p keeper-coc-trpg -f docker-compose.yml build --no-cache
+docker compose -p keeper-coc-trpg -f docker-compose.yml up -d
+```
 
 ## 不要做的事
 

@@ -196,11 +196,22 @@ async function dispatchImage({ apiSettings, prompt, size = "1024x1024", onLog }:
       meta: { upstreamUrl, model, size, n: 1, qinyHost: apiSettings.image.qinyHost ?? "com", promptPreview: previewText(prompt) }
     });
     const t0 = Date.now();
-    const resp = await fetch(upstreamUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, prompt, n: 1, size, response_format: "b64_json" })
-    });
+    let resp: Response;
+    try {
+      resp = await fetch(upstreamUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, prompt, n: 1, size, response_format: "b64_json" })
+      });
+    } catch (e: any) {
+      const friendly = humanizeFetchError(e, { url: upstreamUrl, what: "画图供应商 qiny" });
+      log({
+        direction: "error",
+        content: `IMG qiny ${model} 网络层失败`,
+        meta: { durationMs: Date.now() - t0, error: friendly, causeCode: e?.cause?.code, causeHost: e?.cause?.hostname }
+      });
+      throw new Error(friendly);
+    }
     const durationMs = Date.now() - t0;
     if (!resp.ok) {
       const errText = await resp.text();
@@ -298,7 +309,31 @@ const SYSTEM_INSTRUCTION = `你是一位专业且极具沉浸感的《克苏鲁�
 2. 【克苏鲁生态圈多样性】：场景中不要只有无脑的鱼人（深潜者）和丧尸。合理融入星之彩、空鬼、米·戈、古老者、伊斯伟大种族、虚数之物、英灵残存魔术刻印、SCP-173等奇异生命。
 3. 【型月与SCP要素融入】：让魔术协会（时钟塔）、圣堂教会与SCP基金会在暗中角力或隐秘协作。克苏鲁古老支配者即为宇宙根源的阴暗侧，魔术秘仪与基金会控制、收容异常的能力相结合。
 4. 【客观真实投骰与明暗骰】：KP决不能代玩家或自己随意胡编掷骰判定结果。当玩家行动存在不确定性时，你必须在对应的响应JSON中设置 'rollRequest'（或者是理智方面的 'sanityCheck'），让前端呈现要求玩家手动点击投点按钮并播放动画。而如果是守秘人（Keeper）单独发起的主动性行为检定，或代表敌对NPC、场景环境暗中进行的技能/属性判定（如：怪物潜行、暗中聆听、NPC对玩家隐瞒事实进行心理学对抗等），你必须在对应的响应JSON中设置 'keeperRoll' 对象。你必须指定 'isSecret'（true/false分别代表暗骰和明骰）以及大体判定技能/属性和成功目标。前端拦截后，会专门针对守秘人投点播放自动化精美投骰动画（若是暗骰则不向玩家透露具体骰点与难度结果只表达神秘轰鸣，若是明骰则公开数值），并把客观真实的投点结果追加至上下文供你理直气壮地继续推演叙事，绝不胡扯！
+
+   4.1 【奖励骰 / 惩罚骰由 KP 裁定，玩家不可点单】：CoC 7e 规则下，奖励骰（bonus）和惩罚骰（penalty）的发放权完全归 KP（也就是你）。玩家**不能**主动选择给自己加奖励骰，前端 UI 也不会向玩家提供这个开关。你必须根据当时的处境优势/劣势，在 'rollRequest' 或 'keeperRoll' 中通过 bonus / penalty 字段（取值 0 / 1 / 2）显式下达。
+       - 给奖励骰的合理时机：调查员有充裕时间、合适工具、有效的同伴协助（assisted roll）、有利地形、对方处于明显弱势或被束缚等。
+       - 给惩罚骰的合理时机：调查员负伤、被催促、能见度差、装备不顺手、半心半意行动、地形/光线等不利条件。
+       - **bonus 与 penalty 互斥**：同一次检定不能同时 > 0；若处境同时存在利弊，按规则相互抵消，最终都填 0。
+       - 不要滥发：大多数检定都应当是标准 1d100，bonus/penalty 只在处境明显时使用。不给则填 0（或省略）。
+
+   4.2 【明骰 vs 暗骰判断口径】：判断标准只有一个——"玩家提前知道这次掷骰发生过会不会破坏沉浸/破坏后续叙事张力"。
+       - 走暗骰（keeperRoll + isSecret: true）：隐藏的侦查/聆听（让玩家掷会暴露"这里有藏起来的东西没找到"）、潜行被发现判定、被欺瞒方的心理学/识谎、命运豁免、随机遭遇等。**注意 SAN 检定永远走明骰，不要用暗骰**——见 5.1。
+       - 走明骰：公开行动的后果检定，玩家本就清楚风险的场景。
+       - **暗骰的 reason 字段必须叙事化**：不要写"判断 NPC 是否撒谎"这种机制化描述，改写为氛围/感官描述，如"那双眼睛的某个细节让她隐约感到不对"、"屋内某种细微的气息让他一阵警觉"。前端会把 skillName / targetValue / difficulty / 骰点结果全部打码遮蔽，**只有 reason 会原样展示给玩家**——所以暗骰 reason 一旦泄露技能名或数值就破功了。
+       - 暗骰的结果会以"成功 / 失败 / 大成功 / 大失败 / 困难成功 / 极难成功"这样的纯文本形式回传给你；你需要在下一轮 narrative 中**把结果叙事化**地融入剧情（"她什么也没察觉到" / "他后背的寒意更甚了"），而不是直接告诉玩家"暗骰失败"。
+
+   4.3 【玩家技能/属性声明 → KP 裁定】：玩家可能从角色面板预填出"我想用【某技能】(X%) 来…"这样的意图声明。这**只是申报**，不是骰子触发器——前端不会绕过你直接掷骰。你必须按当时情境裁定：
+       - 情境合理且结果不确定 → 设置 'rollRequest'，正常召唤掷骰；可在 reason 里采纳玩家描述、也可改写。
+       - 玩家选错技能但意图合理 → 不要照单全收技能名，挑更合适的那个发起 'rollRequest'，并在 narrative 中简短解释（如"这种情况下用【聆听】更合适"）。
+       - 情境完全不合理（如玩家正在水下却声明用【计算机使用】打开舱门）→ **明确拒绝**，narrative 中以 KP 口吻反驳，不发 rollRequest。允许进入"PL 口胡 vs KP 反驳"的口水战——这是 TRPG 的乐趣，不要怕和玩家辩。
+       - 玩家若提出有创意的解释（"我有防水手机+预先配对的舱门蓝牙"）并能自洽，可以让步并发起检定，必要时挂上 penalty 反映难度。
+       - 情境可推进但无需骰（小事/必然成功失败）→ 直接叙事推进，narrative 里说明结果，不发 rollRequest。
 5. 【理智检定(Sanity Check)】：当玩家直面不可名状神秘、骇人血腥、死徒行径或SCP模因时，必须且仅能通过设置 'sanityCheck' 对象来发起理智检定，并规定成功/失败分别减去多少理智（如成功减0，失败减1d6）。
+   5.1 【SAN 检定不可回避】：CoC 7e 规则下，理智冲击是因果上"已发生"的事——只要你触发了 sanityCheck，前端会**强制弹出 modal、禁用聊天输入、禁用角色面板的意图声明**，玩家**不能取消、不能跳过**，必须立即掷骰。所以：
+       - 不要轻易触发 SAN 检定。只在调查员**确实已经看到/听到/接触到**冲击源时触发。"可能会瞥到"这种暧昧场景请在 narrative 里描写，不要直接发 sanityCheck。
+       - 触发时 'reason' 字段要写**已感知**事实，如"她看清了祭坛后那张面孔"、"他听见地板下传来的咀嚼声"，不要写"如果她抬头会看到..."这种条件式。
+       - 如果你希望给玩家"捂眼/转身"的窗口，就在前一回合 narrative 里铺垫感官前兆（异味、温度、声响），由玩家声明回避动作；只有当玩家**没有声明回避**或回避失败时，下一回合才发 sanityCheck。
+       - SAN 检定**永远是明骰**：玩家自己投，自己看到结果。要触发暗骰用 'keeperRoll'，不要用 'sanityCheck'。
 6. 【视觉线索生成】：当玩家发现重要的现场遗留纸条、魔法术式记号、沾血笔记、诡异现场照片、scp绝密档案、甚至是扭曲徽章等视觉观察道具时，必须设置 'clue' 字段，提供富含暗黑写实、克苏鲁色调的质感图片生成提示词（用英文描述），这将在剧情消息中渲染，并保留至线索集。
 7. 【初始模组与角色创建】：如果接到新游戏启动指令或这是最初的信息，你必须在 narrative 中向玩家介绍CoC规则、型月+基金会混搭的世界设定，并引导他们：
     - 选择模组背景时代：现代 或 1920年代，并对这两者的氛围在剧中做出简单气氛介绍。
@@ -316,7 +351,9 @@ const KEEPER_RESPONSE_SCHEMA = {
         skillName: { type: Type.STRING, description: "需要检定的属性或技能名称（例如：侦查, 聆听, 神秘学, 心理学, 意志, 力量, 说服, 敏捷等）" },
         targetValue: { type: Type.INTEGER, description: "根据玩家卡片或规则，角色应该满足的该技能/属性的最大成功目标值（一般在 1-99 之间，包含该数值）" },
         difficulty: { type: Type.STRING, description: "检定难度等级，必须是 'regular' (常规成功即可), 'hard' (必须要困难成功, 即 <= 技能的一半), 'extreme' (必须要极难成功, 即 <= 技能的五分之一) 之一" },
-        reason: { type: Type.STRING, description: "进行此检定的原因描述。例如：在书房的杂乱字迹中翻找关于型月魔术回路的隐秘记录" }
+        reason: { type: Type.STRING, description: "进行此检定的原因描述。例如：在书房的杂乱字迹中翻找关于型月魔术回路的隐秘记录" },
+        bonus: { type: Type.INTEGER, description: "守密人裁定的奖励骰数量（0/1/2）。处境对调查员明显有利（充裕时间、合适工具、同伴有效协助、有利地形等）时给出。与 penalty 互斥；不给则填 0。" },
+        penalty: { type: Type.INTEGER, description: "守密人裁定的惩罚骰数量（0/1/2）。处境对调查员明显不利（负伤、被催促、能见度差、装备不顺、半心半意行动等）时给出。与 bonus 互斥；不给则填 0。" }
       },
       required: ["skillName", "targetValue", "difficulty", "reason"],
       description: "如果当前的玩家意图或遭遇触发了技能/属性检定需求，将其填充，这将在前端拦截并让玩家进行双十面骰动画掷骰。无则设为 null。"
@@ -367,8 +404,10 @@ const KEEPER_RESPONSE_SCHEMA = {
         skillName: { type: Type.STRING, description: "守秘人方需要检定的技能或属性名称" },
         targetValue: { type: Type.INTEGER, description: "目标胜出条件所需的上限属性成功限度值（1-99之间）" },
         difficulty: { type: Type.STRING, description: "判定难度级别，'regular', 'hard', 'extreme' 之一" },
-        isSecret: { type: Type.BOOLEAN, description: "是否暗骰" },
-        reason: { type: Type.STRING, description: "原因" }
+        isSecret: { type: Type.BOOLEAN, description: "是否暗骰。判定原则：玩家若提前知道掷骰发生过会破坏沉浸（隐藏的侦查/聆听、潜行被发现判定、被欺瞒方的心理学、揭露恐怖前的SAN等）→ 暗骰；公开后果且玩家应直接看到的 → 明骰" },
+        reason: { type: Type.STRING, description: "原因。暗骰时务必写得叙事化、避免暴露机制（不要提技能名/数值/难度），可以表达氛围（如：'某个细节让她后背一阵发凉'）" },
+        bonus: { type: Type.INTEGER, description: "守密人裁定的奖励骰数量（0/1/2）。与 penalty 互斥；不给则填 0。" },
+        penalty: { type: Type.INTEGER, description: "守密人裁定的惩罚骰数量（0/1/2）。与 bonus 互斥；不给则填 0。" }
       },
       required: ["skillName", "targetValue", "difficulty", "isSecret", "reason"],
       description: "守秘人需要替非玩家动作进行客观判定时填写。无则设为 null。"
@@ -572,17 +611,80 @@ async function dispatchLlm({ apiSettings, systemInstruction, userText, schema, t
     });
     return text;
   } catch (e: any) {
+    const isFetchFailed = e?.message === "fetch failed" || e?.name === "TypeError";
+    const friendly = isFetchFailed
+      ? humanizeFetchError(e, { what: `LLM 供应商 ${provider}` })
+      : (e?.message || String(e));
     log({
       direction: "error",
       content: `LLM ${provider} ${model} 失败`,
-      meta: { durationMs: Date.now() - t0, error: e?.message || String(e) }
+      meta: {
+        durationMs: Date.now() - t0,
+        error: friendly,
+        rawError: e?.message || String(e),
+        causeCode: e?.cause?.code,
+        causeHost: e?.cause?.hostname,
+      }
     });
+    if (isFetchFailed) {
+      const wrapped = new Error(friendly);
+      (wrapped as any).cause = e;
+      throw wrapped;
+    }
     throw e;
   }
 }
 
 function stripCodeFence(s: string): string {
   return s.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+}
+
+// undici 的 fetch 在网络层失败时会抛 TypeError("fetch failed") 并把真实原因
+// 挂在 e.cause 上。这层翻译让前端拿到可定位的中文消息，而不是裸 "fetch failed"。
+function humanizeFetchError(e: any, ctx: { url?: string; what?: string } = {}): string {
+  const cause: any = e?.cause ?? e;
+  const code: string | undefined = cause?.code;
+  const host: string | undefined = cause?.hostname || (() => {
+    try { return ctx.url ? new URL(ctx.url).host : undefined; } catch { return undefined; }
+  })();
+  const what = ctx.what ?? "上游服务";
+  const tail = host ? `（${host}）` : "";
+
+  switch (code) {
+    case "ENOTFOUND":
+    case "EAI_AGAIN":
+      return `DNS 解析失败${tail}：无法找到域名${host ? `「${host}」` : ""}。可能是该域名被运营商/网络拦截或上游 DNS 临时不可达。如果使用 qiny，可在「虚空连接的设置」里把 host 切到 .icu 镜像。`;
+    case "ECONNREFUSED":
+      return `${what}拒绝连接${tail}：目标端口未开放或服务未启动。`;
+    case "ETIMEDOUT":
+    case "UND_ERR_CONNECT_TIMEOUT":
+      return `连接${what}超时${tail}：网络抖动或目标不可达。请稍后重试。`;
+    case "ECONNRESET":
+    case "UND_ERR_SOCKET":
+      return `与${what}的连接被中断${tail}：链路在请求中途断开，请重试。`;
+    case "CERT_HAS_EXPIRED":
+    case "UNABLE_TO_VERIFY_LEAF_SIGNATURE":
+    case "DEPTH_ZERO_SELF_SIGNED_CERT":
+      return `${what} TLS 证书校验失败${tail}：${code}。`;
+  }
+  if (e?.name === "AbortError") return `请求${what}已超时被中止${tail}。`;
+  const msg = cause?.message || e?.message || String(e);
+  return `${what}请求失败${tail}：${msg}`;
+}
+
+// NyaaChat-MCP returns Streamable-HTTP responses that may be either plain
+// JSON or SSE-framed (`event: message\ndata: {...}`). Tolerate both.
+function parseSseOrJson(raw: string): any {
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error("MCP 服务返回空响应");
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) return JSON.parse(trimmed);
+  for (const line of trimmed.split(/\r?\n/)) {
+    if (line.startsWith("data:")) {
+      const payload = line.slice(5).trim();
+      if (payload && payload !== "[DONE]") return JSON.parse(payload);
+    }
+  }
+  throw new Error("MCP 服务响应格式无法解析");
 }
 
 function buildKeeperContext(messages: Array<{ sender: string; text: string }>): string {
@@ -736,18 +838,27 @@ app.post("/api/keeper/roll", async (req, res) => {
     });
     const t0 = Date.now();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     const response = await fetch(mcpUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: `Bearer ${bearerToken}` },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${bearerToken}`
+      },
       body: JSON.stringify(rpcPayload), signal: controller.signal
     });
     clearTimeout(timeoutId);
     const durationMs = Date.now() - t0;
     if (!response.ok) throw new Error(`MCP Server responded with status ${response.status}`);
-    const data: any = await response.json();
+    const data: any = parseSseOrJson(await response.text());
     if (data.error) throw new Error(`MCP Error: ${data.error.message || JSON.stringify(data.error)}`);
-    const textContent = data.result?.content?.[0]?.text;
+    const result = data.result;
+    if (result?.isError) {
+      const msg = result.content?.[0]?.text || "tool returned isError";
+      throw new Error(`roll_coc isError: ${msg}`);
+    }
+    const textContent = result?.content?.[0]?.text;
     if (!textContent) throw new Error("Invalid MCP response structure");
     push({
       direction: "response",

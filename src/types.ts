@@ -57,6 +57,8 @@ export interface RollRequest {
   reason: string;
   isKeeperRoll?: boolean;
   isSecret?: boolean;
+  bonus?: 0 | 1 | 2;
+  penalty?: 0 | 1 | 2;
 }
 
 export interface KeeperRollRequest {
@@ -65,6 +67,8 @@ export interface KeeperRollRequest {
   difficulty: "regular" | "hard" | "extreme";
   isSecret: boolean;
   reason: string;
+  bonus?: 0 | 1 | 2;
+  penalty?: 0 | 1 | 2;
 }
 
 export interface SanityCheckRequest {
