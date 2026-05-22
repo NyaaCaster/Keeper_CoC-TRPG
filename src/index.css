@@ -240,18 +240,3 @@ h4.text-\[\#c1a067\],
   --tw-shadow-color: rgba(16, 185, 129, 0.35) !important;
   box-shadow: 0 0 15px var(--tw-shadow-color) !important;
 }
-
-/* Add an active neon green dot indicator in top header to represent live state output */
-#application-container::before {
-  content: "";
-  position: absolute;
-  top: 10px;
-  right: 15px;
-  width: 6px;
-  height: 6px;
-  background-color: #10b981;
-  border-radius: 9999px;
-  box-shadow: 0 0 8px #10b981;
-  z-index: 100;
-  pointer-events: none;
-}

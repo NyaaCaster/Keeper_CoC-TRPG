@@ -337,7 +337,7 @@ const SYSTEM_INSTRUCTION = `你是一位专业且极具沉浸感的《克苏鲁�
 6. 【视觉线索生成】：当玩家发现重要的现场遗留纸条、魔法术式记号、沾血笔记、诡异现场照片、scp绝密档案、甚至是扭曲徽章等视觉观察道具时，必须设置 'clue' 字段，提供富含暗黑写实、克苏鲁色调的质感图片生成提示词（用英文描述），这将在剧情消息中渲染，并保留至线索集。
 7. 【初始模组与角色创建】：如果接到新游戏启动指令或这是最初的信息，你必须在 narrative 中向玩家介绍CoC规则、型月+基金会混搭的世界设定，并引导他们：
     - 选择模组背景时代：现代 或 1920年代，并对这两者的氛围在剧中做出简单气氛介绍。
-    - 选择提供的 3 个预设调查员（预设卡：包含名字、年龄、职业和关键技能分配、属性分配等。比如：时钟塔魔术研究员、SCP基金会第4层级外勤特工、大学考古教授），或者自定义一位调查员。并将 gameState 设定为 Location "游戏准备室"、DangerLevel: 1。
+    - 选择提供的 3 个预设调查员（预设卡：包含名字、年龄、职业和关键技能分配、属性分配等。比如：时钟塔魔术研究员、SCP基金会第4层级外勤特工、大学考古教授），或者自定义一位调查员。并将 gameState 设定为 Location "游戏准备室"。
 
 记住：你的所有输出必须遵循 Response Schema 定义的严格 JSON 结构，绝不能夹杂任何多余的 JSON 外文本（如 Markdown 的 \`\`\`json 标记以外的额外唠叨）。`;
 
@@ -416,10 +416,9 @@ const KEEPER_RESPONSE_SCHEMA = {
       type: Type.OBJECT,
       properties: {
         moduleName: { type: Type.STRING, description: "当前模组名称" },
-        currentLocation: { type: Type.STRING, description: "当前场景" },
-        dangerLevel: { type: Type.INTEGER, description: "1-10 危险度" }
+        currentLocation: { type: Type.STRING, description: "当前场景" }
       },
-      required: ["moduleName", "currentLocation", "dangerLevel"],
+      required: ["moduleName", "currentLocation"],
       description: "状态同步数据，必须返回最新状态。"
     }
   },
@@ -915,6 +914,38 @@ function localCocRoll(skill: any, bonus: any, penalty: any): string {
   最终：${diceResult < 10 ? "0" + diceResult : diceResult}
   判定：${outcome}（≤${skillVal}）`;
 }
+
+// 3.6. API - NyaaChat-MCP liveness probe
+//   GET /api/mcp/status → { ok: boolean, reason?: string }
+//   The frontend Settings panel uses this to render a green/grey status dot.
+app.get("/api/mcp/status", async (_req, res) => {
+  const mcpUrl = "http://h.hony-wen.com:3094/mcp";
+  const bearerToken = process.env.NYAACHAT_MCP_TOKEN || "";
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    };
+    if (bearerToken) headers.Authorization = `Bearer ${bearerToken}`;
+    const r = await fetch(mcpUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method: "tools/list", params: {} }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!r.ok) return res.json({ ok: false, reason: `HTTP ${r.status}` });
+    const data: any = parseSseOrJson(await r.text());
+    if (data?.error) return res.json({ ok: false, reason: data.error.message || "rpc error" });
+    return res.json({ ok: true });
+  } catch (e: any) {
+    clearTimeout(timeoutId);
+    const reason = e?.name === "AbortError" ? "timeout" : e?.message || String(e);
+    return res.json({ ok: false, reason });
+  }
+});
 
 // 4. API - Generate CoC Stats from description
 app.post("/api/keeper/generate-stats", async (req, res) => {

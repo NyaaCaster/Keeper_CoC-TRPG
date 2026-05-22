@@ -111,21 +111,19 @@ export interface KeeperResponse {
   gameState?: {
     moduleName: string;
     currentLocation: string;
-    dangerLevel: number; // 1-10
   } | null;
 }
 
 export interface WebGameSave {
   id: string; // The saveId, e.g. "save_16881881"
   moduleName: string; // From gameState
-  timestamp: string; // YYYYMMDDhhmmss formatted date 
+  timestamp: string; // YYYYMMDDhhmmss formatted date
   lastUpdated: number; // For sorting
   messages: ChatMessage[];
   character: CharacterSheet;
   clues: ClueItem[];
   enabledFeatures: { typemoon: boolean; scp: boolean };
   currentLocation: string;
-  dangerLevel: number;
 }
 
 export interface ChatMessage {
@@ -134,6 +132,9 @@ export interface ChatMessage {
   timestamp: string;
   text: string; // Narration text
   parsedResponse?: KeeperResponse;
+  model?: string;
+  moduleName?: string;
+  location?: string;
   rollResult?: {
     skillName: string;
     result: RollResult;

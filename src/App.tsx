@@ -22,7 +22,6 @@ import {
   Shield,
   MessageSquare,
   BookOpen,
-  Plug,
   RotateCcw,
   Database,
   Sparkles,
@@ -33,9 +32,7 @@ import {
   Compass,
   Eye,
   User,
-  Download,
-  LogOut,
-  Terminal,
+  Settings,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -50,6 +47,7 @@ import {
 import { loadApiSettings, isApiConfigured } from "./lib/apiSettings";
 import ApiSettingsPanel from "./components/ApiSettingsPanel";
 import { ConsoleLogPanel } from "./components/ConsoleLogPanel";
+import SettingsPanel from "./components/SettingsPanel";
 import { WebGameSave, ApiSettings } from "./types";
 import { getImagePublicPrefix } from "./lib/publicConfig";
 
@@ -97,6 +95,7 @@ export default function App() {
     "sheet" | "notebook" | null
   >(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showSettings, setShowSettings] = useState<boolean>(false);
   const [showApiSettings, setShowApiSettings] = useState<boolean>(false);
   const [showConsoleLog, setShowConsoleLog] = useState<boolean>(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -158,8 +157,6 @@ export default function App() {
   // Scenery parameters from keeper
   const [currentLocation, setCurrentLocation] =
     useState<string>("古木教堂的隐秘密道");
-  const [dangerLevel, setDangerLevel] = useState<number>(1);
-
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   // Scroll to bottom of message thread
@@ -180,7 +177,6 @@ export default function App() {
     setEnabledFeatures(features);
     setAppMode("game");
     setCurrentLocation("游戏准备舱 (调查室)");
-    setDangerLevel(1);
 
     const newSaveId = `save_${Date.now()}`;
     const newTimestamp = generateTimestamp();
@@ -208,7 +204,6 @@ export default function App() {
     clues: ClueItem[];
     char: CharacterSheet;
     loc: string;
-    dlvl: number;
     tS: string;
     sId: string;
     mName: string;
@@ -224,7 +219,6 @@ export default function App() {
       clues: st.clues,
       enabledFeatures,
       currentLocation: st.loc,
-      dangerLevel: st.dlvl,
     };
     saveGame(saveObj);
   };
@@ -320,7 +314,6 @@ export default function App() {
           hasKeeperRoll: !!keeperData.keeperRoll,
           hasSanityCheck: !!keeperData.sanityCheck,
           hasClue: !!keeperData.clue,
-          dangerLevel: keeperData.gameState?.dangerLevel,
         },
       });
 
@@ -368,7 +361,6 @@ export default function App() {
         setGameModuleName(keeperData.gameState.moduleName);
       }
       setCurrentLocation(keeperData.gameState.currentLocation || "未知禁区");
-      setDangerLevel(keeperData.gameState.dangerLevel || 1);
     }
 
     // Check for Character Attributes updates (HP / SAN / MP)
@@ -438,12 +430,19 @@ export default function App() {
     }
 
     // Create main message card with KeeperResponse
+    const snapshotModuleName =
+      keeperData.gameState?.moduleName || gameModuleName;
+    const snapshotLocation =
+      keeperData.gameState?.currentLocation || currentLocation;
     newMsgs.push({
       id: `keeper_${Date.now()}`,
       sender: "keeper",
       timestamp: new Date().toLocaleTimeString(),
       text: keeperData.narrative,
       parsedResponse: keeperData,
+      model: apiSettings.llm.model || apiSettings.llm.provider,
+      moduleName: snapshotModuleName,
+      location: snapshotLocation,
     });
 
     setMessages((prev) => [...prev, ...newMsgs]);
@@ -670,7 +669,6 @@ export default function App() {
         clues,
         enabledFeatures,
         currentLocation,
-        dangerLevel,
       });
     }
   }, [
@@ -683,7 +681,6 @@ export default function App() {
     clues,
     enabledFeatures,
     currentLocation,
-    dangerLevel,
   ]);
 
   useEffect(() => {
@@ -718,7 +715,6 @@ export default function App() {
         clues,
         enabledFeatures,
         currentLocation,
-        dangerLevel,
       };
       downloadSaveAsJson(saveObj);
     }
@@ -746,7 +742,6 @@ export default function App() {
     setClues(save.clues);
     setEnabledFeatures(save.enabledFeatures);
     setCurrentLocation(save.currentLocation || "未知禁区");
-    setDangerLevel(save.dangerLevel || 1);
     setAppMode("game");
   };
 
@@ -796,54 +791,34 @@ export default function App() {
 
           {/* Left panel: Narrative feed / Chat body */}
           <div className="flex-1 height-full flex flex-col bg-[#0e1011] border-r border-[#c1a067]/15 relative overflow-hidden">
-            {/* Header Status Bar (Danger Level, Location, Character Quick Status) */}
+            {/* Header Status Bar (Project link + Quick Actions) */}
             <div className="h-14 bg-[#131516] border-b border-gray-950 px-4 flex items-center justify-between shadow-md">
-              <div className="flex items-center gap-2">
-                <Compass className="w-4 h-4 text-[#c1a067]" />
-                <span
-                  id="header-location-title"
-                  className="text-xs font-bold text-[#c1a067] font-mono tracking-wider"
+              <a
+                href="https://github.com/NyaaCaster/Keeper_CoC-TRPG"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-[#10b981]/80 hover:text-[#10b981] transition-colors group"
+                title="查看 GitHub 仓库"
+              >
+                <svg
+                  className="w-5 h-5 shrink-0 group-hover:drop-shadow-[0_0_4px_rgba(16,185,129,0.6)] transition-[filter]"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
                 >
-                  [{gameModuleName}] {currentLocation.toUpperCase()}
+                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                  <circle cx="12" cy="12" r="3" fill="currentColor" />
+                </svg>
+                <span className="text-xs font-mono font-bold tracking-widest">
+                  CoC·TRPG
                 </span>
-                <span className="text-[10px] text-gray-500">•</span>
-                <div
-                  id="header-danger-meter"
-                  className="flex items-center gap-1 hidden sm:flex"
-                >
-                  <span className="text-[9px] text-gray-500 uppercase font-mono">
-                    DANGER
-                  </span>
-                  {Array.from({ length: 10 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className={`w-1 h-3 rounded-full ${i < dangerLevel ? "bg-red-500/80 animate-pulse shadow-[0_0_5px_rgba(239,68,68,0.5)]" : "bg-gray-800"}`}
-                    />
-                  ))}
-                </div>
-              </div>
+              </a>
 
               <div className="flex items-center gap-2">
-                <button
-                  id="download-save-btn"
-                  type="button"
-                  onClick={handleDownloadSave}
-                  className="p-1 px-2 border border-gray-800 bg-black/30 rounded text-gray-500 hover:text-[#c1a067] transition-colors"
-                  title="下载调查日志"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                </button>
-
-                <button
-                  id="exit-investigation-btn"
-                  type="button"
-                  onClick={handleExitInvestigation}
-                  className="p-1 px-2 border border-gray-800 bg-black/30 rounded text-gray-500 hover:text-red-500 transition-colors"
-                  title="退出调查"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
-
                 {/* Character Sidebar Toggle Shortcut */}
                 <button
                   id="toggle-sheet-btn"
@@ -891,35 +866,20 @@ export default function App() {
                   )}
                 </button>
 
-                {/* Console Log Toggle */}
+                {/* Unified Settings entry */}
                 <button
-                  id="toggle-console-log-btn"
+                  id="settings-btn"
                   type="button"
-                  onClick={() => setShowConsoleLog(true)}
+                  onClick={() => setShowSettings(true)}
                   className={`p-1 px-2 border rounded transition-all ${
-                    showConsoleLog
+                    showSettings
                       ? "bg-[#c1a067]/20 border-[#c1a067] text-[#c1a067]"
                       : "bg-black/40 border-gray-800 text-gray-400 hover:text-gray-200"
                   }`}
-                  title="控制台日志"
-                  aria-label="控制台日志"
+                  title="设置"
+                  aria-label="设置"
                 >
-                  <Terminal className="w-3.5 h-3.5" />
-                </button>
-
-                <button
-                  id="api-settings-btn"
-                  type="button"
-                  onClick={() => setShowApiSettings(!showApiSettings)}
-                  className={`p-1 px-2 border rounded transition-all ${
-                    showApiSettings
-                      ? "bg-[#c1a067]/20 border-[#c1a067] text-[#c1a067]"
-                      : "bg-black/40 border-gray-800 text-gray-400 hover:text-gray-200"
-                  }`}
-                  title="API 设置"
-                  aria-label="API 设置"
-                >
-                  <Plug className="w-3.5 h-3.5" />
+                  <Settings className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
@@ -959,14 +919,34 @@ export default function App() {
                       className="w-full max-w-3xl bg-[#141617]/50 border border-[#c1a067]/10 rounded-lg p-5 shadow-2xl space-y-4"
                     >
                       {/* Avatar descriptor */}
-                      <div className="flex items-center gap-2 border-b border-[#c1a067]/10 pb-2">
-                        <Dices className="w-4 h-4 text-[#c1a067]" />
-                        <span className="text-xs font-bold text-[#c1a067] uppercase tracking-widest font-mono">
-                          KEEPER 守密人
-                        </span>
-                        <span className="text-[10px] text-gray-650 font-mono">
-                          {m.timestamp}
-                        </span>
+                      <div className="border-b border-[#c1a067]/10 pb-2 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Dices className="w-4 h-4 text-[#c1a067]" />
+                          <span className="text-xs font-bold text-[#c1a067] uppercase tracking-widest font-mono">
+                            KEEPER 守密人
+                          </span>
+                          <span className="text-[10px] text-gray-650 font-mono">
+                            {m.timestamp}
+                          </span>
+                          {m.model && (
+                            <span
+                              className="text-[10px] font-mono text-[#10b981] border border-[#10b981]/40 bg-[#10b981]/10 px-1.5 py-0.5 rounded tracking-wider truncate max-w-[14rem]"
+                              title={`生成模型 · ${m.model}`}
+                            >
+                              {m.model}
+                            </span>
+                          )}
+                        </div>
+
+                        {(m.moduleName || m.location) && (
+                          <div className="flex items-center gap-1.5 text-[11px] font-mono tracking-wider text-[#c1a067]/80">
+                            <Compass className="w-3 h-3 text-[#c1a067]/70 shrink-0" />
+                            <span className="truncate">
+                              {m.moduleName ? `[${m.moduleName}] ` : ""}
+                              {(m.location || "").toUpperCase()}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Main prose */}
@@ -1272,6 +1252,17 @@ export default function App() {
         onClose={() => setShowConsoleLog(false)}
         logs={logs}
         onClearLogs={() => setLogs([])}
+      />
+
+      <SettingsPanel
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        onOpenApiSettings={() => setShowApiSettings(true)}
+        onDownloadSave={handleDownloadSave}
+        onExitInvestigation={handleExitInvestigation}
+        onOpenConsoleLog={() => setShowConsoleLog(true)}
+        canDownload={appMode === "game" && !!activeSaveId && !!character}
+        canExit={appMode === "game"}
       />
     </div>
   );
