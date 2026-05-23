@@ -3,11 +3,32 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { CharacterSheet, CharacterAttributes, CharacterSkills, ApiSettings, LogEntry, MythicEncounters } from "../types";
 import { TEMPLATE_PRESETS } from "../data/presets";
 import { getOccupations, findOccupation } from "../data/cocOccupations";
 import { dodgeOf, motherTongueValue } from "../lib/cocRules";
+import {
+  SkillSheetDraft,
+  SlotConstraint,
+  SlotState,
+  SkillSelection,
+  computePointPools,
+  spentInSlots,
+  expandOccupationSlots,
+  customOccupationConstraints,
+  emptyDraft,
+  draftToSkills,
+  distributeSkillsToDraft,
+  findDuplicateSelections,
+  getSlotCandidates,
+  selectionKey,
+  baseOfSelection,
+  nameOfSelection,
+  finalValueOfSlot,
+  describeConstraint,
+  INTEREST_SLOT_COUNT,
+} from "../lib/cocSkillSlots";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Sparkles,
@@ -133,9 +154,8 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
   const [customAttrs, setCustomAttrs] = useState<CharacterAttributes>({
     str: 50, con: 50, siz: 50, dex: 50, app: 50, int: 50, pow: 50, edu: 50, luck: 50
   });
-  const [customSkills, setCustomSkills] = useState<CharacterSkills>({
-    "侦查": 50, "聆听": 40, "图书馆使用": 40, "神秘学": 30, "心理学": 30, "手枪": 20, "潜行": 25, "说服": 25, "格斗(斗殴)": 25
-  });
+  // 阶段 7：技能区改为槽位草稿 (8 职业槽 + 4 兴趣槽)
+  const [skillDraft, setSkillDraft] = useState<SkillSheetDraft>(() => emptyDraft(customOccupationConstraints()));
 
   const [isRolling, setIsRolling] = useState(false);
   const [isGeneratingStats, setIsGeneratingStats] = useState(false);
@@ -146,6 +166,44 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
 
   const [importError, setImportError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+
+  // 阶段 7：派生当前职业模板的槽位约束（自拟职业 = 8 个 free 槽）。
+  const occupationConstraints: SlotConstraint[] = useMemo(() => {
+    if (customOccupationId) {
+      const tpl = findOccupation(selectedEra, customOccupationId);
+      if (tpl) return expandOccupationSlots(tpl);
+    }
+    return customOccupationConstraints();
+  }, [customOccupationId, selectedEra]);
+
+  // 当职业 / 年代变化导致约束变更时，重置职业槽（保留兴趣槽）。
+  // 比较"约束签名"避免在初始 mount + 同一职业之间反复重置。
+  const constraintSignature = useMemo(
+    () => JSON.stringify(occupationConstraints),
+    [occupationConstraints],
+  );
+  useEffect(() => {
+    setSkillDraft((prev) => ({
+      occupation: occupationConstraints.map((c) => {
+        // 固定槽（fixedSkill / fixedBranch）自动锁定 picked，玩家不可改
+        if (c.kind === "fixedSkill") {
+          return { constraint: c, picked: { kind: "skill", skillId: c.skillId }, pointsAllocated: 0 };
+        }
+        if (c.kind === "fixedBranch") {
+          return { constraint: c, picked: { kind: "branch", parentId: c.parentId, branchId: c.branchId }, pointsAllocated: 0 };
+        }
+        return { constraint: c, pointsAllocated: 0 };
+      }),
+      interest: prev.interest,
+    }));
+    // 仅在 constraintSignature 变化时执行
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [constraintSignature]);
+
+  const pointPools = useMemo(() => computePointPools(customAttrs), [customAttrs]);
+  const occSpent = useMemo(() => spentInSlots(skillDraft.occupation), [skillDraft.occupation]);
+  const intSpent = useMemo(() => spentInSlots(skillDraft.interest), [skillDraft.interest]);
+  const duplicateKeys = useMemo(() => findDuplicateSelections(skillDraft), [skillDraft]);
 
   // Get active presets list: either the dynamically generated templates or classical fallback presets
   const activePresets = React.useMemo(() => {
@@ -545,7 +603,16 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
 
         const filteredSkills = { ...importedPC.skills };
         delete (filteredSkills as any)["克苏鲁神话"];
-        setCustomSkills(filteredSkills);
+        // 阶段 7：把名值字典平摊到职业 / 兴趣槽。
+        // 注意：occupationConstraints 来自 useMemo，可能仍是上一次 era / 职业 id 对应的版本，
+        // 此处用导入卡的 occupation 模板重新解析（若匹配不到模板则走 8 free 槽）。
+        {
+          const occRaw = importedPC.occupation || "";
+          const eraImported = (importedPC.background as "1920s" | "modern") || selectedEra;
+          const matchedTpl = getOccupations(eraImported).find((o) => o.id === occRaw || o.nameZh === occRaw);
+          const constraints = matchedTpl ? expandOccupationSlots(matchedTpl) : customOccupationConstraints();
+          setSkillDraft(distributeSkillsToDraft(filteredSkills, constraints, eraImported));
+        }
 
         setCustomAvatar(cleanAvatar);
 
@@ -593,12 +660,29 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
     }, 60);
   };
 
-  const updateSkill = (skill: string, value: number) => {
-    const limValue = Math.max(1, Math.min(99, value));
-    setCustomSkills(prev => ({
-      ...prev,
-      [skill]: limValue
-    }));
+  // 阶段 7 · 槽位编辑 helpers
+  const updateOccupationSlot = (idx: number, patch: Partial<SlotState>) => {
+    setSkillDraft((prev) => {
+      const next = prev.occupation.slice();
+      next[idx] = { ...next[idx], ...patch };
+      return { ...prev, occupation: next };
+    });
+  };
+  const updateInterestSlot = (idx: number, patch: Partial<SlotState>) => {
+    setSkillDraft((prev) => {
+      const next = prev.interest.slice();
+      next[idx] = { ...next[idx], ...patch };
+      return { ...prev, interest: next };
+    });
+  };
+  const setSlotPicked = (kind: "occupation" | "interest", idx: number, picked: SkillSelection | undefined) => {
+    const updater = kind === "occupation" ? updateOccupationSlot : updateInterestSlot;
+    updater(idx, { picked, pointsAllocated: 0 });
+  };
+  const setSlotPoints = (kind: "occupation" | "interest", idx: number, points: number) => {
+    const clamped = Math.max(0, Math.min(99, Math.floor(points || 0)));
+    const updater = kind === "occupation" ? updateOccupationSlot : updateInterestSlot;
+    updater(idx, { pointsAllocated: clamped });
   };
 
   // Generate Module Outline via the user-configured LLM provider
@@ -787,7 +871,17 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
               mappedSkills[s.name] = s.value;
             }
           });
-          setCustomSkills(mappedSkills);
+          // 阶段 7：LLM 回填要按"当前选择的职业"来落槽位，未选职业 = 8 free 槽。
+          // 此处直接用最新的 customOccupationId（charData.occupation 已经在前面写入 state）。
+          const tplOccId =
+            (typeof charData.occupation === "string" &&
+              getOccupations(selectedEra).find(
+                (o) => o.id === charData.occupation || o.nameZh === charData.occupation,
+              )?.id) ||
+            customOccupationId;
+          const matchedTpl = tplOccId ? findOccupation(selectedEra, tplOccId) : undefined;
+          const constraints = matchedTpl ? expandOccupationSlots(matchedTpl) : customOccupationConstraints();
+          setSkillDraft(distributeSkillsToDraft(mappedSkills, constraints, selectedEra));
         }
       } else {
         onAddLog?.({
@@ -853,7 +947,7 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
       age: customAge,
       background: selectedEra,
       attributes: { ...customAttrs },
-      skills: { ...customSkills, "克苏鲁神话": 0 },
+      skills: draftToSkills(skillDraft),
       hp: calculatedHp,
       maxHp: calculatedHp,
       mp: calculatedMp,
@@ -1682,42 +1776,68 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                   </details>
                 </div>
 
-                {/* Skill panel custom adjustments */}
+                {/* 阶段 7：槽位化技能区 */}
                 <div className="bg-[#181a1c] border border-gray-800 p-5 rounded-lg space-y-4 font-sans">
-                  <h4 className="text-sm font-semibold text-[#c1a067] border-b border-gray-800 pb-2">自定义技能掌握 (增删技能百分比点数)</h4>
-                  <div className="grid grid-cols-2 max-sm:grid-cols-1 gap-4 text-xs">
-                    {Object.entries(customSkills).map(([skill, val]) => {
-                      const numVal = val as number;
-                      return (
-                        <div key={skill} className="flex items-center justify-between bg-black/30 p-2.5 border border-gray-850 rounded">
-                          <span className="font-semibold text-gray-400">{skill}</span>
-                          <div className="flex items-center gap-2">
-                            <button 
-                              type="button"
-                              onClick={() => updateSkill(skill, numVal - 5)} 
-                              className="w-6 h-6 bg-black border border-gray-800 text-gray-300 rounded hover:bg-[#c1a067]/10 flex items-center justify-center font-bold"
-                            >
-                              -
-                            </button>
-                            <input 
-                              type="text" 
-                              value={numVal} 
-                              onChange={(e) => updateSkill(skill, parseInt(e.target.value) || 0)} 
-                              className="w-10 text-center font-mono font-bold text-gray-200 bg-transparent"
-                            />
-                            <span className="text-gray-500 font-mono">%</span>
-                            <button 
-                              type="button"
-                              onClick={() => updateSkill(skill, numVal + 5)} 
-                              className="w-6 h-6 bg-black border border-gray-800 text-gray-300 rounded hover:bg-[#c1a067]/10 flex items-center justify-center font-bold"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
+                  <div className="flex items-center justify-between border-b border-gray-800 pb-2">
+                    <h4 className="text-sm font-semibold text-[#c1a067]">技能分配（职业槽 8 + 兴趣槽 4）</h4>
+                    <div className="flex items-center gap-3 text-[11px] font-mono">
+                      <span className={occSpent > pointPools.occupation ? "text-red-400" : "text-gray-400"}>
+                        职业池: <span className="text-gray-200">{occSpent}</span> / {pointPools.occupation}
+                      </span>
+                      <span className="text-gray-600">·</span>
+                      <span className={intSpent > pointPools.interest ? "text-red-400" : "text-gray-400"}>
+                        兴趣池: <span className="text-gray-200">{intSpent}</span> / {pointPools.interest}
+                      </span>
+                    </div>
                   </div>
+                  <p className="text-[10px] text-gray-500 leading-relaxed">
+                    职业池 = EDU × 4 = {customAttrs.edu} × 4 = {pointPools.occupation}；兴趣池 = INT × 2 = {customAttrs.int} × 2 = {pointPools.interest}。
+                    每槽分配的点数为<strong className="text-[#c1a067]/90">额外加成</strong>，槽位最终值 = 技能基础值 + 该槽位分配点数。
+                  </p>
+
+                  {/* 职业槽 */}
+                  <div className="space-y-2">
+                    <div className="text-[11px] uppercase tracking-wider text-gray-500">
+                      职业槽 · {customOccupationId ? findOccupation(selectedEra, customOccupationId)?.nameZh : "自拟（全自由）"}
+                    </div>
+                    {skillDraft.occupation.map((slot, idx) => (
+                      <SlotRow
+                        key={`occ-${idx}-${constraintSignature.length}`}
+                        slot={slot}
+                        era={selectedEra}
+                        slotLabel={`职业 #${idx + 1}`}
+                        constraintHint={describeConstraint(slot.constraint)}
+                        candidates={getSlotCandidates(slot.constraint, selectedEra)}
+                        isDuplicate={!!slot.picked && duplicateKeys.has(selectionKey(slot.picked))}
+                        onPick={(sel) => setSlotPicked("occupation", idx, sel)}
+                        onPoints={(p) => setSlotPoints("occupation", idx, p)}
+                      />
+                    ))}
+                  </div>
+
+                  {/* 兴趣槽 */}
+                  <div className="space-y-2 pt-2 border-t border-gray-850">
+                    <div className="text-[11px] uppercase tracking-wider text-gray-500">兴趣槽 · 全自由（INT × 2 池）</div>
+                    {skillDraft.interest.map((slot, idx) => (
+                      <SlotRow
+                        key={`int-${idx}`}
+                        slot={slot}
+                        era={selectedEra}
+                        slotLabel={`兴趣 #${idx + 1}`}
+                        constraintHint="自由"
+                        candidates={getSlotCandidates(slot.constraint, selectedEra)}
+                        isDuplicate={!!slot.picked && duplicateKeys.has(selectionKey(slot.picked))}
+                        onPick={(sel) => setSlotPicked("interest", idx, sel)}
+                        onPoints={(p) => setSlotPoints("interest", idx, p)}
+                      />
+                    ))}
+                  </div>
+
+                  {duplicateKeys.size > 0 && (
+                    <div className="text-[11px] text-amber-400/80 leading-relaxed">
+                      ⚠ 有重复选择的技能（红框标记）。提交时会取最大值合并，不会重复加点；建议手动调整以充分利用槽位。
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-between pt-4">
@@ -1981,6 +2101,83 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
         )}
 
       </AnimatePresence>
+    </div>
+  );
+}
+
+// =============================================================================
+// 阶段 7：槽位行子组件（select + 数字输入；外部样式与本组件其他控件保持一致）
+// =============================================================================
+
+interface SlotRowProps {
+  slot: SlotState;
+  era: "1920s" | "modern";
+  slotLabel: string;
+  constraintHint: string;
+  candidates: ReturnType<typeof getSlotCandidates>;
+  isDuplicate: boolean;
+  onPick: (sel: SkillSelection | undefined) => void;
+  onPoints: (points: number) => void;
+}
+
+function SlotRow({ slot, slotLabel, constraintHint, candidates, isDuplicate, onPick, onPoints }: SlotRowProps) {
+  const pickedKey = slot.picked ? selectionKey(slot.picked) : "";
+  const base = slot.picked ? baseOfSelection(slot.picked) : 0;
+  const final = slot.picked ? finalValueOfSlot(slot) : 0;
+  const isFixed = candidates.length === 1 && (slot.constraint.kind === "fixedSkill" || slot.constraint.kind === "fixedBranch");
+
+  return (
+    <div
+      className={`grid grid-cols-12 gap-2 items-center bg-black/30 p-2 rounded border ${
+        isDuplicate ? "border-red-700/60" : "border-gray-850"
+      } text-xs`}
+    >
+      <div className="col-span-2 max-sm:col-span-12 text-[10px] text-gray-500 font-mono uppercase tracking-wider">
+        <div>{slotLabel}</div>
+        <div className="text-[#c1a067]/60 normal-case mt-0.5 truncate" title={constraintHint}>{constraintHint}</div>
+      </div>
+      <div className="col-span-6 max-sm:col-span-8">
+        <select
+          value={pickedKey}
+          onChange={(e) => {
+            const k = e.target.value;
+            if (!k) return onPick(undefined);
+            const found = candidates.find((c) => selectionKey(c.selection) === k);
+            onPick(found?.selection);
+          }}
+          disabled={isFixed}
+          className="w-full bg-[#161719] border border-gray-800 rounded px-2 py-1.5 text-gray-200 focus:outline-none focus:border-[#c1a067] text-xs font-sans disabled:opacity-80 disabled:cursor-not-allowed"
+        >
+          {!isFixed && <option value="">— 未选 —</option>}
+          {candidates.map((c) => (
+            <option key={selectionKey(c.selection)} value={selectionKey(c.selection)}>
+              {c.nameZh}（{c.base}）
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="col-span-2 max-sm:col-span-2 flex items-center gap-1">
+        <span className="text-gray-500 font-mono text-[10px]">+</span>
+        <input
+          type="number"
+          min={0}
+          max={99}
+          value={slot.pointsAllocated}
+          onChange={(e) => onPoints(parseInt(e.target.value) || 0)}
+          disabled={!slot.picked}
+          className="w-full bg-black/40 border border-gray-800 rounded px-1.5 py-1 text-center font-mono text-gray-200 focus:outline-none focus:border-[#c1a067] text-xs disabled:opacity-40"
+        />
+      </div>
+      <div className="col-span-2 max-sm:col-span-2 text-right font-mono text-[11px]">
+        {slot.picked ? (
+          <>
+            <span className="text-gray-500">{base}+{slot.pointsAllocated}=</span>
+            <span className="text-[#c1a067] font-semibold">{final}</span>
+          </>
+        ) : (
+          <span className="text-gray-700">—</span>
+        )}
+      </div>
     </div>
   );
 }
