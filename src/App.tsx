@@ -16,6 +16,7 @@ import {
 } from "./types";
 import CharacterCreator from "./components/CharacterCreator";
 import RollDiceModal from "./components/RollDiceModal";
+import EffectRollModal from "./components/EffectRollModal";
 import CharacterSheetPanel from "./components/CharacterSheetPanel";
 import CluesNotebook from "./components/CluesNotebook";
 import {
@@ -47,9 +48,30 @@ import {
 import { loadApiSettings, isApiConfigured } from "./lib/apiSettings";
 import ApiSettingsPanel from "./components/ApiSettingsPanel";
 import { ConsoleLogPanel } from "./components/ConsoleLogPanel";
+import { rollDiceFormula, DiceFormulaResult } from "./lib/diceFormula";
 import SettingsPanel from "./components/SettingsPanel";
 import { WebGameSave, ApiSettings } from "./types";
 import { getImagePublicPrefix } from "./lib/publicConfig";
+
+/** 二阶段效果骰队列项 — 详见 .docs/two-stage-roll.md。 */
+type EffectKind = "damage" | "heal" | "mpCost" | "sanLoss";
+interface PendingEffectItem {
+  kind: EffectKind;
+  formula: string;
+  evaluated: DiceFormulaResult;
+}
+const EFFECT_LABEL: Record<EffectKind, string> = {
+  damage: "伤害值",
+  heal: "治疗量",
+  mpCost: "魔力消耗",
+  sanLoss: "理智损失",
+};
+const EFFECT_VERB: Record<EffectKind, string> = {
+  damage: "扣减 HP",
+  heal: "恢复 HP",
+  mpCost: "扣减 MP",
+  sanLoss: "扣减 SAN",
+};
 
 export default function App() {
   const initialMode =
@@ -153,6 +175,20 @@ export default function App() {
   const [hpDiff, setHpDiff] = useState<number>(0);
   const [sanDiff, setSanDiff] = useState<number>(0);
   const [mpDiff, setMpDiff] = useState<number>(0);
+  const [luckDiff, setLuckDiff] = useState<number>(0);
+
+  /**
+   * 二阶段效果骰挂起态。技能判定 modal 关闭后，若需要再掷一次"效果公式"
+   * （SAN 失败的 1d6、武器伤害等），由调用方 setPendingEffectRoll 推一份描述。
+   * EffectRollModal 演完动画后调用 onResolve(diceResult)，业务侧再扣属性、回报 KP。
+   */
+  const [pendingEffectRoll, setPendingEffectRoll] = useState<{
+    label: string;
+    formula: string;
+    result: DiceFormulaResult;
+    theme?: "sanity" | "default";
+    onResolve: (result: DiceFormulaResult) => void;
+  } | null>(null);
 
   // Scenery parameters from keeper
   const [currentLocation, setCurrentLocation] =
@@ -232,6 +268,14 @@ export default function App() {
     // CoC 7e 严格合规：SAN 检定挂起期间，玩家不可推进剧情。系统回报例外（SAN 检定结束后会以 system 身份发回）。
     if (activeSanity && !isSystemReport) return;
 
+    // [sys_test] 测试命令拦截 — 不入消息流、不入日志、不调 LLM
+    if (!isSystemReport && textToSend.trim().startsWith("[sys_test]")) {
+      const cmd = textToSend.trim().slice("[sys_test]".length).trim();
+      runSysTestCommand(cmd);
+      setInputText("");
+      return;
+    }
+
     const playerMsg: ChatMessage = {
       id: `player_${Date.now()}`,
       sender: isSystemReport ? "system" : "player",
@@ -245,6 +289,188 @@ export default function App() {
 
     // Trigger Keeper Call
     triggerKeeperNarration(updated, character!, enabledFeatures);
+  };
+
+  /**
+   * [sys_test] 测试命令派发器 — 直接构造 RollRequest / SanityCheckRequest 触发对应 modal。
+   * 测试 modal 完成后由 onComplete sentinel (request.testForce) 检出，跳过所有游戏副作用。
+   */
+  const runSysTestCommand = (cmd: string) => {
+    if (activeRoll || activeSanity) return; // 已有 modal 在场不重复触发
+    switch (cmd) {
+      case "roll":
+        setActiveRoll({
+          skillName: "侦查",
+          targetValue: 60,
+          difficulty: "regular",
+          reason: "[测试] 普通投骰",
+          testForce: {},
+        });
+        return;
+      case "roll_win":
+        setActiveRoll({
+          skillName: "侦查",
+          targetValue: 60,
+          difficulty: "regular",
+          reason: "[测试] 必定普通成功",
+          testForce: { total: 50, successType: "regular" },
+        });
+        return;
+      case "roll_crit":
+        setActiveRoll({
+          skillName: "侦查",
+          targetValue: 60,
+          difficulty: "regular",
+          reason: "[测试] 必定大成功",
+          testForce: { total: 1, successType: "critical" },
+        });
+        return;
+      case "roll_fumble":
+        setActiveRoll({
+          skillName: "侦查",
+          targetValue: 60,
+          difficulty: "regular",
+          reason: "[测试] 必定大失败",
+          testForce: { total: 100, successType: "fumble" },
+        });
+        return;
+      case "roll_fail":
+        // 闪避是战斗骰，路径合规但被战斗白名单挡住——命运博弈按钮应不出现。
+        setActiveRoll({
+          skillName: "闪避",
+          targetValue: 60,
+          difficulty: "regular",
+          reason: "[测试] 必定失败 · 战斗骰路径（命运博弈应不出现）",
+          testForce: { total: 75, successType: "failure" },
+        });
+        return;
+      case "roll_fail_gamble":
+        setActiveRoll({
+          skillName: "侦查",
+          targetValue: 60,
+          difficulty: "regular",
+          reason: "[测试] 必定失败 · 命运博弈可用",
+          testForce: { total: 75, successType: "failure" },
+        });
+        return;
+      case "san":
+        setActiveSanity({
+          lossOnSuccess: "0",
+          lossOnFailure: "1d6",
+          reason: "[测试] SAN 检定 (真实随机 · 命运博弈应不出现)",
+        });
+        setActiveRoll({
+          skillName: "理智意志 (SAN)",
+          targetValue: character?.san ?? 60,
+          difficulty: "regular",
+          reason: "[测试] SAN 检定 · 真实随机",
+          testForce: {},
+        });
+        return;
+      case "san_success":
+        setActiveSanity({
+          lossOnSuccess: "0",
+          lossOnFailure: "1d6",
+          reason: "[测试] SAN 检定 · 强制成功（应展示 0 损失，不弹效果骰）",
+        });
+        setActiveRoll({
+          skillName: "理智意志 (SAN)",
+          targetValue: character?.san ?? 60,
+          difficulty: "regular",
+          reason: "[测试] SAN 强制成功",
+          testForce: { total: 1, successType: "regular" },
+        });
+        return;
+      case "san_fail":
+        setActiveSanity({
+          lossOnSuccess: "0",
+          lossOnFailure: "1d6",
+          reason: "[测试] SAN 检定 · 强制失败（应弹 1d6 效果骰浮窗）",
+        });
+        setActiveRoll({
+          skillName: "理智意志 (SAN)",
+          targetValue: character?.san ?? 60,
+          difficulty: "regular",
+          reason: "[测试] SAN 强制失败",
+          testForce: { total: 99, successType: "failure" },
+        });
+        return;
+      case "damage":
+        runEffectRollTest("damage", "1d6");
+        return;
+      case "heal":
+        runEffectRollTest("heal", "1d3");
+        return;
+      case "mp_cost":
+        runEffectRollTest("mpCost", "1d4");
+        return;
+      case "damage_static":
+        // 静态公式不弹浮窗,但仍演示 hpDiff 浮字,验证 isStatic 分流
+        runEffectRollTest("damage", "5");
+        return;
+      case "damage_full":
+        // 全链路:闪避失败判定 modal → 自动接 1d6+1 伤害效果骰浮窗
+        setActiveRoll({
+          skillName: "闪避",
+          targetValue: 60,
+          difficulty: "regular",
+          reason: "[测试] 全链路 · 闪避失败 → 1d6+1 伤害效果骰",
+          testForce: {
+            total: 75,
+            successType: "failure",
+            chainEffect: { kind: "damage", formula: "1d6+1" },
+          },
+        });
+        return;
+      default:
+        // 未知命令静默忽略，保持"测试通道不入消息"的承诺
+        return;
+    }
+  };
+
+  /**
+   * [sys_test] 效果骰测试通道 — 直接构造 pendingEffectRoll 或同步走 diff 浮字。
+   * 测试模式不真扣属性,只演动画+浮字,方便反复验证二阶段流水线。
+   */
+  const runEffectRollTest = (kind: EffectKind, formula: string) => {
+    if (pendingEffectRoll) return;
+    const evaluated = rollDiceFormula(formula);
+    const showDiff = (value: number) => {
+      if (value <= 0) return;
+      switch (kind) {
+        case "damage":
+          setHpDiff(-value);
+          setTimeout(() => setHpDiff(0), 3000);
+          return;
+        case "heal":
+          setHpDiff(value);
+          setTimeout(() => setHpDiff(0), 3000);
+          return;
+        case "mpCost":
+          setMpDiff(-value);
+          setTimeout(() => setMpDiff(0), 3000);
+          return;
+        case "sanLoss":
+          setSanDiff(-value);
+          setTimeout(() => setSanDiff(0), 3000);
+          return;
+      }
+    };
+
+    if (evaluated.isStatic) {
+      showDiff(evaluated.total);
+      return;
+    }
+    setPendingEffectRoll({
+      label: `${EFFECT_LABEL[kind]} [测试]`,
+      formula,
+      result: evaluated,
+      theme: kind === "sanLoss" ? "sanity" : "default",
+      onResolve: (resolved) => {
+        setPendingEffectRoll(null);
+        showDiff(resolved.total);
+      },
+    });
   };
 
   const triggerKeeperNarration = async (
@@ -366,13 +592,19 @@ export default function App() {
     // Check for Character Attributes updates (HP / SAN / MP)
     if (keeperData.characterUpdates) {
       const updates = keeperData.characterUpdates;
+
+      // 公式字段优先:同类属性的整数字段被对应公式覆盖时跳过(详见 .docs/two-stage-roll.md 第四节)
+      const skipHpChange = !!(updates.hpDamageFormula || updates.hpHealFormula);
+      const skipMpChange = !!updates.mpCostFormula;
+      const skipSanChange = !!updates.sanLossFormula;
+
       let finalHp = character!.hp;
       let finalMp = character!.mp;
       let finalSan = character!.san;
       let finalMythos = character!.mythos;
       let finalMaxSanLimit = character!.maxSanLimit;
 
-      if (updates.hpChange) {
+      if (updates.hpChange && !skipHpChange) {
         finalHp = Math.max(
           0,
           Math.min(character!.maxHp, character!.hp + updates.hpChange),
@@ -381,7 +613,7 @@ export default function App() {
         setTimeout(() => setHpDiff(0), 3000);
       }
 
-      if (updates.mpChange) {
+      if (updates.mpChange && !skipMpChange) {
         finalMp = Math.max(
           0,
           Math.min(character!.maxMp, character!.mp + updates.mpChange),
@@ -390,7 +622,7 @@ export default function App() {
         setTimeout(() => setMpDiff(0), 3000);
       }
 
-      if (updates.sanChange) {
+      if (updates.sanChange && !skipSanChange) {
         finalSan = Math.max(
           0,
           Math.min(character!.maxSanLimit, character!.san + updates.sanChange),
@@ -415,6 +647,40 @@ export default function App() {
       };
 
       setCharacter(nextCharState);
+
+      // 二阶段效果骰:收集公式字段,串行演投,演完汇总回报 KP。
+      const formulaQueue: PendingEffectItem[] = [];
+      if (updates.hpDamageFormula) {
+        formulaQueue.push({
+          kind: "damage",
+          formula: updates.hpDamageFormula,
+          evaluated: rollDiceFormula(updates.hpDamageFormula),
+        });
+      }
+      if (updates.hpHealFormula) {
+        formulaQueue.push({
+          kind: "heal",
+          formula: updates.hpHealFormula,
+          evaluated: rollDiceFormula(updates.hpHealFormula),
+        });
+      }
+      if (updates.mpCostFormula) {
+        formulaQueue.push({
+          kind: "mpCost",
+          formula: updates.mpCostFormula,
+          evaluated: rollDiceFormula(updates.mpCostFormula),
+        });
+      }
+      if (updates.sanLossFormula) {
+        formulaQueue.push({
+          kind: "sanLoss",
+          formula: updates.sanLossFormula,
+          evaluated: rollDiceFormula(updates.sanLossFormula),
+        });
+      }
+      if (formulaQueue.length > 0) {
+        runEffectRollQueue(formulaQueue, []);
+      }
     }
 
     const newMsgs: ChatMessage[] = [];
@@ -602,25 +868,50 @@ export default function App() {
     setActiveSanity(null);
     setActiveRoll(null);
 
-    let lossFormula =
+    const lossFormula =
       result.successType !== "failure" && result.successType !== "fumble"
         ? sanityReq.lossOnSuccess
         : sanityReq.lossOnFailure;
 
-    // Roll loss points
-    const rolledLoss = parseAndRollDice(lossFormula);
+    const isSuccess = result.successType !== "failure" && result.successType !== "fumble";
+    const evaluated = rollDiceFormula(lossFormula);
 
+    // 静态公式（"0" / 纯数字）→ 没有悬念，沿用旧同步路径，不弹效果骰
+    if (evaluated.isStatic) {
+      applySanityLoss(result, lossFormula, evaluated, isSuccess);
+      return;
+    }
+
+    // 动态公式（含 NdM）→ 弹 EffectRollModal，演完动画再统一应用
+    setPendingEffectRoll({
+      label: "理智损失",
+      formula: lossFormula,
+      result: evaluated,
+      theme: "sanity",
+      onResolve: (resolved) => {
+        setPendingEffectRoll(null);
+        applySanityLoss(result, lossFormula, resolved, isSuccess);
+      },
+    });
+  };
+
+  /** 把 SAN 损失实际写入角色并回报 KP — 抽出来给"静态/动态公式"两条路径共用。 */
+  const applySanityLoss = (
+    checkResult: RollResult,
+    lossFormula: string,
+    evaluated: DiceFormulaResult,
+    isSuccess: boolean,
+  ) => {
+    const rolledLoss = evaluated.total;
     const nextSan = Math.max(0, character!.san - rolledLoss);
     setSanDiff(-rolledLoss);
     setTimeout(() => setSanDiff(0), 3000);
 
-    const updatedChar = {
+    setCharacter({
       ...character!,
       san: nextSan,
-    };
-    setCharacter(updatedChar);
+    });
 
-    // Build the report text
     let stateStr = "理智受到剧烈压迫，脑叶产生诡异轰鸣";
     if (rolledLoss === 0) {
       stateStr = "意志在绝望中维持了坚韧，未受到创伤";
@@ -629,28 +920,106 @@ export default function App() {
         "【临时性精神失常 (Temporary Insanity)】：你目睹了超出三维常识之物，大脑防御崩溃！陷入了短暂的狂乱幻想、歇斯底里！";
     }
 
-    const reportMsg = `[系统的理智SAN值判定 - 意志: 投出 ${result.total} / 目标 ${result.targetValue} (${result.successType === "failure" || result.successType === "fumble" ? "失败" : "成功"}) -> 扣减 SAN 值 ${rolledLoss} 点 (公式 ${lossFormula})。当前理智值：${nextSan}/${character!.maxSanLimit}。\n异常行为状态：${stateStr}]`;
+    const breakdown = evaluated.dice
+      ? ` (公式 ${lossFormula}，骰点 [${evaluated.rolls.join(", ")}]${evaluated.constant ? ` ${evaluated.constant >= 0 ? "+" : ""}${evaluated.constant}` : ""}${evaluated.divisor > 1 ? ` ÷${evaluated.divisor}` : ""})`
+      : ` (公式 ${lossFormula})`;
+
+    const reportMsg = `[系统的理智SAN值判定 - 意志: 投出 ${checkResult.total} / 目标 ${checkResult.targetValue} (${isSuccess ? "成功" : "失败"}) -> 扣减 SAN 值 ${rolledLoss} 点${breakdown}。当前理智值：${nextSan}/${character!.maxSanLimit}。\n异常行为状态：${stateStr}]`;
 
     handleSendPlayerMessage(reportMsg, true);
   };
 
-  const parseAndRollDice = (formula: string): number => {
-    const f = formula.trim().toLowerCase();
-    if (!f || f === "0") return 0;
-    if (/^\d+$/.test(f)) return parseInt(f);
-
-    const match = f.match(/^(\d+)d(\d+)$/);
-    if (match) {
-      const num = parseInt(match[1]);
-      const sides = parseInt(match[2]);
-      let sum = 0;
-      for (let i = 0; i < num; i++) {
-        sum += Math.floor(Math.random() * sides) + 1;
+  /**
+   * 二阶段效果骰队列处理:把 KP 在同一回合下发的多个效果公式串行演投,
+   * 静态公式同步结算,动态公式逐个弹 EffectRollModal,全部演完后汇总回报 KP。
+   * 详见 .docs/two-stage-roll.md 第 6 / 7 节。
+   */
+  const runEffectRollQueue = (
+    queue: PendingEffectItem[],
+    resolved: PendingEffectItem[],
+  ) => {
+    if (queue.length === 0) {
+      if (resolved.length > 0) {
+        const reportMsg = formatEffectQueueReport(resolved);
+        handleSendPlayerMessage(reportMsg, true);
       }
-      return sum;
+      return;
     }
-    return 1;
+
+    const [head, ...rest] = queue;
+
+    if (head.evaluated.isStatic) {
+      applyEffectItem(head);
+      runEffectRollQueue(rest, [...resolved, head]);
+      return;
+    }
+
+    setPendingEffectRoll({
+      label: EFFECT_LABEL[head.kind],
+      formula: head.formula,
+      result: head.evaluated,
+      theme: head.kind === "sanLoss" ? "sanity" : "default",
+      onResolve: (resolvedDice) => {
+        setPendingEffectRoll(null);
+        const final = { ...head, evaluated: resolvedDice };
+        applyEffectItem(final);
+        runEffectRollQueue(rest, [...resolved, final]);
+      },
+    });
   };
+
+  /** 把单个效果骰结果写进角色并触发 diff 浮字。0 值跳过扣属性,但仍计入汇总报告。 */
+  const applyEffectItem = (item: PendingEffectItem) => {
+    const value = item.evaluated.total;
+    if (value <= 0) return;
+
+    setCharacter((prev) => {
+      if (!prev) return prev;
+      switch (item.kind) {
+        case "damage":
+          return { ...prev, hp: Math.max(0, prev.hp - value) };
+        case "heal":
+          return { ...prev, hp: Math.min(prev.maxHp, prev.hp + value) };
+        case "mpCost":
+          return { ...prev, mp: Math.max(0, prev.mp - value) };
+        case "sanLoss":
+          return { ...prev, san: Math.max(0, prev.san - value) };
+      }
+    });
+
+    switch (item.kind) {
+      case "damage":
+        setHpDiff(-value);
+        setTimeout(() => setHpDiff(0), 3000);
+        return;
+      case "heal":
+        setHpDiff(value);
+        setTimeout(() => setHpDiff(0), 3000);
+        return;
+      case "mpCost":
+        setMpDiff(-value);
+        setTimeout(() => setMpDiff(0), 3000);
+        return;
+      case "sanLoss":
+        setSanDiff(-value);
+        setTimeout(() => setSanDiff(0), 3000);
+        return;
+    }
+  };
+
+  /** 汇总效果骰队列结果为一条 system 消息,回报给 KP 让它在下回合 narrative 中接住。 */
+  const formatEffectQueueReport = (items: PendingEffectItem[]): string => {
+    const lines = items.map((it) => {
+      const v = it.evaluated.total;
+      const breakdown = it.evaluated.dice
+        ? `公式 ${it.formula},骰点 [${it.evaluated.rolls.join(", ")}]${it.evaluated.constant ? ` ${it.evaluated.constant >= 0 ? "+" : ""}${it.evaluated.constant}` : ""}${it.evaluated.divisor > 1 ? ` ÷${it.evaluated.divisor}` : ""} = ${v}`
+        : `公式 ${it.formula} = ${v}`;
+      const verb = EFFECT_VERB[it.kind];
+      return `- ${EFFECT_LABEL[it.kind]}:${breakdown},${verb} ${v} 点`;
+    });
+    return `[效果骰汇报]\n${lines.join("\n")}`;
+  };
+
 
   useEffect(() => {
     if (
@@ -1148,6 +1517,7 @@ export default function App() {
                     hpDiff={hpDiff}
                     sanDiff={sanDiff}
                     mpDiff={mpDiff}
+                    luckDiff={luckDiff}
                     onSkillIntentDraft={(skill, val) => {
                       if (isKeeperLoading) return;
                       // SAN 挂起期间，禁止"声明意图"的预填动作；查看属性/技能仍可。
@@ -1178,12 +1548,70 @@ export default function App() {
                 isSanityCheck={activeRoll.skillName.includes("SAN")}
                 isKeeperRoll={activeRoll.isKeeperRoll}
                 isSecret={activeRoll.isSecret}
+                currentLuck={character?.attributes.luck ?? 0}
+                onLuckSpend={(cost) => {
+                  // [sys_test] 测试模式：燃运只演示动画 + 浮字，不真的扣 LUC，方便反复测试
+                  if (activeRoll.testForce) {
+                    setLuckDiff(-cost);
+                    setTimeout(() => setLuckDiff(0), 3000);
+                    return;
+                  }
+                  if (!character) return;
+                  const nextLuck = Math.max(0, character.attributes.luck - cost);
+                  setCharacter({
+                    ...character,
+                    attributes: { ...character.attributes, luck: nextLuck },
+                  });
+                  setLuckDiff(-cost);
+                  setTimeout(() => setLuckDiff(0), 3000);
+                }}
                 sanityMeta={
                   activeSanity
                     ? { lossOnSuccess: activeSanity.lossOnSuccess, lossOnFailure: activeSanity.lossOnFailure }
                     : undefined
                 }
                 onComplete={(result, outcomeMessage) => {
+                  // [sys_test] 测试模式：跳过所有游戏副作用（不扣属性、不回报 KP、不入消息流），
+                  // 但 SAN 检定仍然演示二阶段效果骰浮窗，让用户看清动画。
+                  if (activeRoll.testForce) {
+                    const isSanTest = activeRoll.skillName.includes("SAN") && activeSanity;
+                    if (isSanTest) {
+                      const isSuccess = result.successType !== "failure" && result.successType !== "fumble";
+                      const lossFormula = isSuccess ? activeSanity!.lossOnSuccess : activeSanity!.lossOnFailure;
+                      const evaluated = rollDiceFormula(lossFormula);
+                      setActiveRoll(null);
+                      setActiveSanity(null);
+                      if (evaluated.isStatic) {
+                        // 没有悬念，扣浮字看一下就行
+                        if (evaluated.total > 0) {
+                          setSanDiff(-evaluated.total);
+                          setTimeout(() => setSanDiff(0), 3000);
+                        }
+                        return;
+                      }
+                      setPendingEffectRoll({
+                        label: "理智损失 [测试]",
+                        formula: lossFormula,
+                        result: evaluated,
+                        theme: "sanity",
+                        onResolve: (resolved) => {
+                          setPendingEffectRoll(null);
+                          // 测试模式：演示浮字但不真扣 SAN
+                          setSanDiff(-resolved.total);
+                          setTimeout(() => setSanDiff(0), 3000);
+                        },
+                      });
+                      return;
+                    }
+                    // 全链路 sentinel:判定 modal 关掉后自动接效果骰浮窗(测试模式不真扣属性)
+                    const chain = activeRoll.testForce.chainEffect;
+                    setActiveRoll(null);
+                    setActiveSanity(null);
+                    if (chain) {
+                      runEffectRollTest(chain.kind, chain.formula);
+                    }
+                    return;
+                  }
                   if (activeRoll.isKeeperRoll) {
                     handleKeeperRollComplete(result, outcomeMessage);
                   } else if (activeRoll.skillName.includes("SAN")) {
@@ -1193,10 +1621,23 @@ export default function App() {
                   }
                 }}
                 onCancel={
-                  activeRoll.skillName.includes("SAN")
-                    ? undefined
-                    : () => setActiveRoll(null)
+                  activeRoll.testForce
+                    ? () => { setActiveRoll(null); setActiveSanity(null); }
+                    : activeRoll.skillName.includes("SAN")
+                      ? undefined
+                      : () => setActiveRoll(null)
                 }
+              />
+            )}
+
+            {pendingEffectRoll && (
+              <EffectRollModal
+                key="modal_effect_roll"
+                label={pendingEffectRoll.label}
+                formulaDisplay={pendingEffectRoll.formula}
+                result={pendingEffectRoll.result}
+                theme={pendingEffectRoll.theme}
+                onResolve={pendingEffectRoll.onResolve}
               />
             )}
 

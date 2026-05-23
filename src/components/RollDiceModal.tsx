@@ -6,7 +6,8 @@
 import React, { useState, useEffect } from "react";
 import { RollRequest, RollResult } from "../types";
 import { motion, AnimatePresence } from "motion/react";
-import { Dices, Sparkles, TrendingUp, AlertTriangle, CheckCircle, Skull, X } from "lucide-react";
+import { Dices, Sparkles, TrendingUp, AlertTriangle, CheckCircle, Skull, X, Repeat, Flame } from "lucide-react";
+import { canPushRoll, evaluateBurnLuck } from "../lib/rollPolicy";
 
 interface RollDiceModalProps {
   key?: string;
@@ -15,6 +16,10 @@ interface RollDiceModalProps {
   isKeeperRoll?: boolean;
   isSecret?: boolean;
   sanityMeta?: { lossOnSuccess: string; lossOnFailure: string };
+  /** 当前调查员的剩余 LUC，用于燃运按钮的成本计算与禁用判断 */
+  currentLuck?: number;
+  /** 燃运成功后通知父组件永久扣减幸运点 */
+  onLuckSpend?: (cost: number) => void;
   onComplete: (result: RollResult, outcomeMessage: string) => void;
   onCancel?: () => void;
 }
@@ -25,6 +30,8 @@ export default function RollDiceModal({
   isKeeperRoll = false,
   isSecret = false,
   sanityMeta,
+  currentLuck = 0,
+  onLuckSpend,
   onComplete,
   onCancel,
 }: RollDiceModalProps) {
@@ -33,6 +40,12 @@ export default function RollDiceModal({
   const [unitsValue, setUnitsValue] = useState<number>(0);
   const [calculatedTotal, setCalculatedTotal] = useState<number>(0);
   const [successType, setSuccessType] = useState<RollResult["successType"]>("failure");
+
+  // 命运博弈状态机：none → 用户在 settled 阶段二选一 → pushed | burned
+  // 任何一项动作执行后，命运博弈按钮区不再渲染（互斥锁）。
+  const [actionTaken, setActionTaken] = useState<"none" | "pushed" | "burned">("none");
+  const [pushForcedFumble, setPushForcedFumble] = useState<boolean>(false);
+  const [luckSpent, setLuckSpent] = useState<number>(0);
 
   // CoC 7e: bonus/penalty are Keeper-assigned via the request, never player-chosen.
   const bonusCount = request.bonus && !request.penalty ? request.bonus : 0;
@@ -63,7 +76,7 @@ export default function RollDiceModal({
     }
   }, [isKeeperRoll, phase, tensValue, unitsValue, calculatedTotal, successType]);
 
-  const runPureClientFallback = () => {
+  const runPureClientFallback = (isPush: boolean = false) => {
     // CoC 7e: bonus/penalty roll N+1 tens dice and pick most/least favorable.
     const extraTens = bonusOrPenalty === "bonus" ? bonusCount : bonusOrPenalty === "penalty" ? penaltyCount : 0;
     const totalTens = 1 + extraTens;
@@ -71,7 +84,7 @@ export default function RollDiceModal({
     for (let i = 0; i < totalTens; i++) {
       tensList.push(Math.floor(Math.random() * 10) * 10);
     }
-    const finalUnits = Math.floor(Math.random() * 10);
+    let finalUnits = Math.floor(Math.random() * 10);
 
     let finalTensSelected = tensList[0];
     if (bonusOrPenalty === "bonus") {
@@ -85,6 +98,21 @@ export default function RollDiceModal({
       diceResult = 100;
     } else {
       diceResult = finalTensSelected + finalUnits;
+    }
+
+    // [sys_test] 测试模式：用 testForce.total 强制覆盖骰点（仅首投生效，孤注一掷二投走真实随机）
+    const forced = !isPush ? request.testForce : undefined;
+    if (forced?.total !== undefined) {
+      diceResult = Math.max(1, Math.min(100, Math.floor(forced.total)));
+      if (diceResult === 100) {
+        finalTensSelected = 0;
+        finalUnits = 0;
+      } else {
+        finalUnits = diceResult % 10;
+        finalTensSelected = diceResult - finalUnits;
+      }
+      tensList.length = 0;
+      tensList.push(finalTensSelected);
     }
 
     const target = request.targetValue;
@@ -106,18 +134,46 @@ export default function RollDiceModal({
       outcome = "failure";
     }
 
+    // [sys_test] testForce.successType 直接强制等级（覆盖骰点推导）
+    if (forced?.successType) {
+      outcome = forced.successType;
+    }
+
+    // 项目家规：孤注一掷二投失败必定升格为大失败
+    let forcedFumble = false;
+    if (isPush && outcome === "failure") {
+      outcome = "fumble";
+      forcedFumble = true;
+    }
+
     setTensValue(finalTensSelected);
     setUnitsValue(finalUnits);
     setCalculatedTotal(diceResult);
     setTensRolls(tensList);
     setSuccessType(outcome);
+    if (isPush) setPushForcedFumble(forcedFumble);
     setPhase("settled");
   };
 
-  const handleRoll = async () => {
+  const handleRoll = async (isPush: boolean = false) => {
     if (phase === "rolling") return;
 
     setPhase("rolling");
+
+    // [sys_test] 测试模式：跳过 /api/keeper/roll，直接走前端兜底（含 forced 覆盖）
+    if (request.testForce && !isPush) {
+      let tick = 0;
+      const shuffleInterval = setInterval(() => {
+        setSimTens(Math.floor(Math.random() * 10) * 10);
+        setSimUnits(Math.floor(Math.random() * 10));
+        tick++;
+      }, 80);
+      setTimeout(() => {
+        clearInterval(shuffleInterval);
+        runPureClientFallback(false);
+      }, 800);
+      return;
+    }
 
     // Start shuffling animation
     let tick = 0;
@@ -193,6 +249,13 @@ export default function RollDiceModal({
         parsedOutcome = "failure";
       }
 
+      // 项目家规：孤注一掷二投失败必定升格为大失败
+      let forcedFumble = false;
+      if (isPush && parsedOutcome === "failure") {
+        parsedOutcome = "fumble";
+        forcedFumble = true;
+      }
+
       // Ensure shuffling visual feel
       const minTicks = 12;
       const delayMs = Math.max(0, (minTicks - tick) * 80);
@@ -204,14 +267,49 @@ export default function RollDiceModal({
         setCalculatedTotal(parsedTotal);
         setTensRolls(parsedTensList);
         setSuccessType(parsedOutcome);
+        if (isPush) setPushForcedFumble(forcedFumble);
         setPhase("settled");
       }, delayMs);
 
     } catch (e) {
       console.error("Fetch roll API failed, running pure frontend random generation backup:", e);
       clearInterval(shuffleInterval);
-      runPureClientFallback();
+      runPureClientFallback(isPush);
     }
+  };
+
+  // 孤注一掷：锁定 actionTaken，重新进入 rolling 阶段，二投失败将强制 fumble
+  const handlePush = () => {
+    if (actionTaken !== "none") return;
+    setActionTaken("pushed");
+    setPushForcedFumble(false);
+    handleRoll(true);
+  };
+
+  // 燃运：不重投，直接把 total 压到 targetValue，successType 改为普通成功，扣 LUC
+  const handleBurn = () => {
+    if (actionTaken !== "none") return;
+    const cost = calculatedTotal - request.targetValue;
+    if (cost < 1) return;
+    if (currentLuck < cost) return;
+    setActionTaken("burned");
+    setLuckSpent(cost);
+    setCalculatedTotal(request.targetValue);
+
+    // 把 tensValue / unitsValue 重新拆分以保持 UI 一致（例如 50 → tens=50, units=0）
+    const newTotal = request.targetValue;
+    if (newTotal === 100) {
+      setTensValue(0);
+      setUnitsValue(0);
+    } else {
+      const newUnits = newTotal % 10;
+      const newTens = newTotal - newUnits;
+      setTensValue(newTens);
+      setUnitsValue(newUnits);
+    }
+
+    setSuccessType("regular");
+    onLuckSpend?.(cost);
   };
 
   const handleApplyResult = () => {
@@ -234,6 +332,23 @@ export default function RollDiceModal({
     const tensListStr = tensRolls.map(t => t === 0 ? 0 : t / 10);
     const selectedTensDigit = tensValue === 0 ? 0 : tensValue / 10;
 
+    // 命运博弈段落 — 由前端硬规则生成，告诉 KP 玩家做了什么
+    let fateGambleNote = "";
+    if (actionTaken === "pushed") {
+      if (pushForcedFumble) {
+        fateGambleNote = `\n\n[孤注一掷 (Push)] 玩家选择孤注一掷重投，二投失败已升格为大失败 (Fumble)。请按 CoC 7e 大失败口径加重叙事后果（如：受伤、暴露、装备损坏、引来注意等）。`;
+      } else if (successType === "fumble") {
+        fateGambleNote = `\n\n[孤注一掷 (Push)] 玩家选择孤注一掷重投，二投真实大失败 (Fumble)。请按 CoC 7e 大失败口径处理叙事。`;
+      } else if (successType === "failure") {
+        fateGambleNote = `\n\n[孤注一掷 (Push)] 玩家选择孤注一掷重投，结果仍为失败。`;
+      } else {
+        fateGambleNote = `\n\n[孤注一掷 (Push)] 玩家选择孤注一掷重投，本次为 ${successZh}。可在叙事中体现"破釜沉舟"的紧迫感。`;
+      }
+    } else if (actionTaken === "burned") {
+      const remaining = Math.max(0, currentLuck - luckSpent);
+      fateGambleNote = `\n\n[燃运 (Burn Luck)] 玩家燃烧 ${luckSpent} 点幸运将判定改写为普通成功 (剩余 LUC ${remaining})。请在叙事中将其呈现为"危急关头一闪念的好运"，而非技能本身真的成功。`;
+    }
+
     let message = "";
     if (isKeeperRoll) {
       if (isSecret) {
@@ -252,7 +367,7 @@ export default function RollDiceModal({
 > 十位骰 [${tensListStr.join(", ")}] 取 ${selectedTensDigit}，个位骰 ${unitsValue}。
 > **✨ ${successZh}**
 
-阈值：≤${Math.floor(target / 5)} 极难 / ≤${Math.floor(target / 2)} 困难 / ≤${target} 普通。`;
+阈值：≤${Math.floor(target / 5)} 极难 / ≤${Math.floor(target / 2)} 困难 / ≤${target} 普通。${fateGambleNote}`;
     }
 
     const resultObj: RollResult = {
@@ -262,7 +377,10 @@ export default function RollDiceModal({
       targetValue: target,
       isBonus: bonusOrPenalty === "bonus",
       isPenalty: bonusOrPenalty === "penalty",
-      successType
+      successType,
+      pushed: actionTaken === "pushed" || undefined,
+      pushForcedFumble: pushForcedFumble || undefined,
+      luckSpent: luckSpent > 0 ? luckSpent : undefined,
     };
 
     onComplete(resultObj, message);
@@ -393,7 +511,7 @@ export default function RollDiceModal({
                   <button
                     id="modal-roll-trigger-btn"
                     type="button"
-                    onClick={handleRoll}
+                    onClick={() => handleRoll()}
                     className={
                       isSanityCheck
                         ? "w-24 h-24 bg-gradient-to-tr from-purple-700 to-fuchsia-500 text-white font-semibold rounded-full shadow-[0_0_30px_rgba(168,85,247,0.5)] hover:scale-105 active:scale-95 transition-all flex flex-col items-center justify-center border-2 border-purple-200/30"
@@ -570,6 +688,96 @@ export default function RollDiceModal({
                   <div className="px-6 py-2 rounded-full bg-red-950/50 border-2 border-red-650 text-red-400 flex items-center gap-2 text-md font-extrabold shadow-[0_0_25px_rgba(239,68,68,0.3)] animate-bounce font-mono">
                     <Skull className="w-5 h-5 text-red-500 animate-pulse" /> 大 失 败 (Fumble) !!!
                   </div>
+                )}
+              </div>
+            )}
+
+            {/* 命运博弈按钮区 — 仅在玩家明骰、判定失败、路径合规、且本次未用过命运博弈时出现 */}
+            {(() => {
+              if (isSecret || isSanityCheck || isKeeperRoll) return null;
+              if (actionTaken !== "none") return null;
+              const settledResult: RollResult = {
+                dice10: tensValue,
+                dice1: unitsValue,
+                total: calculatedTotal,
+                targetValue: request.targetValue,
+                isBonus: bonusOrPenalty === "bonus",
+                isPenalty: bonusOrPenalty === "penalty",
+                successType,
+              };
+              if (!canPushRoll(request, settledResult)) return null;
+              const burn = evaluateBurnLuck(request, settledResult, currentLuck);
+              return (
+                <div id="m-fate-gamble-row" className="mb-3 grid grid-cols-2 gap-2">
+                  <button
+                    id="m-fate-push-btn"
+                    type="button"
+                    onClick={handlePush}
+                    title="重新投掷此判定。失败将升格为大失败 (Fumble)。"
+                    className="bg-black/40 border border-red-700/40 hover:border-red-500 hover:bg-red-950/20 transition rounded p-2.5 text-left flex flex-col gap-1 group active:scale-[0.98]"
+                  >
+                    <div className="flex items-center gap-1.5 text-red-300 font-semibold text-xs font-sans">
+                      <Repeat className="w-3.5 h-3.5 group-hover:rotate-180 transition-transform duration-300" />
+                      <span>孤注一掷</span>
+                      <span className="text-[9px] text-red-500/60 font-mono uppercase tracking-widest ml-auto">PUSH</span>
+                    </div>
+                    <div className="text-[10px] text-gray-500 font-sans leading-snug">
+                      重新投掷一次，失败将升格为大失败
+                    </div>
+                  </button>
+
+                  <button
+                    id="m-fate-burn-btn"
+                    type="button"
+                    disabled={!burn.affordable}
+                    onClick={burn.affordable ? handleBurn : undefined}
+                    title={
+                      burn.affordable
+                        ? `燃烧 ${burn.cost} 点幸运将本次判定改写为普通成功`
+                        : `需要 ${burn.cost} 点幸运，当前剩余 ${currentLuck} 点不足`
+                    }
+                    className={
+                      burn.affordable
+                        ? "bg-black/40 border border-coc-gold/40 hover:border-coc-gold hover:bg-[#10b981]/10 transition rounded p-2.5 text-left flex flex-col gap-1 group active:scale-[0.98]"
+                        : "bg-black/40 border border-gray-800 rounded p-2.5 text-left flex flex-col gap-1 opacity-40 cursor-not-allowed"
+                    }
+                  >
+                    <div className={`flex items-center gap-1.5 font-semibold text-xs font-sans ${burn.affordable ? "text-coc-gold" : "text-gray-500"}`}>
+                      <Flame className="w-3.5 h-3.5" />
+                      <span>燃运 -{burn.cost} LUC{burn.affordable ? "" : "（不足）"}</span>
+                      <span className={`text-[9px] font-mono uppercase tracking-widest ml-auto ${burn.affordable ? "text-coc-gold/60" : "text-gray-600"}`}>
+                        BURN
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-gray-500 font-sans leading-snug">
+                      压至普通成功 · 剩余 LUC: {currentLuck}
+                    </div>
+                  </button>
+                </div>
+              );
+            })()}
+
+            {/* 命运博弈已使用 — 提示玩家本次的 fate gamble 选择 */}
+            {actionTaken !== "none" && (
+              <div id="m-fate-gamble-used" className="mb-3 px-3 py-2 rounded border border-[#c1a067]/20 bg-black/30 text-[11px] text-gray-400 font-sans flex items-center gap-2">
+                {actionTaken === "pushed" ? (
+                  <>
+                    <Repeat className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                    <span className="text-red-300/80">
+                      孤注一掷已使用 ·
+                    </span>
+                    <span>
+                      二投结果已落定{pushForcedFumble ? "（失败已升格为大失败）" : ""}。
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Flame className="w-3.5 h-3.5 text-coc-gold shrink-0" />
+                    <span className="text-coc-gold/80">燃运已使用 ·</span>
+                    <span>
+                      消耗 {luckSpent} 点幸运，判定改写为普通成功（剩余 LUC {Math.max(0, currentLuck - luckSpent)}）。
+                    </span>
+                  </>
                 )}
               </div>
             )}

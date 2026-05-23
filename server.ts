@@ -328,6 +328,12 @@ const SYSTEM_INSTRUCTION = `你是一位专业且极具沉浸感的《克苏鲁�
        - 情境完全不合理（如玩家正在水下却声明用【计算机使用】打开舱门）→ **明确拒绝**，narrative 中以 KP 口吻反驳，不发 rollRequest。允许进入"PL 口胡 vs KP 反驳"的口水战——这是 TRPG 的乐趣，不要怕和玩家辩。
        - 玩家若提出有创意的解释（"我有防水手机+预先配对的舱门蓝牙"）并能自洽，可以让步并发起检定，必要时挂上 penalty 反映难度。
        - 情境可推进但无需骰（小事/必然成功失败）→ 直接叙事推进，narrative 里说明结果，不发 rollRequest。
+
+   4.4 【伤害与效果骰：带随机性走公式，确定性走整数】：当扣血/扣 MP/扣 SAN 的数值**带随机性**（武器伤害、咒语反噬、急救回血量、大失败附带 SAN 冲击等），用 'characterUpdates.hpDamageFormula' / 'hpHealFormula' / 'mpCostFormula' / 'sanLossFormula' 下发公式字符串（形如 'NdM'、'NdM+常数'、'NdM/除数'，例如 '1d6'、'2d4+1'、'1d10/2'），前端会弹"效果骰"浮窗演投。**确定性**的数值变动（剧情设定的固定 5 点 HP 恢复、定额魔力消耗等）继续用整数字段 'hpChange' / 'mpChange' / 'sanChange'，前端不弹浮窗直接结算。
+       - 同一类属性**不要同时**下发整数字段与公式字段（例如不要既给 hpChange 又给 hpDamageFormula）。同时存在时前端按"公式优先"处理。
+       - 公式只支持单组骰：'NdM'、'NdM+常数'、'NdM-常数'、'NdM/除数'。**不支持** '1d6+1d4' 这类多组相加，也不支持 keep highest/drop lowest。解析失败前端按 0 处理并把原字符串展示给玩家。
+       - sanityCheck 路径已自带 lossOnSuccess / lossOnFailure，**不要**在 sanityCheck 触发的同一回合再下发 sanLossFormula——后者只在大失败/特殊叙事强制扣 SAN 时使用。
+       - 伤害骰由玩家自己掷（项目家规：演出感优先），KP 不要在 narrative 里直接报数（如"扣 4 点 HP"），让 narrative 描写感官冲击，把数值交给公式字段。
 5. 【理智检定(Sanity Check)】：当玩家直面不可名状神秘、骇人血腥、死徒行径或SCP模因时，必须且仅能通过设置 'sanityCheck' 对象来发起理智检定，并规定成功/失败分别减去多少理智（如成功减0，失败减1d6）。
    5.1 【SAN 检定不可回避】：CoC 7e 规则下，理智冲击是因果上"已发生"的事——只要你触发了 sanityCheck，前端会**强制弹出 modal、禁用聊天输入、禁用角色面板的意图声明**，玩家**不能取消、不能跳过**，必须立即掷骰。所以：
        - 不要轻易触发 SAN 检定。只在调查员**确实已经看到/听到/接触到**冲击源时触发。"可能会瞥到"这种暧昧场景请在 narrative 里描写，不要直接发 sanityCheck。
@@ -382,12 +388,16 @@ const KEEPER_RESPONSE_SCHEMA = {
     characterUpdates: {
       type: Type.OBJECT,
       properties: {
-        hpChange: { type: Type.INTEGER, description: "生命变动" },
-        mpChange: { type: Type.INTEGER, description: "魔法值变动" },
-        sanChange: { type: Type.INTEGER, description: "直接引起的San值强制变动" },
-        sanitySkillGain: { type: Type.INTEGER, description: "永久提升的克苏鲁神话技能点。" }
+        hpChange: { type: Type.INTEGER, description: "确定性的生命变动(整数)。仅用于剧情设定的固定值,如固定 5 点恢复。带随机性时改用 hpDamageFormula / hpHealFormula。" },
+        mpChange: { type: Type.INTEGER, description: "确定性的魔法值变动(整数)。带随机性时改用 mpCostFormula。" },
+        sanChange: { type: Type.INTEGER, description: "确定性的 San 值强制变动(整数)。带随机性时改用 sanLossFormula(且独立于 sanityCheck 路径)。" },
+        sanitySkillGain: { type: Type.INTEGER, description: "永久提升的克苏鲁神话技能点。" },
+        hpDamageFormula: { type: Type.STRING, description: "玩家受伤的伤害公式,形如 'NdM[+常数][/除数]'(例:'1d6'、'2d4+1'、'1d10/2')。前端会弹效果骰浮窗演投。与 hpChange 互斥;同时下发时前端按公式优先。" },
+        hpHealFormula: { type: Type.STRING, description: "急救/医学等治疗公式,正向回血,例 '1d3'。前端弹效果骰浮窗。与 hpChange(正向部分)互斥。" },
+        mpCostFormula: { type: Type.STRING, description: "魔法反噬等魔力消耗公式,例 '1d4'。前端弹效果骰浮窗。与 mpChange(消耗部分)互斥。" },
+        sanLossFormula: { type: Type.STRING, description: "大失败叙事附带的强制 SAN 损失公式,例 '1d6'。独立于 sanityCheck 路径(后者已自带 lossOnSuccess/lossOnFailure)。前端弹效果骰浮窗。与 sanChange(负向部分)互斥。" }
       },
-      description: "由当前非掷骰的突发剧情直接引发的属性指标绝对变化。无则设为 null。"
+      description: "由当前非掷骰的突发剧情直接引发的属性指标变化。同类属性的整数字段与 *Formula 字段二选一下发(详见各字段说明)。无则设为 null。"
     },
     npcDialogue: {
       type: Type.OBJECT,

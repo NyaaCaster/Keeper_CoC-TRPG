@@ -6,31 +6,36 @@
 import React, { useState, useEffect, useRef } from "react";
 import { CharacterSheet } from "../types";
 import { motion, AnimatePresence } from "motion/react";
-import { Shield, Sparkles, AlertTriangle, Eye, Heart, BookOpen, ChevronRight, Zap, RefreshCw } from "lucide-react";
+import { Shield, Sparkles, AlertTriangle, Eye, Heart, BookOpen, ChevronRight, Zap, RefreshCw, FileText } from "lucide-react";
+import CharacterDossierPanel from "./CharacterDossierPanel";
 
 interface CharacterSheetPanelProps {
   sheet: CharacterSheet;
   hpDiff: number; // passed down to trigger animation
   sanDiff: number; // passed down to trigger animation
   mpDiff: number; // passed down to trigger animation
+  luckDiff: number; // passed down to trigger animation
   onSkillIntentDraft?: (skillName: string, value: number) => void;
   onClose?: () => void;
 }
 
-export default function CharacterSheetPanel({ 
-  sheet, 
+export default function CharacterSheetPanel({
+  sheet,
   hpDiff,
   sanDiff,
   mpDiff,
+  luckDiff,
   onSkillIntentDraft,
   onClose
 }: CharacterSheetPanelProps) {
   const [activeTab, setActiveTab] = useState<"attributes" | "skills">("attributes");
-  
+  const [showDossier, setShowDossier] = useState(false);
+
   // Animation Triggers
   const [hpAnim, setHpAnim] = useState<number | null>(null);
   const [sanAnim, setSanAnim] = useState<number | null>(null);
   const [mpAnim, setMpAnim] = useState<number | null>(null);
+  const [luckAnim, setLuckAnim] = useState<number | null>(null);
 
   const prevHp = useRef(sheet.hp);
   const prevSan = useRef(sheet.san);
@@ -59,6 +64,14 @@ export default function CharacterSheetPanel({
       return () => clearTimeout(timer);
     }
   }, [mpDiff]);
+
+  useEffect(() => {
+    if (luckDiff !== 0) {
+      setLuckAnim(luckDiff);
+      const timer = setTimeout(() => setLuckAnim(null), 2500);
+      return () => clearTimeout(timer);
+    }
+  }, [luckDiff]);
 
   // Handle local comparisons if props are not directly pushed as diffs
   useEffect(() => {
@@ -128,6 +141,16 @@ export default function CharacterSheetPanel({
             <h2 id="cs-name-display" className="text-md font-bold text-gray-100 flex items-center gap-1.5 font-sans">
               <span>{sheet.name}</span>
               <span className="text-xs text-gray-405 font-normal">({sheet.gender || "男"} • {sheet.age || 30}岁)</span>
+              <button
+                id="cs-open-dossier-btn"
+                type="button"
+                onClick={() => setShowDossier(true)}
+                title="调查员档案"
+                aria-label="打开调查员档案"
+                className="ml-1 p-1 rounded text-[#c1a067]/70 hover:text-[#c1a067] hover:bg-[#c1a067]/10 border border-transparent hover:border-[#c1a067]/30 transition"
+              >
+                <FileText className="w-3.5 h-3.5" />
+              </button>
             </h2>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <p id="cs-job-display" className="text-xs text-gray-400 font-sans">{sheet.occupation}</p>
@@ -200,28 +223,28 @@ export default function CharacterSheetPanel({
           </AnimatePresence>
         </div>
 
-        {/* SAN Meter with animated mental distortion */}
-        <div className="bg-[#17111b]/70 border border-[#10b981]/20 p-2 rounded text-center relative overflow-hidden flex flex-col justify-between">
+        {/* SAN Meter with animated mental distortion — 紫色主题与 SAN 检定 modal 一致 */}
+        <div className="bg-[#160e1c]/70 border border-purple-500/25 p-2 rounded text-center relative overflow-hidden flex flex-col justify-between">
           <div>
-            <Eye className="w-3.5 h-3.5 text-emerald-400 mx-auto mb-1 animate-pulse" />
+            <Eye className="w-3.5 h-3.5 text-purple-300 mx-auto mb-1 animate-pulse" />
             <div className="text-[9px] text-gray-400 font-sans">SAN (理智)</div>
-            <div className="text-sm font-mono font-bold text-emerald-300 mt-1">{sheet.san} <span className="text-[10px] text-emerald-600 font-normal">/{sheet.maxSanLimit}</span></div>
+            <div className="text-sm font-mono font-bold text-purple-200 mt-1">{sheet.san} <span className="text-[10px] text-purple-400/70 font-normal">/{sheet.maxSanLimit}</span></div>
           </div>
           <div className="h-1 bg-black/50 rounded-full overflow-hidden mt-2 w-full">
-            <div 
-              className="h-full bg-[#10b981] rounded-full shadow-[0_0_6px_#10b981] transition-all duration-500"
+            <div
+              className="h-full bg-purple-500 rounded-full shadow-[0_0_6px_#a855f7] transition-all duration-500"
               style={{ width: `${Math.min(100, Math.max(0, (sheet.san / (sheet.maxSanLimit || 1)) * 100))}%` }}
             />
           </div>
           {/* floating diff */}
           <AnimatePresence>
             {sanAnim !== null && (
-              <motion.div 
+              <motion.div
                 id="floating-san-indicator"
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: -25 }}
                 exit={{ opacity: 0 }}
-                className={`absolute top-1/2 left-0 right-0 text-center font-mono font-black text-xs ${sanAnim < 0 ? "text-emerald-500" : "text-green-400"}`}
+                className={`absolute top-1/2 left-0 right-0 text-center font-mono font-black text-xs ${sanAnim < 0 ? "text-purple-400" : "text-purple-200"}`}
               >
                 {sanAnim < 0 ? sanAnim : `+${sanAnim}`} SAN
               </motion.div>
@@ -230,18 +253,31 @@ export default function CharacterSheetPanel({
         </div>
 
         {/* Luck meter */}
-        <div className="bg-[#1a1911]/70 border border-yellow-950/30 p-2 rounded text-center flex flex-col justify-between">
+        <div className="bg-[#1a1911]/70 border border-yellow-950/30 p-2 rounded text-center flex flex-col justify-between relative overflow-hidden">
           <div>
             <Sparkles className="w-3.5 h-3.5 text-yellow-500 mx-auto mb-1" />
             <div className="text-[9px] text-gray-400 font-sans">LUC (幸运)</div>
             <div className="text-sm font-mono font-bold text-yellow-500 mt-1">{sheet.attributes.luck} <span className="text-[10px] text-yellow-750 font-normal">/99</span></div>
           </div>
           <div className="h-1 bg-black/50 rounded-full overflow-hidden mt-2 w-full">
-            <div 
+            <div
               className="h-full bg-yellow-500 rounded-full shadow-[0_0_6px_#eab308] transition-all duration-500"
               style={{ width: `${Math.min(100, Math.max(0, (sheet.attributes.luck / 99) * 100))}%` }}
             />
           </div>
+          <AnimatePresence>
+            {luckAnim !== null && (
+              <motion.div
+                id="floating-luck-indicator"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: -25 }}
+                exit={{ opacity: 0 }}
+                className={`absolute top-1/2 left-0 right-0 text-center font-mono font-black text-xs ${luckAnim < 0 ? "text-orange-500" : "text-green-400"}`}
+              >
+                {luckAnim < 0 ? luckAnim : `+${luckAnim}`} LUC
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
@@ -320,25 +356,20 @@ export default function CharacterSheetPanel({
         )}
       </div>
 
-      {/* Investigator Background Panel */}
-      <div className="flex-1 min-h-0 flex flex-col border-t border-gray-900 bg-[#101112]">
-        <div className="px-4 pt-3 pb-1 text-[10px] uppercase tracking-widest font-mono text-[#c1a067]/70">
-          调查员背景
-        </div>
-        <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-3 text-xs text-gray-400 leading-relaxed font-sans whitespace-pre-wrap">
-          {sheet.backgroundStory?.trim() ? (
-            sheet.backgroundStory
-          ) : (
-            <span className="text-gray-600 italic">尚未记录调查员背景概述。</span>
-          )}
-        </div>
-      </div>
+      {/* Reserved Slot — 原"调查员背景"位置，留空待后续设计 */}
+      <div className="flex-1 min-h-0 border-t border-gray-900 bg-[#101112]" />
 
       {/* Occult Warning sign at footer */}
       <div className="p-3 bg-[#111213] border-t border-[#c1a067]/15 text-center text-[10px] font-sans text-gray-500 flex items-center justify-center gap-1.5">
         <AlertTriangle className="w-3.5 h-3.5 text-[#c1a067]/40" />
         <span>注意：克苏鲁神话(Mythos)技能增涨会导致SAN度永久扣竭</span>
       </div>
+
+      <CharacterDossierPanel
+        isOpen={showDossier}
+        onClose={() => setShowDossier(false)}
+        sheet={sheet}
+      />
 
     </div>
   );
