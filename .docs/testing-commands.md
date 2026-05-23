@@ -32,6 +32,7 @@
 | `[sys_test]clue_image` | 直接插入一条**带 prompt 的**线索（拓印 / `marking`），无 imageUrl | 验证按需画图链路 — 笔记本详情应**展示图框 + 占位 + 放大镜**，点放大镜触发 `/api/image/generate-clue` 显示转圈，成功后写入 `imageUrl` | — |
 | `[sys_test]clue_text` | 直接插入一条**不带 prompt 的**线索（账册摘录 / `note`） | 验证规范裁剪 — 笔记本详情应**完全不渲染图框**，只显示标题 + 描述 | — |
 | `[sys_test]scene_image` | 在聊天追加一条仅含 `sceneImage` 的 keeper 消息（祭坛螺旋符号 / `marking`） | 验证**对话内视觉勾子**链路 — 应在 keeper 气泡里渲染绿色虚线占位卡，点「显示图像」生成图，缩略图点击展开全屏预览，预览顶栏多出「收录线索」按钮，点击后写入笔记本并按钮变「已收录」 | — |
+| `[sys_test]cancel_card` | 在聊天追加一条带 `rollRequest` 的伪 keeper 消息（聆听 / 65%） | 验证**放弃声明完整链路**（详见 `.docs/roll-cancellation.md`）—（1）卡片初始为金色 active 态、按钮可点；（2）打开投骰界面后点"X 我再想想"应只关 modal，**不**消费卡片，再点按钮仍可重新投；（3）此时往输入框里发任意一句新对话，卡片应立即变灰、按钮 disabled、文案改"已错过"，输入框被禁用直到 LLM 回包；（4）打开 console 日志可见 `[放弃声明]` system 消息已合并进当次 `/api/keeper/chat` 上下文。注：本命令依赖真实 LLM，需要在「虚空连接的设置」里配好对话模型。 | — |
 
 ---
 
@@ -53,6 +54,7 @@
 - **不能模拟的事**：测试通道只构造 `activeRoll`/`activeSanity`/`pendingEffectRoll` 三个 React state，
   **不会**触发聊天里的"找到线索"卡片、HP/MP 变化、地点切换、剧情同步——这些都属于 KP 回包的处理逻辑，与本测试通道无关。
   - 例外：`[sys_test]clue_image` / `[sys_test]clue_text` 直接 `setClues`，会把测试线索写入存档（受 useEffect 自动落 localStorage），如不需要可在笔记本中手动清空或换存档。`[sys_test]scene_image` 直接 `setMessages` 追加一条带 sceneImage 的 keeper 消息，同样会进入存档；其完整链路涉及真实的 `/api/image/generate-clue` 调用，需要在「虚空连接的设置」里配好画图模型。「收录线索」按钮触发后会把 sceneImage 升格为正式 ClueItem。
+  - **特殊例外**：`[sys_test]cancel_card` **会真实调用 LLM**——它注入的是带 rollRequest 字段的真 keeper 消息，玩家发新消息后会触发 `[放弃声明]` system 标记进入 `/api/keeper/chat` 上下文。这是为了完整端到端验证派生失效逻辑而做出的特例，使用时请确保已配置对话模型。
 
 ---
 

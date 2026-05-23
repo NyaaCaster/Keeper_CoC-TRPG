@@ -353,7 +353,9 @@ export default function RollDiceModal({
     let message = "";
     if (isKeeperRoll) {
       if (isSecret) {
-        message = `[系统的守秘人判定(暗骰) - 针对 [${skill}] (${target}%) 进行了一次暗中判定。命运暗自契合契定因果，细节由旁白隐秘呈现。]`;
+        // 暗骰回报必须明示"有暗骰发生"但**不暴露**技能名/目标值/骰点/成功等级 —
+        // 详见 .docs/roll-cancellation.md 与 fate-gamble.md 第二节路径 C 的口径要求。
+        message = `[系统的守秘人判定(暗骰) - 针对 [？？？] (???%) 进行了一次暗中判定。命运暗自契合契定因果，结果细节由旁白隐秘呈现。]`;
       } else {
         message = `[系统的守秘人判定(明骰) - ${skill}]
 > **🎲 ${formattedDiceResult}** (上限目标值 ${target}%)

@@ -55,6 +55,11 @@ import { rollDiceFormula, DiceFormulaResult } from "./lib/diceFormula";
 import SettingsPanel from "./components/SettingsPanel";
 import { WebGameSave, ApiSettings } from "./types";
 import { getImagePublicPrefix } from "./lib/publicConfig";
+import {
+  isLatestKeeperRollRequest,
+  findPendingTailRollRequest,
+  buildCancellationReport,
+} from "./lib/rollCancellation";
 
 /** 二阶段效果骰队列项 — 详见 .docs/two-stage-roll.md。 */
 type EffectKind = "damage" | "heal" | "mpCost" | "sanLoss";
@@ -287,6 +292,25 @@ export default function App() {
       return;
     }
 
+    // 放弃声明判定(详见 .docs/roll-cancellation.md 第三节铁律):
+    // 当前 messages 队尾若是带未消费 rollRequest 的 keeper 消息,且本次新消息**不是**
+    // 由"投完骰"流程注入的 system 回报(投完骰已通过方案A清空 rollRequest 字段),
+    // 那就视为玩家撤回了行为意图 — 在新消息之前注入 [放弃声明] system 标记。
+    // 该回报与玩家新消息合并进入同一次 LLM 调用,不再单独触发新调用。
+    const cancellationMsgs: ChatMessage[] = [];
+    const pendingTail = findPendingTailRollRequest(messages);
+    if (pendingTail && pendingTail.parsedResponse?.rollRequest) {
+      const rr = pendingTail.parsedResponse.rollRequest;
+      // 原 rollRequest 留在历史卡片上(派生函数会把它渲染为"已错过"),不清空字段 —
+      // 玩家"放弃了什么"在历史里仍要可见。
+      cancellationMsgs.push({
+        id: `sys_cancel_${Date.now()}`,
+        sender: "system",
+        timestamp: new Date().toLocaleTimeString(),
+        text: buildCancellationReport(rr.skillName, rr.reason),
+      });
+    }
+
     const playerMsg: ChatMessage = {
       id: `player_${Date.now()}`,
       sender: isSystemReport ? "system" : "player",
@@ -294,7 +318,7 @@ export default function App() {
       text: textToSend,
     };
 
-    const updated = [...messages, playerMsg];
+    const updated = [...messages, ...cancellationMsgs, playerMsg];
     setMessages(updated);
     setInputText("");
 
@@ -497,6 +521,39 @@ export default function App() {
                 "warm shadows, weathered stone texture, gothic Lovecraftian " +
                 "atmosphere, cinematic shallow depth of field, ultra-detailed",
             },
+          },
+        ]);
+        return;
+      }
+      case "cancel_card": {
+        // 放弃声明完整链路 — 在聊天里追加一条带 rollRequest 字段的 keeper 消息,
+        // 用以验证三件事:
+        //   (1) 初始队尾 → 卡片应渲染为金色 active 态、按钮可点;
+        //   (2) 玩家随便发一句新消息 → 该卡片应自动变灰、按钮 disabled、文案改"已错过";
+        //   (3) 触发上一步同时,前端会向 LLM 注入 [放弃声明] system 消息(测试模式由
+        //       handleSendPlayerMessage 入口的 findPendingTailRollRequest 派生注入)。
+        // 注:点"我再想想"暂离 modal 不应触发 (2)/(3),只有发新消息才算。
+        const id = `keeper_test_${Date.now()}`;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id,
+            sender: "keeper",
+            timestamp: new Date().toLocaleTimeString(),
+            text: "[测试] 走廊深处某扇半掩的门后传来极轻微的滴水声,像有什么东西在那片黑暗里慢慢滴落。",
+            parsedResponse: {
+              narrative: "",
+              rollRequest: {
+                skillName: "聆听",
+                targetValue: 65,
+                difficulty: "regular",
+                reason: "[测试] 试图分辨滴水声背后是否还有别的声响",
+              },
+              gameState: {
+                moduleName: gameModuleName,
+                currentLocation: currentLocation,
+              },
+            } as KeeperResponse,
           },
         ]);
         return;
@@ -1075,9 +1132,32 @@ export default function App() {
     return clueId;
   };
 
-  // Dice roll complete callback from specialized Roll Modal
+  // Dice roll complete callback from specialized Roll Modal.
+  // 投完即清空对应 keeper 消息上的 rollRequest 字段(方案A) — 这是 .docs/roll-cancellation.md
+  // 第六节"成功投骰即清空 rollRequest 字段(消费证据)"的实现:与放弃判定的派生逻辑互补,
+  // 让"投完后历史卡片不再显示 REQUIRES DESTINY ROLL"和"未投骰且不再队尾的卡片显示已错过"
+  // 在派生层完全自洽。
   const handleRollComplete = (result: RollResult, messageReport: string) => {
     setActiveRoll(null);
+    setMessages((prev) => {
+      // 找到队尾那条带 rollRequest 的 keeper 消息(即玩家刚刚投的那条),清空其 rollRequest
+      const tail = prev[prev.length - 1];
+      if (
+        tail &&
+        tail.sender === "keeper" &&
+        tail.parsedResponse?.rollRequest
+      ) {
+        const cleared: ChatMessage = {
+          ...tail,
+          parsedResponse: {
+            ...tail.parsedResponse,
+            rollRequest: null,
+          },
+        };
+        return [...prev.slice(0, -1), cleared];
+      }
+      return prev;
+    });
     handleSendPlayerMessage(messageReport, true);
   };
 
@@ -1671,22 +1751,33 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* Action trigger: Required Skill Roll Button */}
-                      {m.parsedResponse?.rollRequest && (
+                      {/* Action trigger: Required Skill Roll Button.
+                          失效判定:卡片不再是 messages 队尾即视为已放弃,详见 .docs/roll-cancellation.md */}
+                      {m.parsedResponse?.rollRequest && (() => {
+                        const isActive = isLatestKeeperRollRequest(m, messages);
+                        return (
                         <div
                           id="roll-request-banner"
-                          className="bg-[#1c1a17] border border-amber-950 p-4 rounded-lg flex items-center justify-between gap-4 mt-4 animate-pulse"
+                          className={`bg-[#1c1a17] border p-4 rounded-lg flex items-center justify-between gap-4 mt-4 ${
+                            isActive
+                              ? "border-amber-950 animate-pulse"
+                              : "border-gray-800 opacity-50 grayscale"
+                          }`}
                         >
                           <div>
-                            <div className="text-[10px] uppercase text-[#c1a067] font-mono tracking-widest">
-                              REQUIRES DESTINY ROLL
+                            <div className={`text-[10px] uppercase font-mono tracking-widest ${
+                              isActive ? "text-[#c1a067]" : "text-gray-500"
+                            }`}>
+                              {isActive ? "REQUIRES DESTINY ROLL" : "ROLL MISSED · 已错过"}
                             </div>
                             <div
                               id="roll-request-desc"
                               className="text-xs text-gray-300 font-sans mt-0.5"
                             >
                               请尝试通过进行一次{" "}
-                              <span className="font-semibold text-[#c1a067]">
+                              <span className={`font-semibold ${
+                                isActive ? "text-[#c1a067]" : "text-gray-500"
+                              }`}>
                                 {m.parsedResponse.rollRequest.skillName}
                               </span>{" "}
                               判定。({m.parsedResponse.rollRequest.reason})
@@ -1695,17 +1786,25 @@ export default function App() {
                           <button
                             id="roll-prompt-action-btn"
                             type="button"
-                            disabled={!!activeSanity}
+                            disabled={!isActive || !!activeSanity}
                             onClick={() =>
                               setActiveRoll(m.parsedResponse!.rollRequest!)
                             }
-                            className="bg-gradient-to-r from-[#c1a067] to-[#dcb77c] text-black hover:scale-105 active:scale-95 transition-all text-xs font-bold px-4 py-2 rounded-full flex items-center gap-1.5 font-sans disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
+                            title={isActive ? undefined : "本次声明已被新的对话打断,无法再投骰"}
+                            className={`text-xs font-bold px-4 py-2 rounded-full flex items-center gap-1.5 font-sans transition-all disabled:cursor-not-allowed ${
+                              isActive
+                                ? "bg-gradient-to-r from-[#c1a067] to-[#dcb77c] text-black hover:scale-105 active:scale-95 disabled:opacity-30 disabled:hover:scale-100"
+                                : "bg-gray-800 text-gray-500 border border-gray-700"
+                            }`}
                           >
-                            <Dices className="w-4 h-4" /> 投掷 D100 (
-                            {m.parsedResponse.rollRequest.targetValue}%)
+                            <Dices className="w-4 h-4" />
+                            {isActive
+                              ? `投掷 D100 (${m.parsedResponse.rollRequest.targetValue}%)`
+                              : "已错过"}
                           </button>
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -1749,12 +1848,25 @@ export default function App() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Bottom dialogue user prompt input console */}
+            {/* Bottom dialogue user prompt input console.
+                玩家明骰挂起期间禁用输入与发送(详见 .docs/roll-cancellation.md 第四节);
+                keeperRoll 不阻塞(暗骰阻塞会破暗骰、明骰动画很快无干预权);
+                SAN 路径已由 activeSanity 兜底。 */}
             <div className="p-4 bg-[#111314] border-t border-gray-950 z-10 flex gap-2">
+              {(() => {
+                const playerRollPending =
+                  !!activeRoll &&
+                  !activeRoll.isKeeperRoll &&
+                  !activeRoll.skillName.includes("SAN");
+                const inputDisabled =
+                  isKeeperLoading || !!activeSanity || playerRollPending;
+                const sendDisabled = inputDisabled || !inputText.trim();
+                return (
+                  <>
               <input
                 id="main-player-chat-input"
                 type="text"
-                disabled={isKeeperLoading || !!activeSanity}
+                disabled={inputDisabled}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={(e) => {
@@ -1767,8 +1879,8 @@ export default function App() {
                     ? "守密人沉浸叙述中，请稍候..."
                     : activeSanity
                       ? "【理智冲击降临】请先完成理智检定，理智冲击不可回避..."
-                      : activeRoll
-                        ? "【强制检定状态】：请在上面点击掷骰子投点，以继续生成故事"
+                      : playerRollPending
+                        ? "【判定挂起中】请投骰，或点 'X 我再想想' 退出查看面板/线索册"
                         : "叙言你的侦查与侦测意图（如：我拿出魔术提灯、潜行走前去检查...）"
                 }
                 className="flex-1 bg-black/50 border border-gray-800 rounded px-4 py-2.5 text-sm placeholder-gray-650 focus:outline-[#c1a067]/40 focus:outline-1 focus:border-[#c1a067] text-gray-200 outline-none disabled:opacity-40"
@@ -1776,7 +1888,7 @@ export default function App() {
               <button
                 id="main-player-send-btn"
                 type="button"
-                disabled={isKeeperLoading || !!activeSanity || !inputText.trim()}
+                disabled={sendDisabled}
                 onClick={() => handleSendPlayerMessage(inputText)}
                 className="px-5 bg-black hover:bg-neutral-900 border border-gray-800 hover:border-[#c1a067] transition text-gray-300 font-semibold text-xs uppercase rounded flex items-center justify-center disabled:opacity-30"
                 title="发送"
@@ -1784,6 +1896,9 @@ export default function App() {
               >
                 <Send className="w-3.5 h-3.5" />
               </button>
+                  </>
+                );
+              })()}
             </div>
           </div>
 
