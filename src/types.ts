@@ -20,6 +20,26 @@ export interface CharacterSkills {
 }
 
 /**
+ * 派生战斗值快照（阶段 10.1）。
+ *
+ * 持久化在 sheet 上，跑团时给 LLM / 战斗结算直接读取，避免每次现算。
+ * 由 server 在任何修改 `attributes.str / con / siz / dex` 或 `age` 的出口处统一刷新
+ * （见 cocRules.ts 的 refreshCombatDerived helper），客户端只读。
+ *
+ * 字段含义：
+ * - db    伤害加值（{flat, dice, display} 与 cocRules.DamageBonus 兼容）
+ * - build 体格（格斗对抗 / 擒抱用）
+ * - mov   移动率
+ * - dodge 闪避基础值（DEX/2，独立于 sheet.skills，不进技能表）
+ */
+export interface CombatDerivedSnapshot {
+  db: { flat: number; dice: string | null; display: string };
+  build: number;
+  mov: number;
+  dodge: number;
+}
+
+/**
  * 神秘接触档案。CoC 7e 规则中"调查员持有/接触过的神话相关条目"。
  * 不可手动调，仅由 KP 在游戏过程中按规则下发。
  * 创建期为空对象（不是 undefined），方便 UI 直接 map。
@@ -61,6 +81,19 @@ export interface MythicEntityEntry {
   encounteredAt?: string;
   notes?: string;
 }
+
+/**
+ * 装备槽条目（House Rule：8 槽随身上限，详见 .docs/character-card-current.md 第 5 节）。
+ *
+ * - `kind: "item"`：自由文本物品。`text === ""` 视为空槽。重要个人物件 / 工具 / 出诊包等都走这里。
+ * - `kind: "weapon"`：通过 weaponId 引用 src/data/cocWeapons.ts 的结构化条目；ammo 由
+ *   武器表 maxAmmo 派生，创建期固定，跑团时由 KP 扣加。近战 / 投掷武器 ammo 恒为 0。
+ *
+ * 默认值约定：`{ kind: "item", text: "" }`。
+ */
+export type InventoryEntry =
+  | { kind: "item"; text: string }
+  | { kind: "weapon"; weaponId: string; ammo: number };
 
 export interface CharacterSheet {
   name: string;
@@ -104,13 +137,43 @@ export interface CharacterSheet {
   maxMp: number;
   san: number;
   maxSan: number;
-  maxSanLimit: number; // 99 - 克苏鲁神话
+  /**
+   * SAN 硬上限 = 99 − 克苏鲁神话。阶段 10 后由 clampSanityLayers helper 维护，
+   * 实际"现算源"是 cocRules.maxSanLimitOf(mythos)；本字段保留为兼容冗余，
+   * 旧代码 / 旧存档读取无须迁移。游戏 UI 不直接展示。
+   */
+  maxSanLimit: number;
   mythos: number; // 克苏鲁神话技能
   /**
    * 神秘接触档案。创建期为 undefined / 空对象都合法；
    * KP 通过 sanitySkillGain 等字段按 CoC 7e 规则在游戏过程中追加。
    */
   mythicEncounters?: MythicEncounters;
+  /**
+   * 装备与随身物品（House Rule：长度恒为 8，空槽用 { kind: "item", text: "" } 占位）。
+   * 详见 .docs/character-card-current.md 第 5 节。旧存档可能没有此字段（undefined 合法）。
+   */
+  inventory?: InventoryEntry[];
+  /**
+   * 运行时现金余额（阶段 10）。
+   * 创建期由 startingCashOf(creditRating, background) 派生写入；
+   * 跑团时由 KP 工具 updateCashBalance 扣加，不由客户端直接编辑。
+   * 旧存档 undefined 时，UI 显示回退到派生值。
+   */
+  cashBalance?: number;
+  /**
+   * 派生战斗值快照（阶段 10）。详见 CombatDerivedSnapshot 注释。
+   * 旧存档 undefined 合法，server 第一次访问时由 refreshCombatDerived 自动补写。
+   *
+   * Invariant：任何修改 attributes.str/con/siz/dex 或 age 的出口都必须紧跟一次
+   * cocRules.refreshCombatDerived(sheet) 重写本字段。当前已知出口：
+   *   - CharacterCreator.handleCreateCustom（自定义创建）
+   *   - CharacterCreator.handleSelectPreset（预设选取）
+   *   - CharacterCreator.handleImportCharacterCard（PNG 卡片导入）
+   * 跑团期 App.tsx 现存的 setCharacter 调用只改 luck（不影响 db/build/mov/dodge），
+   * 故无需重算；若未来新增改 str/con/siz/dex/age 的运行时通道，必须同步加 helper。
+   */
+  combatDerived?: CombatDerivedSnapshot;
   avatar?: string; // 角色头像 (Base64 data URI)
   backgroundStory?: string; // 调查员背景介绍/生平概述
   /**
@@ -131,6 +194,16 @@ export interface CharacterSheet {
     boutRoll?: number;
     indefiniteAnchor?: { moduleName: string; turnId: string };
   };
+  /**
+   * 创建期不可变快照。在 onComplete 进入游戏的入口处一次性深拷贝写入；
+   * 运行期任何 setCharacter 都不应再触碰这个字段。
+   *
+   * 用途：跑团中途的"下载调查员角色卡"按钮渲染的应是创建期原貌（HP 满血、
+   * SAN 未扣、技能未涨值、现金未消、装备未变），而非当前实时状态。
+   *
+   * 嵌套约束：snapshot.creationSnapshot 永远应为 undefined（不递归）。
+   */
+  creationSnapshot?: CharacterSheet;
 }
 
 export interface ClueItem {
@@ -253,6 +326,23 @@ export interface KeeperResponse {
     mpCostFormula?: string;
     /** 大失败叙事附带的强制 SAN 损失,例 "1d6"。独立于 sanityCheck 路径。 */
     sanLossFormula?: string;
+
+    /**
+     * 阶段 10：现金余额变动（写入 sheet.cashBalance）。
+     * cashChange = 增减量（正进负出），cashSetTo = 重置到指定值；二者互斥，
+     * 同时下发时前端按 cashSetTo 优先。前端钳制 cashBalance ≥ 0。
+     */
+    cashChange?: number;
+    cashSetTo?: number;
+
+    /**
+     * 阶段 10：武器槽弹药变动（写入 inventory[slotIndex].ammo）。
+     * 仅作用于 kind === "weapon" 且 maxAmmo > 0 的槽位；其它槽位静默跳过。
+     * ammoDelta = 增减量（正补充负消耗），ammoSetTo = 重置到指定值；二者互斥，
+     * 同时下发时前端按 ammoSetTo 优先。前端钳制 ammo ∈ [0, weapon.maxAmmo]。
+     * slotIndex 越界（< 0 或 ≥ inventory.length）静默跳过。
+     */
+    ammoUpdates?: Array<{ slotIndex: number; ammoDelta?: number; ammoSetTo?: number }>;
   } | null;
   npcDialogue?: {
     name: string;

@@ -12,6 +12,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import fs from "fs";
 import crypto from "crypto";
 import { deriveCombatStats, breakpointOf } from "./src/lib/cocRules";
+import { findWeapon } from "./src/data/cocWeapons";
 import type { CharacterSheet } from "./src/types";
 
 dotenv.config();
@@ -372,6 +373,11 @@ const SYSTEM_INSTRUCTION = `你是一位专业且极具沉浸感的《克苏鲁�
        - **不要**把场景元素"擦除" — 线索/危险还在那里，玩家只是没去碰它。下次玩家声明同类行为时，由你重新裁定是否再次召唤检定。
        - **偶尔的"惩罚"**：当撤回的犹豫**本身**在场景里有意义时（紧迫战斗中调查员伸手又收回、被追逐时停下脚步、对话里 NPC 看到迟疑），可以在 narrative 中让"犹豫"产生后果（NPC 察觉、错过时机、距离被拉近、对方信任度下降）。但要**克制使用** — 默认行为是放过。
        - 放弃声明在 'keeperRoll'（明/暗骰）和 'sanityCheck' 路径上**前端硬禁不可发生**——这两条路径是 KP 主动施加的客观结算，玩家无权放弃。所以你不会在这些场景下收到 '[放弃声明]' 标记。
+   4.7 【现金 / 弹药变动：必须走 characterUpdates 通道，禁止口头报数】：玩家的现金余额（cashBalance）与每把武器的弹药计数都是**真实的运行时状态**，由前端持久化在角色卡上并显示在道具面板。任何剧情上引发的现金 / 弹药变动**必须**通过 'characterUpdates' 下发，不要只在 narrative 里描写"花了 50 块钱"或"打光了弹匣"——那样数值不会真扣，玩家的余额 / 弹药条会失真。
+       - **现金**：增减用 'cashChange'（正进负出，单位与背景设定一致：1920s = 美元，现代 = 玩家所在地货币 / 美元）；剧情需要清空或重置走 'cashSetTo'（≥ 0）。前端会硬钳到 ≥ 0，所以**不要**自己再算"如果只有 30 块就只扣 30"——直接下 cashChange: -50，前端会自动把 30 - 50 钳到 0 并在 LogEntry 里标注"透支扣空"。**典型触发场景**：买东西付款、被劫匪 / 黑帮勒索、捡到一笔钱、押金 / 赌资、雇佣 NPC 服务、住店与餐饮。**不要**在 KP 视角"自动结算"日常小额开销（吃饭、交通），除非剧情上**明确强调**钱袋见底的紧迫感。
+       - **弹药**：通过 'ammoUpdates' 数组按 slotIndex 下发；'ammoDelta'（增减）或 'ammoSetTo'（重置）二选一。**只对 inventory 中 kind="weapon" 且 maxAmmo > 0 的槽位有效**，近战 / 投掷武器（拳头、刀、石块等 maxAmmo=0）不要下发；非武器槽 / 越界 slotIndex 前端会静默跳过。前端会硬钳到 [0, weapon.maxAmmo]，**不要**自己算"剩 1 发只扣 1 发"。**典型触发场景**：玩家声明开火（每次扣对应攻击模式的射击数，例如 "1(3)" 单发扣 1 / 三连发扣 3）、玩家在场景里捡到弹药 / 弹匣（按对应口径补 ammoSetTo 或 ammoDelta）、武器走火 / 故障导致弹药意外消耗。**不要**替玩家自动满弹换弹——换弹是玩家声明的动作，由 KP 在玩家声明换弹后下 ammoSetTo: maxAmmo。
+       - **slotIndex 的获取**：调查员 inventory 数组在 KP 上下文里以 "[槽位 N · 武器名(ammo/maxAmmo)]" 形式可见,N 即 0-based slotIndex；当玩家声明攻击时，按照他指定 / 上下文最近使用的武器槽下发。**禁止**对玩家不持有的槽位 / 玩家未声明使用的武器槽下发弹药变动。
+       - 同一回合可以同时下发现金 + 弹药变动（玩家在枪战里抢到了对方的钱包并打掉了几发子弹）；前端会按统一通道结算并在 LogEntry 里逐条记录,narrative 不必复述具体数字（项目家规：演出感优先,数值由前端面板传达）。
 5. 【理智检定(Sanity Check)】：当玩家直面不可名状神秘、骇人血腥、死徒行径或SCP模因时，必须且仅能通过设置 'sanityCheck' 对象来发起理智检定，并规定成功/失败分别减去多少理智（如成功减0，失败减1d6）。
    5.1 【SAN 检定不可回避】：CoC 7e 规则下，理智冲击是因果上"已发生"的事——只要你触发了 sanityCheck，前端会**强制弹出 modal、禁用聊天输入、禁用角色面板的意图声明**，玩家**不能取消、不能跳过**，必须立即掷骰。所以：
        - 不要轻易触发 SAN 检定。只在调查员**确实已经看到/听到/接触到**冲击源时触发。"可能会瞥到"这种暧昧场景请在 narrative 里描写，不要直接发 sanityCheck。
@@ -520,9 +526,24 @@ const KEEPER_RESPONSE_SCHEMA = {
         hpDamageFormula: { type: Type.STRING, description: "玩家受伤的伤害公式,形如 'NdM[+常数][/除数]'(例:'1d6'、'2d4+1'、'1d10/2')。前端会弹效果骰浮窗演投。与 hpChange 互斥;同时下发时前端按公式优先。" },
         hpHealFormula: { type: Type.STRING, description: "急救/医学等治疗公式,正向回血,例 '1d3'。前端弹效果骰浮窗。与 hpChange(正向部分)互斥。" },
         mpCostFormula: { type: Type.STRING, description: "魔法反噬等魔力消耗公式,例 '1d4'。前端弹效果骰浮窗。与 mpChange(消耗部分)互斥。" },
-        sanLossFormula: { type: Type.STRING, description: "大失败叙事附带的强制 SAN 损失公式,例 '1d6'。独立于 sanityCheck 路径(后者已自带 lossOnSuccess/lossOnFailure)。前端弹效果骰浮窗。与 sanChange(负向部分)互斥。" }
+        sanLossFormula: { type: Type.STRING, description: "大失败叙事附带的强制 SAN 损失公式,例 '1d6'。独立于 sanityCheck 路径(后者已自带 lossOnSuccess/lossOnFailure)。前端弹效果骰浮窗。与 sanChange(负向部分)互斥。" },
+        cashChange: { type: Type.INTEGER, description: "现金余额增减量(正进负出),例 +50 / -120。例:玩家在场景里捡到钱、被勒索、买东西付款。与 cashSetTo 互斥;同时下发时按 cashSetTo 优先。前端会钳制 cashBalance ≥ 0(透支自动归零)。" },
+        cashSetTo: { type: Type.INTEGER, description: "把现金余额重置到指定值(整数,≥ 0)。仅在剧情上需要『全部清空 / 重置到某个具体数额』时使用,如被洗劫一空 cashSetTo: 0。优先于 cashChange。" },
+        ammoUpdates: {
+          type: Type.ARRAY,
+          description: "武器槽弹药变动数组。仅作用于 kind=\"weapon\" 且 maxAmmo>0 的槽位(近战 / 投掷武器 maxAmmo=0 不接受弹药变动);非武器槽 / 越界 slotIndex 前端静默跳过。每项二选一下发 ammoDelta(增减量)或 ammoSetTo(重置值);同项同时下发时按 ammoSetTo 优先。前端钳制 ammo ∈ [0, weapon.maxAmmo]。例:射击两发后下 [{slotIndex: 3, ammoDelta: -2}];换弹满到 [{slotIndex: 3, ammoSetTo: 6}]。",
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              slotIndex: { type: Type.INTEGER, description: "目标槽位下标,0-based,对应玩家 inventory 数组(共 8 槽)。" },
+              ammoDelta: { type: Type.INTEGER, description: "弹药增减量(正补充负消耗)。与 ammoSetTo 互斥。" },
+              ammoSetTo: { type: Type.INTEGER, description: "把弹药重置到指定值(整数,≥ 0)。优先于 ammoDelta。" }
+            },
+            required: ["slotIndex"]
+          }
+        }
       },
-      description: "由当前非掷骰的突发剧情直接引发的属性指标变化。同类属性的整数字段与 *Formula 字段二选一下发(详见各字段说明)。无则设为 null。"
+      description: "由当前非掷骰的突发剧情直接引发的属性指标变化。同类属性的整数字段与 *Formula 字段二选一下发(详见各字段说明)。**现金 / 弹药**变动也走本通道(cashChange / cashSetTo / ammoUpdates),不要凭空在 narrative 里口头报数;前端会自动结算并把变动写入 LogEntry 通知玩家。无变动则设为 null。"
     },
     npcDialogue: {
       type: Type.OBJECT,
@@ -907,7 +928,38 @@ app.post("/api/keeper/chat", async (req, res) => {
         "  • MOV 用于追逐 / 逃脱场景的距离推进；不要让 LLM 自己估算移动力，按本字段为准。\n";
     }
 
-    const systemInstruction = SYSTEM_INSTRUCTION + dynamicInstructions + elementSandboxLimiter + combatDerivedBlock;
+    // 阶段 10：装备 / 现金 运行时快照。slotIndex 0-based,武器槽显示 ammo / maxAmmo,
+    // 让 KP 在玩家声明攻击 / 换弹 / 消费时能直接定位 ammoUpdates 的目标槽与 cashChange 量级。
+    let inventoryBlock = "";
+    if (character && (character as CharacterSheet)?.inventory) {
+      const sheet = character as CharacterSheet;
+      const lines: string[] = [];
+      const inv = sheet.inventory ?? [];
+      inv.forEach((entry, idx) => {
+        if (entry.kind === "weapon") {
+          const w = findWeapon(entry.weaponId);
+          const label = w?.nameZh ?? `未知武器(${entry.weaponId})`;
+          const ammoStr = w && w.maxAmmo > 0 ? `${entry.ammo}/${w.maxAmmo}` : "近战/投掷";
+          lines.push(`  - [槽位 ${idx} · 武器] ${label}（${ammoStr}）`);
+        } else if (entry.text && entry.text.trim()) {
+          lines.push(`  - [槽位 ${idx} · 物品] ${entry.text.trim()}`);
+        }
+      });
+      const cashLine = typeof sheet.cashBalance === "number"
+        ? `- 现金余额（cashBalance）：${sheet.cashBalance}`
+        : "- 现金余额（cashBalance）：未初始化";
+      inventoryBlock =
+        "\n\n=== [当前调查员装备槽与现金（运行时状态，可由 characterUpdates 修改）] ===\n" +
+        cashLine + "\n" +
+        "- 8 槽随身（仅列出非空槽，slotIndex 即下方方括号里的数字）：\n" +
+        (lines.length > 0 ? lines.join("\n") + "\n" : "  （无随身物品 / 武器）\n") +
+        "调用口径：\n" +
+        "  • 玩家声明开火 / 用枪 / 换弹 / 捡到弹药时，按上面的 [槽位 N] 下发 ammoUpdates。\n" +
+        "  • 玩家在场景里付款 / 收钱 / 被劫时，下发 cashChange（增减）或 cashSetTo（重置）。\n" +
+        "  • 详见 SYSTEM_INSTRUCTION 第 4.7 节关于现金 / 弹药变动的铁律。\n";
+    }
+
+    const systemInstruction = SYSTEM_INSTRUCTION + dynamicInstructions + elementSandboxLimiter + combatDerivedBlock + inventoryBlock;
     const userText = buildKeeperContext(messages);
 
     push({ direction: "info", content: `/api/keeper/chat ← ${messages.length} messages`, meta: { msgCount: messages.length, tmEnabled, scpEnabled } });

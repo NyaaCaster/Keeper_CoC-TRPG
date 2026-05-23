@@ -1,0 +1,804 @@
+# =============================================================================
+# Keeper_CoC-TRPG · 调查员角色数据字典表 (Character Data Dictionary)
+# =============================================================================
+#
+# 用途
+#   本字典表是“给 LLM 看的角色卡 schema-with-spec”。当 LLM 被要求生成一个
+#   可直接用于本游戏的调查员（Investigator / Player Character）数据对象时，
+#   严格按本表的字段定义、枚举、范围、派生公式、约束输出 JSON 即可。
+#
+# 数据来源
+#   - src/types.ts             CharacterSheet / CharacterAttributes /
+#                              CombatDerivedSnapshot / MythicEncounters /
+#                              InventoryEntry / sanityState
+#   - src/lib/cocRules.ts      HP / MP / SAN / DB / Build / MOV / Dodge /
+#                              MotherTongue / StartingCash 派生公式
+#   - src/data/cocSkills.ts    SKILL_REGISTRY_ALL（含多分支父类与 era 过滤）
+#   - src/data/cocOccupations.ts  职业模板 + 5 种 OccupationSkillRef kind
+#   - src/data/cocWeapons.ts   武器结构 + DB 加成口径
+#   - .docs/character-card-current.md  字段语义与 House Rule
+#
+# 阅读约定
+#   - $type 标注期望的 JSON / TypeScript 类型；中文 # 注释解释语义。
+#   - $required: true/false 指明该字段必填还是可选（运行时字段大多 optional）。
+#   - $enum 列出枚举允许值；$range 列出数值闭区间；$formula 给出派生公式。
+#   - 名为 example 的同级 key 给一个完整的合法样例片段。
+#
+# 输出规范（LLM 生成角色时的硬要求）
+#   1. 输出 JSON（不是 YAML / Markdown / 代码块以外的散文）。
+#   2. 顶层 schema 是 character_sheet 节点描述的 CharacterSheet 对象。
+#   3. 所有派生字段（hp / mp / san / maxSanLimit / combatDerived / cashBalance /
+#      Dodge / 母语技能值）必须按 derived_formulas 一致地现算后再写入。
+#   4. 技能键名一律用合并表里的 nameZh（多分支技能用 “父类(分支)” 形如
+#      "格斗(斗殴)" / "火器(手枪)" / "艺术/手艺(摄影)"）。不得自创新技能名。
+#   5. 创建期 mythos = 0；mythicEncounters = { tomes: [], spells: [],
+#      artifacts: [], entities: [] }；sanityState = { episodeSanLoss: 0,
+#      madness: null }。
+#   6. inventory 长度恒为 8，空槽用 { kind: "item", text: "" } 占位。
+
+meta:
+  schema_version: "1.0.0"
+  game_system: "Call of Cthulhu 7th Edition"
+  project: "Keeper_CoC-TRPG"
+  language_default: "zh-CN"
+  notes:
+    - "本表是 LLM 生成角色的唯一规范源。如与代码冲突，以代码为准并提交 PR 修正本表。"
+    - "生成器必须在 LLM 端完成派生数值计算后再交付，不得指望前端补算。"
+
+# =============================================================================
+# 1. 顶层结构（运行期持久化对象 = CharacterSheet）
+# =============================================================================
+character_sheet:
+  $type: object
+  $description: |
+    游戏运行期使用的角色卡，对应 src/types.ts 的 CharacterSheet。
+    创建期 (CharacterCreator) 装配完毕后写入此结构；游戏运行期由
+    server / KP 工具调用更新（HP / MP / SAN / 现金 / mythos / 状态机等）。
+
+  fields:
+
+    # ---- 1.1 基础信息（创建期手填或导入；运行期不变）----
+    name:
+      $type: string
+      $required: true
+      $description: "角色姓名。中英文皆可，建议含中英文双名（如 “阿尔伯特·克劳利 (Albert Crowley)”）。"
+
+    occupation:
+      $type: string
+      $required: true
+      $description: |
+        职业名（中文）。优先使用 occupations.templates 中的 nameZh；
+        当采用自定义职业（不在模板表内）时，落自由文本（与 customOccupationFreeText 等价）。
+
+    identity:
+      $type: string
+      $required: false
+      $description: |
+        角色“扮演身份”自由文本。与 occupation 协同，例：
+        occupation = "会计师"，identity = "时钟塔学院政法科专员"。仅供 LLM 叙事使用。
+
+    nationality:
+      $type: string
+      $required: false
+      $description: "国籍，自由文本（如 “英国”、“美国”、“日本”）。仅叙事使用。"
+
+    residence:
+      $type: string
+      $required: false
+      $description: "居住地，自由文本（城市 / 街区粒度）。仅叙事使用。"
+
+    motherTongue:
+      $type: string
+      $required: false
+      $description: |
+        母语名称（自由文本，如 “汉语” / “英语”）。
+        母语技能值不写入 skills 表，由 derived_formulas.motherTongueValue 现算。
+
+    creditRating:
+      $type: integer
+      $required: false
+      $range: [0, 99]
+      $description: |
+        信用评级（CR）。CoC 7e 原本是技能，本项目按“资产/消费等级”移到基本信息层，
+        不写入 skills 表。同时驱动起始现金 / 生活水准派生。
+
+    gender:
+      $type: string
+      $required: true
+      $enum: ["男", "女", "未详"]
+
+    age:
+      $type: integer
+      $required: true
+      $range: [10, 100]
+      $description: "年龄。影响 MOV 修正（≥40 起每 10 岁 -1，下限 1）。默认建议 30。"
+
+    background:
+      $type: string
+      $required: true
+      $enum: ["1920s", "modern"]
+      $description: |
+        年代背景。决定可选职业表 / 技能表 era 过滤、武器表 era 过滤、起始现金公式。
+        与“selectedEra”同义。
+
+    avatar:
+      $type: string
+      $required: false
+      $description: "Base64 data URI（JPG/PNG）；LLM 生成时通常省略，由前端在创建流程中上传。"
+
+    backgroundStory:
+      $type: string
+      $required: false
+      $description: "调查员的生平/概述（自由文本，多行）。LLM 创建时务必填写，丰富叙事。"
+
+    # ---- 1.2 八维属性（创建期决定，运行期不变）----
+    attributes:
+      $type: CharacterAttributes
+      $required: true
+      $ref: attributes
+
+    # ---- 1.3 技能表（创建期分配，运行期由 KP 触发经验成长追加）----
+    skills:
+      $type: "Record<string, number>"
+      $required: true
+      $description: |
+        键 = 技能中文名（多分支用 “父类(分支)” 表达，详见 skills 节）。
+        值 = 当前技能值（百分位，0–99）。
+        创建期硬性写入：skills["克苏鲁神话"] = 0（不占点池）。
+        母语 / 信用评级 / 闪避 / 克苏鲁神话基础 0 不写入；母语派生 = EDU、闪避派生 = DEX/2。
+
+    # ---- 1.4 派生战斗值（运行期持久化快照，必算后写入）----
+    hp:        { $type: integer, $required: true, $formula: "= maxHp（创建期满血）" }
+    maxHp:     { $type: integer, $required: true, $formula: "floor((CON + SIZ) / 10)" }
+    mp:        { $type: integer, $required: true, $formula: "= maxMp（创建期满）" }
+    maxMp:     { $type: integer, $required: true, $formula: "floor(POW / 5)" }
+    san:       { $type: integer, $required: true, $formula: "= maxSan" }
+    maxSan:    { $type: integer, $required: true, $formula: "= POW（受 maxSanLimit 钳制）" }
+    maxSanLimit: { $type: integer, $required: true, $formula: "99 - mythos" }
+    mythos:
+      $type: integer
+      $required: true
+      $range: [0, 99]
+      $description: "克苏鲁神话技能。创建期固定 0；游戏中由 KP 通过 sanitySkillGain 等下发。"
+
+    mythicEncounters:
+      $type: MythicEncounters
+      $required: false
+      $description: "神秘接触档案。创建期写空：tomes/spells/artifacts/entities 各为 []。"
+      $ref: mythic_encounters
+
+    inventory:
+      $type: "InventoryEntry[8]"
+      $required: false
+      $description: "随身槽位（House Rule：长度恒为 8，空槽 { kind: 'item', text: '' }）。"
+      $ref: inventory
+
+    cashBalance:
+      $type: integer
+      $required: false
+      $formula: "= startingCashOf(creditRating, background)"
+      $description: |
+        运行时现金余额。创建期初值由派生公式计算后写入；跑团时由 KP 工具
+        updateCashBalance 扣加，前端不直接编辑。
+
+    combatDerived:
+      $type: CombatDerivedSnapshot
+      $required: false
+      $description: |
+        派生战斗值快照。创建后立即由 server 端 refreshCombatDerived 计算并写入。
+        LLM 生成角色时必须把 db / build / mov / dodge 一并算好填入此快照。
+      $ref: combat_derived
+
+    sanityState:
+      $type: object
+      $required: false
+      $description: "疯狂状态机（运行期，创建期固定写空）。"
+      $ref: sanity_state
+
+
+# =============================================================================
+# 2. CharacterAttributes（八维属性）
+# =============================================================================
+attributes:
+  $type: object
+  $description: "CoC 7e 八维属性 + 幸运。创建期 UI 限制 [15, 99]；规则上限 99。"
+  fields:
+    str:  { $type: integer, $range: [15, 99], $description: "力量 STR" }
+    con:  { $type: integer, $range: [15, 99], $description: "体质 CON" }
+    siz:  { $type: integer, $range: [15, 99], $description: "体型 SIZ" }
+    dex:  { $type: integer, $range: [15, 99], $description: "敏捷 DEX" }
+    app:  { $type: integer, $range: [15, 99], $description: "外貌 APP" }
+    int:  { $type: integer, $range: [15, 99], $description: "智力 INT" }
+    pow:  { $type: integer, $range: [15, 99], $description: "意志 POW" }
+    edu:  { $type: integer, $range: [15, 99], $description: "教育 EDU" }
+    luck: { $type: integer, $range: [15, 99], $description: "幸运 LUCK（7e 独立维度）" }
+
+  random_roll_recipe:
+    $description: |
+      随机宿命投骰（创建期辅助操作）。LLM 不需要扔骰子，但若用户要求生成
+      “符合掷骰分布”的属性，可参考此公式。
+    formulas:
+      - "str = 3D6 × 5"
+      - "con = 3D6 × 5"
+      - "siz = (2D6 + 6) × 5"
+      - "dex = 3D6 × 5"
+      - "app = 3D6 × 5"
+      - "int = (2D6 + 6) × 5"
+      - "pow = 3D6 × 5"
+      - "edu = (2D6 + 6) × 5"
+      - "luck = 3D6 × 5"
+
+
+# =============================================================================
+# 3. 派生公式（创建后必须现算后写入对应 sheet 字段）
+# =============================================================================
+derived_formulas:
+
+  hp:
+    formula: "floor((CON + SIZ) / 10)"
+    target_field: "maxHp / hp"
+
+  mp:
+    formula: "floor(POW / 5)"
+    target_field: "maxMp / mp"
+
+  san:
+    formula: "= POW"
+    target_field: "maxSan / san"
+
+  maxSanLimit:
+    formula: "99 - mythos"
+    target_field: "maxSanLimit"
+
+  motherTongueValue:
+    formula: "= EDU"
+    note: "不写入 skills 表，仅作为派生值供 KP 检定时现算。"
+
+  dodge:
+    formula: "floor(DEX / 2)"
+    note: "不写入 skills 表；写入 combatDerived.dodge。"
+
+  damageBonus_and_build:
+    description: "STR + SIZ → DB / Build。详见 cocRules.computeDamageBonusAndBuild。"
+    table:
+      - { sumRange: "≤ 64",     db: "-2",   build: -2 }
+      - { sumRange: "65–84",    db: "-1",   build: -1 }
+      - { sumRange: "85–124",   db: "0",    build:  0 }
+      - { sumRange: "125–164",  db: "+1d4", build:  1 }
+      - { sumRange: "165–204",  db: "+1d6", build:  2 }
+      - { sumRange: "205–284",  db: "+2d6", build:  3 }
+      - { sumRange: "285–364",  db: "+3d6", build:  4 }
+      - { sumRange: "365–444",  db: "+4d6", build:  5 }
+      - { sumRange: "445–524",  db: "+5d6", build:  6 }
+    extension: "≥ 525 起每 +80 STR+SIZ 多 +1d6 / +1 Build。"
+    db_object_shape:
+      flat:    "整数（仅 dice = null 时有效）"
+      dice:    "字符串（如 '1d4' / '2d6'）或 null"
+      display: "人类可读字符串（'-2' / '0' / '+1d6'）"
+
+  mov:
+    description: "MOV 计算（CoC 7e）。"
+    base_rules:
+      - "STR > SIZ 且 DEX > SIZ → 9"
+      - "STR < SIZ 且 DEX < SIZ → 7"
+      - "其他 → 8"
+    age_penalty:
+      - { age: "≥ 40", penalty: 1 }
+      - { age: "≥ 50", penalty: 2 }
+      - { age: "≥ 60", penalty: 3 }
+      - { age: "≥ 70", penalty: 4 }
+      - { age: "≥ 80", penalty: 5 }
+    floor: 1
+
+  startingCash:
+    description: "创建期现金（CoC 7e 玩家手册 Step 7）。"
+    formulas:
+      "1920s":  "creditRating × 1     (USD)"
+      "modern": "creditRating × 20    (USD)"
+    target_field: "cashBalance"
+
+  livingStandard:
+    description: "CR 区间 → 生活水准（仅 UI 显示用，不入 sheet）。"
+    tiers:
+      - { cr: "0",      tier: "penniless",  label: "身无分文" }
+      - { cr: "1–9",    tier: "poor",       label: "贫困" }
+      - { cr: "10–49",  tier: "average",    label: "中等" }
+      - { cr: "50–89",  tier: "wealthy",    label: "富有" }
+      - { cr: "90–98",  tier: "rich",       label: "富豪" }
+      - { cr: "99",     tier: "superRich",  label: "超级富豪" }
+
+
+# =============================================================================
+# 4. CombatDerivedSnapshot（必填快照对象）
+# =============================================================================
+combat_derived:
+  $type: object
+  $description: |
+    派生战斗值快照，持久化在 sheet 上，跑团时给 LLM / 战斗结算直接读取，避免每次现算。
+    LLM 创建角色时必须把所有四项算好写入。
+  fields:
+    db:
+      $type: object
+      $required: true
+      shape:
+        flat:    integer
+        dice:    "string | null   # '1d4' / '2d6' / null"
+        display: "string          # '-2' / '0' / '+1d6'"
+    build: { $type: integer, $required: true, $description: "体格（格斗/擒抱用）。" }
+    mov:   { $type: integer, $required: true, $description: "移动率（受年龄修正）。" }
+    dodge: { $type: integer, $required: true, $description: "闪避基础值 = floor(DEX/2)。" }
+  example:
+    db: { flat: 0, dice: "1d4", display: "+1d4" }
+    build: 1
+    mov: 8
+    dodge: 35
+
+
+# =============================================================================
+# 5. 技能（skills）
+# =============================================================================
+skills:
+
+  $description: |
+    sheet.skills 是 “技能中文名 → 当前值（0–99）”的字典。键名约定：
+    - 单技能：直接用 nameZh，例 "聆听" / "侦查" / "图书馆使用"。
+    - 多分支技能：用 “父类(分支)” 形式，例 "格斗(斗殴)" / "火器(手枪)" /
+      "艺术/手艺(摄影)" / "科学(化学)" / "驾驶(汽车)" / "求生(极地)" /
+      "其他语种(拉丁语)"。
+    - 不要写父类本身（fighting / firearms / drive / language-other 不可作为键）。
+    - 不要写 “闪避” / “母语” / “信用评级”：闪避 → combatDerived.dodge，
+      母语技能值 → 由 EDU 现算，CR → character_sheet.creditRating。
+    - 克苏鲁神话固定写 "克苏鲁神话": 0，创建期不可调。
+
+  slot_rules:
+    occupation_slots: 8
+    interest_slots: 4
+    total_cap: 12
+    occupation_pool_default: "EDU × 4"
+    interest_pool: "INT × 2"
+    per_skill_max: 99
+    per_skill_min: "该技能基础值（不能低于 base）"
+    pool_isolation: "职业池与兴趣池互不通用"
+    duplicate_policy: "同一技能 / 分支不能在多个槽位重复（提交时按最大值合并）"
+
+  registry:
+    $note: "完整 base 值与 era 限定见 src/data/cocSkills.ts SKILL_REGISTRY_ALL。"
+
+    single_skills:
+      # 通用技能（base 值即创建期不分配时的最低值）
+      - { id: accounting,              nameZh: "会计",           base: 5  }
+      - { id: anthropology,            nameZh: "人类学",         base: 1  }
+      - { id: appraise,                nameZh: "估价",           base: 5  }
+      - { id: archaeology,             nameZh: "考古学",         base: 1  }
+      - { id: charm,                   nameZh: "魅惑",           base: 15 }
+      - { id: climb,                   nameZh: "攀爬",           base: 20 }
+      - { id: computer-use,            nameZh: "计算机使用",     base: 5,  era: "modern" }
+      - { id: cthulhu-mythos,          nameZh: "克苏鲁神话",     base: 0,  cthulhuOnly: true }
+      - { id: disguise,                nameZh: "乔装",           base: 5  }
+      - { id: electrical-repair,       nameZh: "电气维修",       base: 10 }
+      - { id: electronics,             nameZh: "电子学",         base: 1,  era: "modern" }
+      - { id: fast-talk,               nameZh: "快速交谈",       base: 5  }
+      - { id: first-aid,               nameZh: "急救",           base: 30 }
+      - { id: history,                 nameZh: "历史",           base: 5  }
+      - { id: intimidate,              nameZh: "恐吓",           base: 15 }
+      - { id: jump,                    nameZh: "跳跃",           base: 20 }
+      - { id: law,                     nameZh: "法律",           base: 5  }
+      - { id: library-use,             nameZh: "图书馆使用",     base: 20 }
+      - { id: listen,                  nameZh: "聆听",           base: 20 }
+      - { id: locksmith,               nameZh: "锁匠",           base: 1  }
+      - { id: mechanical-repair,       nameZh: "机械维修",       base: 10 }
+      - { id: medicine,                nameZh: "医学",           base: 1  }
+      - { id: natural-world,           nameZh: "博物",           base: 10 }
+      - { id: navigate,                nameZh: "导航",           base: 10 }
+      - { id: occult,                  nameZh: "神秘学",         base: 5  }
+      - { id: operate-heavy-machinery, nameZh: "操作重型机械",   base: 1  }
+      - { id: persuade,                nameZh: "说服",           base: 10 }
+      - { id: psychology,              nameZh: "心理学",         base: 10 }
+      - { id: psychoanalysis,          nameZh: "精神分析",       base: 1  }
+      - { id: ride,                    nameZh: "骑术",           base: 5  }
+      - { id: sleight-of-hand,         nameZh: "妙手",           base: 10 }
+      - { id: spot-hidden,             nameZh: "侦查",           base: 25 }
+      - { id: stealth,                 nameZh: "潜行",           base: 20 }
+      - { id: swim,                    nameZh: "游泳",           base: 20 }
+      - { id: throw,                   nameZh: "投掷",           base: 20 }
+      - { id: track,                   nameZh: "追踪",           base: 10 }
+
+    multi_branch_skills:
+
+      art-craft:
+        nameZh: "艺术 / 手艺"
+        parent_base: 5
+        key_pattern: "艺术/手艺(<分支>)"
+        branches:
+          - { id: art-craft-acting,      nameZh: "表演",          base: 5  }
+          - { id: art-craft-fine-art,    nameZh: "美术",          base: 5  }
+          - { id: art-craft-photography, nameZh: "摄影",          base: 5  }
+          - { id: art-craft-writing,     nameZh: "写作",          base: 5  }
+          - { id: art-craft-instrument,  nameZh: "乐器",          base: 5  }
+          - { id: art-craft-cooking,     nameZh: "烹饪",          base: 5  }
+          - { id: art-craft-carpentry,   nameZh: "木工",          base: 5  }
+          - { id: art-craft-locksmith,   nameZh: "制锁",          base: 5  }
+          - { id: art-craft-drafting,    nameZh: "制图 / 技术绘图", base: 5  }
+          - { id: art-craft-forgery,     nameZh: "伪造",          base: 5  }
+          - { id: art-craft-agriculture, nameZh: "农艺",          base: 5, era: "1920s" }
+          - { id: art-craft-graphic,     nameZh: "平面设计",      base: 5, era: "modern" }
+          - { id: art-craft-video-edit,  nameZh: "视频剪辑",      base: 5, era: "modern" }
+
+      science:
+        nameZh: "科学"
+        parent_base: 1
+        key_pattern: "科学(<分支>)"
+        branches:
+          - { id: science-astronomy,     nameZh: "天文学",   base: 1 }
+          - { id: science-biology,       nameZh: "生物学",   base: 1 }
+          - { id: science-botany,        nameZh: "植物学",   base: 1 }
+          - { id: science-chemistry,     nameZh: "化学",     base: 1 }
+          - { id: science-cryptography,  nameZh: "密码学",   base: 1 }
+          - { id: science-engineering,   nameZh: "工程学",   base: 1 }
+          - { id: science-geology,       nameZh: "地质学",   base: 1 }
+          - { id: science-mathematics,   nameZh: "数学",     base: 1 }
+          - { id: science-meteorology,   nameZh: "气象学",   base: 1 }
+          - { id: science-pharmacy,      nameZh: "药学",     base: 1 }
+          - { id: science-physics,       nameZh: "物理学",   base: 1 }
+          - { id: science-zoology,       nameZh: "动物学",   base: 1 }
+          - { id: science-computer,      nameZh: "计算机科学", base: 1, era: "modern" }
+          - { id: science-forensics,     nameZh: "法医学",   base: 1, era: "modern" }
+          - { id: science-genetics,      nameZh: "遗传学",   base: 1, era: "modern" }
+
+      firearms:
+        nameZh: "火器"
+        parent_base: 0
+        key_pattern: "火器(<分支>)"
+        notes: "父类不直接打钩；分支基础值差异大。"
+        branches:
+          - { id: firearms-handgun,      nameZh: "手枪",       base: 20 }
+          - { id: firearms-rifle,        nameZh: "步枪 / 霰弹枪", base: 25 }
+          - { id: firearms-smg,          nameZh: "冲锋枪",     base: 15 }
+          - { id: firearms-heavy,        nameZh: "重武器",     base: 10 }
+          - { id: firearms-bow,          nameZh: "弓",         base: 15 }
+          - { id: firearms-flamethrower, nameZh: "火焰喷射器", base: 10 }
+
+      fighting:
+        nameZh: "格斗"
+        parent_base: 0
+        key_pattern: "格斗(<分支>)"
+        notes: "父类不直接打钩；分支基础值差异大。"
+        branches:
+          - { id: fighting-brawl,    nameZh: "斗殴",      base: 25 }
+          - { id: fighting-sword,    nameZh: "剑",        base: 20 }
+          - { id: fighting-axe,      nameZh: "斧",        base: 15 }
+          - { id: fighting-spear,    nameZh: "长矛",      base: 20 }
+          - { id: fighting-whip,     nameZh: "鞭",        base:  5 }
+          - { id: fighting-chain,    nameZh: "锁链",      base:  5 }
+          - { id: fighting-flail,    nameZh: "链枷",      base: 10 }
+          - { id: fighting-club,     nameZh: "棍棒",      base: 25 }
+          - { id: fighting-thrown,   nameZh: "镖 / 飞刀", base: 10 }
+          - { id: fighting-chainsaw, nameZh: "链锯",      base: 10, era: "modern" }
+
+      drive:
+        nameZh: "驾驶"
+        parent_base: 0
+        key_pattern: "驾驶(<分支>)"
+        branches:
+          - { id: drive-auto,       nameZh: "汽车",        base: 20 }
+          - { id: drive-carriage,   nameZh: "马车",        base: 20, era: "1920s" }
+          - { id: drive-truck,      nameZh: "卡车 / 重型卡", base: 1,  era: "modern" }
+          - { id: drive-boat,       nameZh: "船",          base: 1,  era: "modern" }
+          - { id: drive-aircraft,   nameZh: "飞机",        base: 1 }
+          - { id: drive-helicopter, nameZh: "直升机",      base: 1,  era: "modern" }
+
+      survival:
+        nameZh: "求生"
+        parent_base: 10
+        key_pattern: "求生(<分支>)"
+        branches:
+          - { id: survival-desert,   nameZh: "沙漠", base: 10 }
+          - { id: survival-sea,      nameZh: "海洋", base: 10 }
+          - { id: survival-arctic,   nameZh: "极地", base: 10 }
+          - { id: survival-mountain, nameZh: "山地", base: 10 }
+          - { id: survival-jungle,   nameZh: "丛林", base: 10 }
+          - { id: survival-plains,   nameZh: "平原", base: 10 }
+
+      language-other:
+        nameZh: "其他语种"
+        parent_base: 1
+        key_pattern: "其他语种(<语言名>)"
+        notes: "玩家可自由声明分支（任意语言名），由 KP 裁定。"
+        branches_examples:
+          - { id: lang-latin,    nameZh: "拉丁语",     base: 1 }
+          - { id: lang-french,   nameZh: "法语",       base: 1 }
+          - { id: lang-german,   nameZh: "德语",       base: 1 }
+          - { id: lang-spanish,  nameZh: "西班牙语",   base: 1 }
+          - { id: lang-arabic,   nameZh: "阿拉伯语",   base: 1 }
+          - { id: lang-greek,    nameZh: "希腊语",     base: 1 }
+          - { id: lang-chinese,  nameZh: "汉语",       base: 1 }
+          - { id: lang-japanese, nameZh: "日语",       base: 1 }
+
+  excluded_from_skills:
+    - { name: "闪避",       reason: "派生战斗值，写入 combatDerived.dodge。" }
+    - { name: "母语",       reason: "派生 = EDU，仅 motherTongue 字段记语言名称。" }
+    - { name: "信用评级",   reason: "基本信息层字段 creditRating；不进 skills。" }
+
+
+# =============================================================================
+# 6. 职业模板（occupations）
+# =============================================================================
+occupations:
+
+  $description: |
+    创建期角色应优先选用 src/data/cocOccupations.ts 的职业模板。完整列表
+    （1920s 43 条 / modern 33 条）以代码为准；本表仅说明结构与解析规则。
+
+  template_shape:
+    id:
+      $type: string
+      $description: "形如 '<slug>-1920s' 或 '<slug>-modern'，避免两表同名冲突。"
+    nameZh: { $type: string, $description: "中文职业名，写入 sheet.occupation。" }
+    nameEn: { $type: string }
+    era:    { $type: string, $enum: ["1920s", "modern"] }
+    coreSkills:
+      $type: "OccupationSkillRef[]"
+      $description: "8 槽展开后总数恒为 8（含 freeSlot.count、oneOf 计 1）。"
+    occupationPointFormula:
+      $type: object
+      shape: { terms: "[{ attr, mult }]", max: "整数（可选上限）" }
+      default: "{ terms: [{ attr: 'edu', mult: 4 }] }   # EDU × 4 兜底"
+
+  occupation_skill_ref_kinds:
+    $description: "5 种 kind，描述职业核心技能槽如何展开。"
+    skill:
+      shape: '{ kind: "skill", id }'
+      meaning: "确定的单技能（id 是 cocSkills.SKILL_REGISTRY_ALL 中的 skill id）。"
+    branch:
+      shape: '{ kind: "branch", parentId, branchId }'
+      meaning: "确定的分支（如 firearms / firearms-handgun）。"
+    anyBranchOf:
+      shape: '{ kind: "anyBranchOf", parentId }'
+      meaning: "玩家在该多分支父类下任选一个分支。"
+    oneOf:
+      shape: '{ kind: "oneOf", options: OccupationSkillRef[] }'
+      meaning: "在多个候选项中任选一个。"
+    freeSlot:
+      shape: '{ kind: "freeSlot", count }'
+      meaning: "自定 N 个职业槽（玩家从全标准技能集任意选）。"
+
+  selection_rules:
+    - "职业槽 8 个，总数恒为 8；自拟职业 = 8 个 freeSlot。"
+    - "兴趣槽 4 个，永远是 freeSlot；从全标准技能集任意挑选。"
+    - "提交时合并去重，按最大值结算。"
+    - "本项目不强校验职业 CR 上下限；creditRating 可自由填 0–99。"
+
+  example_template:
+    id: "antiquarian-1920s"
+    nameZh: "古董商"
+    nameEn: "Antiquarian"
+    era: "1920s"
+    coreSkills:
+      - { kind: "skill", id: "appraise" }
+      - { kind: "anyBranchOf", parentId: "art-craft" }
+      - { kind: "skill", id: "history" }
+      - { kind: "skill", id: "library-use" }
+      - { kind: "anyBranchOf", parentId: "language-other" }
+      - { kind: "skill", id: "listen" }
+      - { kind: "skill", id: "spot-hidden" }
+    occupationPointFormula: { terms: [{ attr: "edu", mult: 4 }] }
+
+
+# =============================================================================
+# 7. 装备与背包（inventory）
+# =============================================================================
+inventory:
+
+  $description: |
+    长度恒为 8 的判别联合数组（House Rule：8 槽硬上限）。
+    每槽形如：
+      - { kind: "item",   text: "..." }            # 自由文本物品；text === "" 视为空槽
+      - { kind: "weapon", weaponId: "...", ammo: <number> }   # ammo 由武器表 maxAmmo 派生
+
+  default_empty_slot: { kind: "item", text: "" }
+
+  rules:
+    - "武器 + 物品共享 8 槽。极限：8 件武器 / 8 个物品 / 8 槽全空都合法。"
+    - "弹药跟随武器条目（ammo 字段），不单独占槽。"
+    - "重要物品 / 意义之锚作为普通 item 录入，无特殊标记位。"
+    - "创建期 ammo = maxAmmo 自动写入；玩家不可调，跑团时由 KP 扣加。"
+
+  weapon_slot_population:
+    description: "weapon 槽 weaponId 必须存在于 cocWeapons.WEAPON_REGISTRY_ALL；ammo = maxAmmo。"
+
+  example:
+    - { kind: "weapon", weaponId: "revolver-38", ammo: 6 }
+    - { kind: "item",   text: "出诊包（听诊器+吗啡+纱布）" }
+    - { kind: "item",   text: "父亲的怀表" }
+    - { kind: "item",   text: "笔记本与钢笔" }
+    - { kind: "item",   text: "" }
+    - { kind: "item",   text: "" }
+    - { kind: "item",   text: "" }
+    - { kind: "item",   text: "" }
+
+
+# =============================================================================
+# 8. 武器结构（weapons —— 仅供查询；inventory.weapon 引用 weaponId）
+# =============================================================================
+weapons:
+  $description: |
+    武器表见 src/data/cocWeapons.ts WEAPON_REGISTRY_ALL（按时代 + 跨代通用合并）。
+    本节仅描述结构与 DB 加成口径，LLM 引用 weaponId 即可，不需要把整张表内联。
+
+  weapon_definition_shape:
+    id:        { $type: string, $description: "武器表 id" }
+    nameZh:    { $type: string }
+    nameEn:    { $type: string }
+    era:       { $type: string, $enum: ["1920s", "modern", "any"] }
+    skillRef:  { $type: "OccupationSkillRef", $description: "仅用 'skill' / 'branch' 两种 kind。" }
+    damage:
+      shape:
+        formula: "string  # 主伤害公式，如 '1D3' / '1D10+2' / '4D6 / 2D6 / 1D6'（散弹三档）"
+        addDB:   "boolean? # true → 战斗结算时加 DB（近战）"
+        halfDB:  "boolean? # true → 战斗结算时加 ½DB（投掷 / 弓；弩 = false）"
+    range:        { $type: string, $description: "近战 = '触及'；火器 = '15m' / 'STR×3m' / 散弹三档 '10m / 20m / 50m'。" }
+    attacks:      { $type: string, $description: "每轮攻击次数：'1' / '2' / '1(3)' / '1/2' / '1 或 2'。" }
+    maxAmmo:      { $type: integer, $description: "装弹数；近战 / 单发投掷 = 0 或 1。" }
+    malfunction:  { $type: integer, $required: false, $description: "命中骰 ≥ 此值卡壳。" }
+
+  damage_bonus_policy:
+    melee:    "addDB = true   → 战斗结算时拼加 combatDerived.db.dice 或 db.flat"
+    thrown:   "halfDB = true  → 加 ½DB（弩例外，halfDB = false）"
+    firearm:  "不加 DB"
+    unarmed_brawl: "1D3 + DB"
+
+
+# =============================================================================
+# 9. MythicEncounters（神秘接触档案）
+# =============================================================================
+mythic_encounters:
+  $type: object
+  $description: |
+    神话相关档案。**创建期一律为空对象**（4 类容器各为 []）；
+    游戏中由 KP 按 7e 规则触发追加，玩家不可手动调。
+
+  fields:
+    tomes:
+      $type: "MythicTomeEntry[]"
+      $required: false
+      shape:
+        id:          string
+        name:        string
+        state:       'string  # "skimmed" | "read" | "studied"   略读/通读/精研'
+        acquiredAt:  'string?'
+        notes:       'string?'
+
+    spells:
+      $type: "MythicSpellEntry[]"
+      $required: false
+      shape:
+        id:          string
+        name:        string
+        cost:        'string?  # POW / MP / SAN 消耗描述'
+        acquiredAt:  'string?'
+        notes:       'string?'
+
+    artifacts:
+      $type: "MythicArtifactEntry[]"
+      $required: false
+      shape:
+        id:          string
+        name:        string
+        state:       'string  # "held" | "encountered"   持有 / 仅接触过'
+        acquiredAt:  'string?'
+        notes:       'string?'
+
+    entities:
+      $type: "MythicEntityEntry[]"
+      $required: false
+      shape:
+        id:            string
+        name:          string
+        encounteredAt: 'string?'
+        notes:         'string?'
+
+  empty_default:
+    tomes: []
+    spells: []
+    artifacts: []
+    entities: []
+
+
+# =============================================================================
+# 10. SanityState（疯狂状态机 —— 运行期）
+# =============================================================================
+sanity_state:
+  $type: object
+  $description: |
+    疯狂状态机。创建期固定写空（episodeSanLoss = 0，madness = null）；
+    运行期由前端硬规则维护。LLM 创建角色时不要自行填别的值。
+
+  fields:
+    episodeSanLoss:
+      $type: integer
+      $description: "本模组累计 SAN 损失（用于 1/5 阈值判断）。"
+    madness:
+      $type: "string | null"
+      $enum: [null, "bout", "temporary", "indefinite"]
+      $description: "null = 正常 / bout = 急性发作 / temporary = 临时疯狂 / indefinite = 不定期疯狂。"
+    boutTurnsRemaining:      { $type: integer, $required: false }
+    temporaryTurnsRemaining: { $type: integer, $required: false }
+    boutRoll:                { $type: integer, $required: false, $range: [1, 10] }
+    indefiniteAnchor:
+      $type: object
+      $required: false
+      shape: { moduleName: string, turnId: string }
+
+  creation_default:
+    episodeSanLoss: 0
+    madness: null
+
+
+# =============================================================================
+# 11. 完整生成范例（LLM 输出 JSON 时的目标形态）
+# =============================================================================
+example_full_character_sheet:
+  name: "阿尔伯特·克劳利 (Albert Crowley)"
+  occupation: "古董商"
+  identity: "时钟塔学院政法科特约鉴定人"
+  nationality: "英国"
+  residence: "伦敦, 布鲁姆斯伯里"
+  motherTongue: "英语"
+  creditRating: 55
+  gender: "男"
+  age: 38
+  background: "1920s"
+
+  attributes: { str: 45, con: 50, siz: 55, dex: 60, app: 50, int: 85, pow: 75, edu: 80, luck: 65 }
+
+  skills:
+    "估价": 70
+    "艺术/手艺(写作)": 40
+    "历史": 75
+    "图书馆使用": 80
+    "其他语种(拉丁语)": 65
+    "聆听": 55
+    "侦查": 50
+    "神秘学": 60       # 兴趣槽
+    "心理学": 45       # 兴趣槽
+    "说服": 40         # 兴趣槽
+    "急救": 35         # 兴趣槽
+    "克苏鲁神话": 0
+
+  hp: 10
+  maxHp: 10
+  mp: 15
+  maxMp: 15
+  san: 75
+  maxSan: 75
+  maxSanLimit: 99
+  mythos: 0
+
+  mythicEncounters: { tomes: [], spells: [], artifacts: [], entities: [] }
+
+  inventory:
+    - { kind: "item",   text: "破损的拉丁文手抄本" }
+    - { kind: "item",   text: "皮革笔记本与墨水钢笔" }
+    - { kind: "item",   text: "放大镜" }
+    - { kind: "item",   text: "怀表（祖父遗物）" }
+    - { kind: "item",   text: "手电筒（备用电池）" }
+    - { kind: "item",   text: "" }
+    - { kind: "item",   text: "" }
+    - { kind: "item",   text: "" }
+
+  cashBalance: 55     # 1920s × 1 = $55
+
+  combatDerived:
+    db:    { flat: 0, dice: null, display: "0" }
+    build: 0
+    mov:   8
+    dodge: 30
+
+  sanityState:
+    episodeSanLoss: 0
+    madness: null
+
+  backgroundStory: |
+    毕业于剑桥大学历史系，毕生致力于译解中世纪遗留的禁忌手稿。
+    性格孤僻，但在整理古籍疑点上无人能出其右。最近接到时钟塔学院政法科委托，
+    协助调查一批在大英博物馆地下室异常发热的青铜器。

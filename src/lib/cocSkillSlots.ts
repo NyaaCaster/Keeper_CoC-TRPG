@@ -215,11 +215,14 @@ export function baseOfSelection(sel: SkillSelection): number {
   return findBranch(sel.parentId, sel.branchId)?.base ?? 0;
 }
 
-/** 查 selection 对应的中文名（"父(分支)" 或 单名）。 */
+/** 查 selection 对应的中文名（"父(分支)" 或 单名）。
+ *  父 / 分支 nameZh 中的空白被剥除，作为 sheet.skills 的紧凑 key 形式
+ *  （字典表 key_pattern：例 "艺术/手艺(摄影)" 对应 UI label "艺术 / 手艺"）。 */
 export function nameOfSelection(sel: SkillSelection): string {
+  const stripWs = (s: string) => s.replace(/\s+/g, "");
   if (sel.kind === "skill") return findSkill(sel.skillId)?.nameZh ?? sel.skillId;
-  const p = findSkill(sel.parentId)?.nameZh ?? sel.parentId;
-  const b = findBranch(sel.parentId, sel.branchId)?.nameZh ?? sel.branchId;
+  const p = stripWs(findSkill(sel.parentId)?.nameZh ?? sel.parentId);
+  const b = stripWs(findBranch(sel.parentId, sel.branchId)?.nameZh ?? sel.branchId);
   return `${p}(${b})`;
 }
 
@@ -419,20 +422,23 @@ export function constraintAccepts(c: SlotConstraint, sel: SkillSelection, era: "
  */
 export function parseSkillName(name: string, era: "1920s" | "modern"): SkillSelection | undefined {
   const trimmed = name.trim();
-  // 单技能精确匹配（限制对 era 可见、非克苏鲁神话）
+  const stripWs = (s: string) => s.replace(/\s+/g, "");
+  const compact = stripWs(trimmed);
+  // 单技能精确匹配（限制对 era 可见、非克苏鲁神话）。父子 nameZh 中可能带空白，
+  // 这里采用"去空白后等价"比较，与 nameOfSelection 输出口径一致。
   const direct = SKILL_REGISTRY_ALL.find(
-    (s) => s.nameZh === trimmed && (!s.eraOnly || s.eraOnly === era) && !s.cthulhuOnly && (!s.branches || s.branches.length === 0),
+    (s) => stripWs(s.nameZh) === compact && (!s.eraOnly || s.eraOnly === era) && !s.cthulhuOnly && (!s.branches || s.branches.length === 0),
   );
   if (direct) return { kind: "skill", skillId: direct.id };
 
   // "父(分支)" 形式
   const m = trimmed.match(/^(.+?)\((.+?)\)$/);
   if (m) {
-    const parentZh = m[1].trim();
-    const branchZh = m[2].trim();
-    const parent = SKILL_REGISTRY_ALL.find((s) => s.nameZh === parentZh && s.branches);
+    const parentZh = stripWs(m[1]);
+    const branchZh = stripWs(m[2]);
+    const parent = SKILL_REGISTRY_ALL.find((s) => stripWs(s.nameZh) === parentZh && s.branches);
     if (parent && parent.branches) {
-      const branch = parent.branches.find((b) => b.nameZh === branchZh && (!b.eraOnly || b.eraOnly === era));
+      const branch = parent.branches.find((b) => stripWs(b.nameZh) === branchZh && (!b.eraOnly || b.eraOnly === era));
       if (branch) return { kind: "branch", parentId: parent.id, branchId: branch.id };
     }
   }

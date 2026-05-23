@@ -8,6 +8,8 @@ import { CharacterSheet } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import { Shield, Sparkles, AlertTriangle, Eye, Heart, BookOpen, ChevronRight, Zap, RefreshCw, FileText } from "lucide-react";
 import CharacterDossierPanel from "./CharacterDossierPanel";
+import { startingCashOf } from "../lib/cocRules";
+import { findWeapon } from "../data/cocWeapons";
 
 interface CharacterSheetPanelProps {
   sheet: CharacterSheet;
@@ -153,9 +155,14 @@ export default function CharacterSheetPanel({
               </button>
             </h2>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              <p id="cs-job-display" className="text-xs text-gray-400 font-sans">{sheet.occupation}</p>
-              <span className="text-[9px] bg-[#c1a067]/10 text-[#c1a067] border border-[#c1a067]/25 px-1.5 py-0.5 rounded font-mono uppercase tracking-widest">
-                {sheet.background === "1920s" ? "1920s Jazz Era" : "Modern Science/Magic"}
+              {sheet.identity && sheet.identity.trim() !== "" && (
+                <p id="cs-identity-display" className="text-xs text-gray-400 font-sans">{sheet.identity}</p>
+              )}
+              <span
+                id="cs-occupation-tag"
+                className="text-[10px] bg-[#c1a067]/10 text-[#c1a067] border border-[#c1a067]/25 px-1.5 py-0.5 rounded font-sans"
+              >
+                {sheet.occupation}
               </span>
             </div>
           </div>
@@ -163,10 +170,12 @@ export default function CharacterSheetPanel({
       </div>
 
       {/* 规则 10:疯狂态横幅 — 仅当 sanityState.madness 非 null 时显示。
-          bout = 急性发作(红紫闪烁) / temporary = 临时疯狂(紫) / indefinite = 不定期疯狂(深紫,持续) */}
+          bout = 急性发作(红紫闪烁) / temporary = 临时疯狂(紫) / indefinite = 不定期疯狂(深紫,持续)
+          阶段 10.6：高度按数据自适应，bout 多一行剩余玩家回合，indefinite 多一行 anchor。 */}
       {sheet.sanityState?.madness && (() => {
-        const m = sheet.sanityState!.madness;
-        const boutId = sheet.sanityState!.boutRoll ?? 1;
+        const ss = sheet.sanityState!;
+        const m = ss.madness;
+        const boutId = ss.boutRoll ?? 1;
         const tableNames = [
           "失忆", "心理性残障", "狂暴攻击", "偏执", "关键人物错认",
           "昏厥", "恐慌逃离", "歇斯底里", "获得恐惧症", "获得狂躁症",
@@ -182,7 +191,7 @@ export default function CharacterSheetPanel({
           m === "bout"
             ? "急性发作 · BOUT OF MADNESS"
             : m === "temporary"
-              ? `临时疯狂 · TEMPORARY (剩余 ${sheet.sanityState!.temporaryTurnsRemaining ?? 0} 守密人回合)`
+              ? `临时疯狂 · TEMPORARY (剩余 ${ss.temporaryTurnsRemaining ?? 0} 守密人回合)`
               : "不定期疯狂 · INDEFINITE (持续整个模组)";
         return (
           <div className={`mx-3.5 mt-3 px-3 py-2 border-2 rounded-md font-mono ${tone}`}>
@@ -192,6 +201,17 @@ export default function CharacterSheetPanel({
             <div className="text-[11px] font-sans">
               起源症状 #{boutId} <span className="font-semibold">{symptomName}</span>
             </div>
+            {m === "bout" && typeof ss.boutTurnsRemaining === "number" && (
+              <div className="text-[11px] font-sans mt-0.5">
+                剩余玩家回合: <span className="font-semibold">{ss.boutTurnsRemaining}</span>
+              </div>
+            )}
+            {m === "indefinite" && ss.indefiniteAnchor && (
+              <div className="text-[11px] font-sans mt-0.5">
+                触发于 <span className="font-semibold">{ss.indefiniteAnchor.moduleName}</span>
+                <span className="text-purple-300/70"> · 回合 {ss.indefiniteAnchor.turnId}</span>
+              </div>
+            )}
           </div>
         );
       })()}
@@ -262,12 +282,12 @@ export default function CharacterSheetPanel({
           <div>
             <Eye className="w-3.5 h-3.5 text-purple-300 mx-auto mb-1 animate-pulse" />
             <div className="text-[9px] text-gray-400 font-sans">SAN (理智)</div>
-            <div className="text-sm font-mono font-bold text-purple-200 mt-1">{sheet.san} <span className="text-[10px] text-purple-400/70 font-normal">/{sheet.maxSanLimit}</span></div>
+            <div className="text-sm font-mono font-bold text-purple-200 mt-1">{sheet.san} <span className="text-[10px] text-purple-400/70 font-normal">/{sheet.maxSan}</span></div>
           </div>
           <div className="h-1 bg-black/50 rounded-full overflow-hidden mt-2 w-full">
             <div
               className="h-full bg-purple-500 rounded-full shadow-[0_0_6px_#a855f7] transition-all duration-500"
-              style={{ width: `${Math.min(100, Math.max(0, (sheet.san / (sheet.maxSanLimit || 1)) * 100))}%` }}
+              style={{ width: `${Math.min(100, Math.max(0, (sheet.san / (sheet.maxSan || 1)) * 100))}%` }}
             />
           </div>
           {/* floating diff */}
@@ -336,62 +356,88 @@ export default function CharacterSheetPanel({
       </div>
 
       {/* Tab Panels */}
-      <div className="overflow-y-auto p-4 custom-scrollbar max-h-[390px] flex-shrink-0">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 custom-scrollbar">
         {activeTab === "attributes" ? (
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { name: "力量 STR", val: sheet.attributes.str },
-              { name: "体质 CON", val: sheet.attributes.con },
-              { name: "体型 SIZ", val: sheet.attributes.siz },
-              { name: "敏捷 DEX", val: sheet.attributes.dex },
-              { name: "外貌 APP", val: sheet.attributes.app },
-              { name: "智力 INT", val: sheet.attributes.int },
-              { name: "意志 POW", val: sheet.attributes.pow },
-              { name: "教育 EDU", val: sheet.attributes.edu }
-            ].map((attr) => (
-              <div
-                id={`cs-attr-row-${attr.name.split(' ')[1]}`}
-                key={attr.name}
-                onClick={() => onSkillIntentDraft?.(attr.name.split(" ")[0], attr.val)}
-                title="向守密人提议用此项检定（最终是否掷骰由守密人裁定）"
-                className="bg-black/20 border border-gray-800/60 p-2.5 rounded hover:border-[#c1a067]/45 cursor-pointer transition group"
-              >
-                <div className="flex justify-between items-center">
-                  <span className="text-[11px] font-semibold text-gray-400 group-hover:text-[#c1a067] transition font-sans">{attr.name}</span>
-                  <span className="font-mono text-base font-bold text-gray-100">{attr.val}%</span>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { name: "力量 STR", val: sheet.attributes.str },
+                { name: "体质 CON", val: sheet.attributes.con },
+                { name: "体型 SIZ", val: sheet.attributes.siz },
+                { name: "敏捷 DEX", val: sheet.attributes.dex },
+                { name: "外貌 APP", val: sheet.attributes.app },
+                { name: "智力 INT", val: sheet.attributes.int },
+                { name: "意志 POW", val: sheet.attributes.pow },
+                { name: "教育 EDU", val: sheet.attributes.edu }
+              ].map((attr) => (
+                <div
+                  id={`cs-attr-row-${attr.name.split(' ')[1]}`}
+                  key={attr.name}
+                  onClick={() => onSkillIntentDraft?.(attr.name.split(" ")[0], attr.val)}
+                  title="向守密人提议用此项检定（最终是否掷骰由守密人裁定）"
+                  className="bg-black/20 border border-gray-800/60 p-2.5 rounded hover:border-[#c1a067]/45 cursor-pointer transition group"
+                >
+                  <div className="flex justify-between items-center">
+                    <span className="text-[11px] font-semibold text-gray-400 group-hover:text-[#c1a067] transition font-sans">{attr.name}</span>
+                    <span className="font-mono text-base font-bold text-gray-100">{attr.val}%</span>
+                  </div>
                 </div>
+              ))}
+            </div>
+
+            {/* 道具栏（8 槽随身，House Rule） + 现金（运行时余额，旧档回退派生值） */}
+            <div id="cs-inventory-section" className="bg-black/30 border border-gray-800/70 rounded p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2 border-b border-gray-800/60 pb-1.5">
+                <span className="text-[11px] font-semibold text-[#c1a067] tracking-wider font-sans">道具栏</span>
+                <span className="text-[11px] font-mono text-amber-200">
+                  现金: <span className="text-[#c1a067] font-semibold">${
+                    typeof sheet.cashBalance === "number"
+                      ? sheet.cashBalance
+                      : startingCashOf(sheet.creditRating || 0, sheet.background)
+                  }</span>
+                </span>
               </div>
-            ))}
+              <div className="grid grid-cols-2 gap-1.5">
+                {Array.from({ length: 8 }, (_, i) => {
+                  const entry = sheet.inventory?.[i];
+                  let label = "—";
+                  let isEmpty = true;
+                  if (entry) {
+                    if (entry.kind === "weapon") {
+                      const w = findWeapon(entry.weaponId);
+                      if (w) {
+                        // 阶段 10：武器名后括号显示 当前/上限 弹药；近战 maxAmmo===0 不显示括号
+                        label = w.maxAmmo > 0
+                          ? `${w.nameZh}(${entry.ammo}/${w.maxAmmo})`
+                          : w.nameZh;
+                        isEmpty = false;
+                      }
+                    } else if (entry.kind === "item" && entry.text.trim() !== "") {
+                      label = entry.text.trim();
+                      isEmpty = false;
+                    }
+                  }
+                  return (
+                    <div
+                      id={`cs-inv-slot-${i}`}
+                      key={i}
+                      className={`flex items-center gap-1.5 bg-black/40 border rounded px-2 py-1.5 text-[11px] font-sans ${
+                        isEmpty ? "border-gray-900/60 text-gray-700" : "border-gray-800/60 text-gray-200"
+                      }`}
+                      title={isEmpty ? `空槽 #${i + 1}` : `槽 #${i + 1}: ${label}`}
+                    >
+                      <span className="text-[9px] font-mono text-gray-600 shrink-0">#{i + 1}</span>
+                      <span className="truncate">{label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         ) : (
-          <div className="space-y-1.5">
-            {Object.entries(sheet.skills).map(([skill, val]) => (
-              <div
-                id={`cs-skill-row-${skill}`}
-                key={skill}
-                onClick={() => onSkillIntentDraft?.(skill, val)}
-                title="向守密人提议用此项检定（最终是否掷骰由守密人裁定）"
-                className="flex items-center justify-between bg-black/20 border border-gray-900/40 rounded px-2.5 py-1.5 hover:border-[#c1a067]/35 cursor-pointer group transition text-xs"
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#c1a067]/50" />
-                  <span className="text-gray-300 font-semibold group-hover:text-[#c1a067] font-sans">{skill}</span>
-                </div>
-                <div className="flex items-baseline gap-2">
-                  {/* Half / Fifth references for pro details */}
-                  <span className="text-[9px] text-[#c1a067]/40 font-mono">
-                    ({Math.floor(val/2)} / {Math.floor(val/5)})
-                  </span>
-                  <span className="font-mono font-bold text-[#c1a067] bg-black/40 px-1.5 py-0.5 rounded text-xs">{val}%</span>
-                </div>
-              </div>
-            ))}
-          </div>
+          <SkillsTabContent sheet={sheet} onSkillIntentDraft={onSkillIntentDraft} />
         )}
       </div>
-
-      {/* Reserved Slot — 原"调查员背景"位置，留空待后续设计 */}
-      <div className="flex-1 min-h-0 border-t border-gray-900 bg-[#101112]" />
 
       {/* Occult Warning sign at footer */}
       <div className="p-3 bg-[#111213] border-t border-[#c1a067]/15 text-center text-[10px] font-sans text-gray-500 flex items-center justify-center gap-1.5">
@@ -405,6 +451,206 @@ export default function CharacterSheetPanel({
         sheet={sheet}
       />
 
+    </div>
+  );
+}
+
+// ============================================================================
+// 探索技能 tab 主体 + 隐秘记录容器（阶段 10.5）
+// 隐秘记录三项任一非空才渲染：episodeSanLoss > 0 / mythos > 0 / mythicEncounters 任一类有条目
+// ============================================================================
+
+function SkillsTabContent({
+  sheet,
+  onSkillIntentDraft,
+}: {
+  sheet: CharacterSheet;
+  onSkillIntentDraft?: (skillName: string, value: number) => void;
+}) {
+  const episodeSanLoss = sheet.sanityState?.episodeSanLoss ?? 0;
+  const mythos = sheet.mythos ?? 0;
+  const me = sheet.mythicEncounters;
+  const hasAnyEncounter =
+    !!me &&
+    (
+      (me.tomes?.length ?? 0) > 0 ||
+      (me.spells?.length ?? 0) > 0 ||
+      (me.artifacts?.length ?? 0) > 0 ||
+      (me.entities?.length ?? 0) > 0
+    );
+  const showHidden = episodeSanLoss > 0 || mythos > 0 || hasAnyEncounter;
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        {Object.entries(sheet.skills).map(([skill, val]) => (
+          <div
+            id={`cs-skill-row-${skill}`}
+            key={skill}
+            onClick={() => onSkillIntentDraft?.(skill, val)}
+            title="向守密人提议用此项检定（最终是否掷骰由守密人裁定）"
+            className="flex items-center justify-between bg-black/20 border border-gray-900/40 rounded px-2.5 py-1.5 hover:border-[#c1a067]/35 cursor-pointer group transition text-xs"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#c1a067]/50" />
+              <span className="text-gray-300 font-semibold group-hover:text-[#c1a067] font-sans">{skill}</span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-[9px] text-[#c1a067]/40 font-mono">
+                ({Math.floor(val / 2)} / {Math.floor(val / 5)})
+              </span>
+              <span className="font-mono font-bold text-[#c1a067] bg-black/40 px-1.5 py-0.5 rounded text-xs">{val}%</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showHidden && (
+        <HiddenRecordsSection
+          episodeSanLoss={episodeSanLoss}
+          mythos={mythos}
+          mythicEncounters={me}
+        />
+      )}
+    </div>
+  );
+}
+
+const TOME_STATE_LABEL: Record<"skimmed" | "read" | "studied", string> = {
+  skimmed: "略读",
+  read: "通读",
+  studied: "精研",
+};
+const ARTIFACT_STATE_LABEL: Record<"held" | "encountered", string> = {
+  held: "持有",
+  encountered: "接触",
+};
+
+function HiddenRecordsSection({
+  episodeSanLoss,
+  mythos,
+  mythicEncounters,
+}: {
+  episodeSanLoss: number;
+  mythos: number;
+  mythicEncounters?: CharacterSheet["mythicEncounters"];
+}) {
+  const tomes = mythicEncounters?.tomes ?? [];
+  const spells = mythicEncounters?.spells ?? [];
+  const artifacts = mythicEncounters?.artifacts ?? [];
+  const entities = mythicEncounters?.entities ?? [];
+
+  return (
+    <div
+      id="cs-hidden-records"
+      className="border border-purple-900/40 bg-purple-950/15 rounded p-3 space-y-2"
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-purple-900/40 pb-1.5">
+        <span className="text-[11px] font-semibold text-purple-300 tracking-wider font-sans">隐秘记录</span>
+        <div className="flex items-center gap-3 text-[10px] font-mono">
+          <span className="text-purple-200">
+            累计SAN损失: <span className="text-purple-100 font-semibold">{episodeSanLoss}</span>
+          </span>
+          <span className="text-purple-200">
+            克苏鲁神话: <span className="text-purple-100 font-semibold">{mythos}</span>
+          </span>
+        </div>
+      </div>
+
+      {tomes.length > 0 && (
+        <EncounterCategory title="神话著作">
+          {tomes.map((t) => (
+            <EncounterRow
+              key={t.id}
+              name={t.name}
+              state={TOME_STATE_LABEL[t.state]}
+              notes={t.notes}
+              acquiredAt={t.acquiredAt}
+            />
+          ))}
+        </EncounterCategory>
+      )}
+      {spells.length > 0 && (
+        <EncounterCategory title="法术">
+          {spells.map((s) => (
+            <EncounterRow
+              key={s.id}
+              name={s.name}
+              state={s.cost}
+              notes={s.notes}
+              acquiredAt={s.acquiredAt}
+            />
+          ))}
+        </EncounterCategory>
+      )}
+      {artifacts.length > 0 && (
+        <EncounterCategory title="神器">
+          {artifacts.map((a) => (
+            <EncounterRow
+              key={a.id}
+              name={a.name}
+              state={ARTIFACT_STATE_LABEL[a.state]}
+              notes={a.notes}
+              acquiredAt={a.acquiredAt}
+            />
+          ))}
+        </EncounterCategory>
+      )}
+      {entities.length > 0 && (
+        <EncounterCategory title="接触实体">
+          {entities.map((e) => (
+            <EncounterRow
+              key={e.id}
+              name={e.name}
+              notes={e.notes}
+              acquiredAt={e.encounteredAt}
+            />
+          ))}
+        </EncounterCategory>
+      )}
+    </div>
+  );
+}
+
+function EncounterCategory({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-widest font-mono text-purple-400/70 mb-1">{title}</div>
+      <div className="space-y-1">{children}</div>
+    </div>
+  );
+}
+
+function EncounterRow({
+  name,
+  state,
+  notes,
+  acquiredAt,
+}: {
+  name: string;
+  state?: string;
+  notes?: string;
+  acquiredAt?: string;
+}) {
+  // 鼠标悬浮 + 点击切换 title 显示 notes / acquiredAt（受控 title 通过 toggle 一个 state）
+  const [showDetail, setShowDetail] = useState(false);
+  const detailParts = [acquiredAt && `获取: ${acquiredAt}`, notes].filter(Boolean) as string[];
+  const detailText = detailParts.length > 0 ? detailParts.join(" · ") : undefined;
+  const titleAttr = detailText ?? `${name}${state ? ` · ${state}` : ""}`;
+
+  return (
+    <div
+      className="bg-black/30 border border-purple-900/30 rounded px-2 py-1 text-[11px] font-sans text-purple-100 cursor-pointer select-none"
+      title={titleAttr}
+      onClick={() => detailText && setShowDetail((v) => !v)}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold truncate">{name}</span>
+        {state && <span className="text-[9px] text-purple-300/70 font-mono shrink-0">{state}</span>}
+      </div>
+      {showDetail && detailText && (
+        <div className="text-[10px] text-purple-200/70 mt-0.5 break-words">{detailText}</div>
+      )}
     </div>
   );
 }

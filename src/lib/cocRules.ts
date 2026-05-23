@@ -165,3 +165,93 @@ export function appendDamageBonus(formula: string, db: DamageBonus): string {
   if (db.flat < 0) return `${trimmed}${db.flat}`;
   return trimmed;
 }
+
+/**
+ * 起始现金（CoC 7e 玩家手册 Step 7 表）。
+ * - 1920s: CR × $1
+ * - modern: CR × $20
+ *
+ * 创建期不可调（玩家不应在 UI 直接编辑现金）；
+ * 跑团时由 KP 维护"游戏中余额"，初值即本函数。
+ */
+export function startingCashOf(creditRating: number, era: "1920s" | "modern"): number {
+  const cr = Math.max(0, Math.min(99, Math.floor(creditRating || 0)));
+  return era === "modern" ? cr * 20 : cr;
+}
+
+export type LivingStandardTier = "penniless" | "poor" | "average" | "wealthy" | "rich" | "superRich";
+
+/** 生活水准（CR → 阶级标签）。CoC 7e 玩家手册 Step 7 分级表。 */
+export function livingStandardOf(creditRating: number): LivingStandardTier {
+  const cr = Math.max(0, Math.min(99, Math.floor(creditRating || 0)));
+  if (cr === 0) return "penniless";
+  if (cr <= 9) return "poor";
+  if (cr <= 49) return "average";
+  if (cr <= 89) return "wealthy";
+  if (cr <= 98) return "rich";
+  return "superRich";
+}
+
+/** 阶级标签 → 中文显示名。 */
+export function livingStandardLabel(tier: LivingStandardTier): string {
+  switch (tier) {
+    case "penniless": return "身无分文";
+    case "poor": return "贫困";
+    case "average": return "中等";
+    case "wealthy": return "富有";
+    case "rich": return "富豪";
+    case "superRich": return "超级富豪";
+  }
+}
+
+// ============================================================================
+// 阶段 10：SAN 三层钳制 + 派生战斗值持久化
+// ============================================================================
+
+/**
+ * SAN 硬上限 = 99 − 克苏鲁神话。
+ *
+ * 仅供规则计算，UI 不展示（游戏 UI 的 SAN 仪表只显示 san / maxSan）。
+ * 在 mythos 变化时由 clampSanityLayers 用本函数收敛 sheet.maxSanLimit 与 maxSan / san。
+ */
+export function maxSanLimitOf(mythos: number): number {
+  return Math.max(0, 99 - Math.max(0, mythos | 0));
+}
+
+/**
+ * SAN 三层钳制：maxSanLimit → maxSan → san。
+ *
+ * mythos 上涨、永久 SAN 受损、临时 SAN 受损都走这一个函数收敛，避免分散修改导致漂移。
+ * 调用前调用方自己更新 mythos / maxSan / san 的"当下值"，本函数只做夹紧不做加减。
+ *
+ * 返回值是新的字段子集（而非 mutate），调用方按需 spread 进 sheet。
+ */
+export function clampSanityLayers(
+  sheet: Pick<CharacterSheet, "mythos" | "maxSan" | "san" | "maxSanLimit">,
+): { mythos: number; maxSanLimit: number; maxSan: number; san: number } {
+  const mythos = Math.max(0, sheet.mythos | 0);
+  const maxSanLimit = maxSanLimitOf(mythos);
+  const maxSan = Math.max(0, Math.min(sheet.maxSan, maxSanLimit));
+  const san = Math.max(0, Math.min(sheet.san, maxSan));
+  return { mythos, maxSanLimit, maxSan, san };
+}
+
+/**
+ * 刷新 sheet.combatDerived 快照（不 mutate 入参，返回新 sheet 引用）。
+ *
+ * 在 server 任何修改 attributes.str / con / siz / dex 或 age 的出口处统一调用。
+ * 客户端不直接调用。dodge 也一并写入快照（与 dodgeOf 口径一致）。
+ */
+export function refreshCombatDerived(sheet: CharacterSheet): CharacterSheet {
+  const stats = deriveCombatStats(sheet);
+  const dodge = dodgeOf(sheet.attributes.dex);
+  return {
+    ...sheet,
+    combatDerived: {
+      db: stats.db,
+      build: stats.build,
+      mov: stats.mov,
+      dodge,
+    },
+  };
+}

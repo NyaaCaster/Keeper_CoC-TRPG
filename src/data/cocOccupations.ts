@@ -151,11 +151,10 @@ export const OCCUPATIONS_1920S: OccupationTemplate[] = [
     coreSkills: [s("anthropology"), s("archaeology"), s("history"), s("library-use"), any("language-other"), s("occult"), s("psychology")],
     occupationPointFormula: DEFAULT_OCCUPATION_POINT_FORMULA },
   // 飞行员：电气维修、机械维修、导航、操作重型机械、科学(天文学)、驾驶(飞机)、自定 1
-  // 注：1920s 飞机驾驶用 drive-aircraft 占位 (modern era 才默认开放)；这里强制借用同一分支 id。
+  // 注：飞机驾驶分支 drive-aircraft 在合并表里两代通用 (1920s 已存在飞机驾驶员)。
   { id: "pilot-1920s", nameZh: "飞行员", nameEn: "Pilot", era: "1920s",
     coreSkills: [s("electrical-repair"), s("mechanical-repair"), s("navigate"), s("operate-heavy-machinery"), br("science", "science-astronomy"), br("drive", "drive-aircraft"), free(1)],
-    occupationPointFormula: DEFAULT_OCCUPATION_POINT_FORMULA,
-    notes: "原表'驾驶(飞机)'借用 drive-aircraft 分支 id,该分支 modern 限定;UI 解析时需对此职业放宽过滤。" },
+    occupationPointFormula: DEFAULT_OCCUPATION_POINT_FORMULA },
   // 教授:图书馆使用、其他语种 ×2、心理学、自定 3
   { id: "professor-1920s", nameZh: "教授", nameEn: "Professor", era: "1920s",
     coreSkills: [s("library-use"), any("language-other"), any("language-other"), s("psychology"), free(3)],

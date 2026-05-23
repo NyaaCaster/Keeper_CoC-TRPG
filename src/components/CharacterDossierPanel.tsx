@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect } from "react";
-import { X, FileText } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { X, FileText, Download } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import type { CharacterSheet } from "../types";
+import { downloadCharacterCard } from "../lib/characterCardRender";
 
 interface CharacterDossierPanelProps {
   isOpen: boolean;
@@ -19,6 +20,8 @@ export default function CharacterDossierPanel({
   onClose,
   sheet,
 }: CharacterDossierPanelProps) {
+  const [isDownloading, setIsDownloading] = useState(false);
+
   useEffect(() => {
     if (!isOpen) return;
     const handleKey = (e: KeyboardEvent) => {
@@ -30,6 +33,21 @@ export default function CharacterDossierPanel({
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [isOpen, onClose]);
+
+  // 跑团中点击导出 = 创建期原貌（HP 满 / SAN 未扣 / 技能未涨值 / 现金未消 / 装备未变）。
+  // 旧存档没 creationSnapshot 时回退到当前 sheet，避免按钮失效。
+  const handleDownload = async () => {
+    if (isDownloading) return;
+    setIsDownloading(true);
+    try {
+      const exportSheet = sheet.creationSnapshot ?? sheet;
+      await downloadCharacterCard(exportSheet);
+    } catch (e) {
+      console.error("Failure compiling downloadable investigator card representation:", e);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -62,14 +80,27 @@ export default function CharacterDossierPanel({
                   {sheet.name} · {sheet.occupation}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                className="p-1.5 text-gray-500 hover:text-gray-200 hover:bg-gray-800/60 rounded transition-colors"
-                title="关闭 (ESC)"
-              >
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={isDownloading}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-mono text-coc-gold/90 hover:text-coc-gold border border-coc-gold/40 hover:border-coc-gold/70 hover:bg-coc-gold/10 rounded transition-colors disabled:opacity-50 disabled:cursor-wait"
+                  title="导出创建期角色卡（PNG，含可回读 JSON payload）"
+                >
+                  <Download size={13} />
+                  <span className="hidden sm:inline">{isDownloading ? "生成中…" : "下载调查员角色卡 (.PNG)"}</span>
+                  <span className="sm:hidden">{isDownloading ? "…" : ".PNG"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="p-1.5 text-gray-500 hover:text-gray-200 hover:bg-gray-800/60 rounded transition-colors"
+                  title="关闭 (ESC)"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             {/* Body */}

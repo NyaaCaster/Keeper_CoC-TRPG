@@ -53,6 +53,8 @@ import { loadApiSettings, isApiConfigured } from "./lib/apiSettings";
 import ApiSettingsPanel from "./components/ApiSettingsPanel";
 import { ConsoleLogPanel } from "./components/ConsoleLogPanel";
 import { rollDiceFormula, DiceFormulaResult } from "./lib/diceFormula";
+import { clampSanityLayers } from "./lib/cocRules";
+import { findWeapon } from "./data/cocWeapons";
 import SettingsPanel from "./components/SettingsPanel";
 import { WebGameSave, ApiSettings } from "./types";
 import { getImagePublicPrefix } from "./lib/publicConfig";
@@ -318,7 +320,14 @@ export default function App() {
     chosenChar: CharacterSheet,
     features: { typemoon: boolean; scp: boolean },
   ) => {
-    setCharacter(chosenChar);
+    // 入口处一次性深拷贝一份「创建期不可变快照」。运行期 setCharacter 不再触碰
+    // creationSnapshot 字段；调查员档案 → 下载调查员角色卡 渲染的就是这份原貌。
+    // 嵌套约束：snapshot 内部不再持有 creationSnapshot（截断递归）。
+    const snapshotSource: CharacterSheet = { ...chosenChar };
+    delete (snapshotSource as { creationSnapshot?: CharacterSheet }).creationSnapshot;
+    const creationSnapshot: CharacterSheet = JSON.parse(JSON.stringify(snapshotSource));
+    const charWithSnapshot: CharacterSheet = { ...chosenChar, creationSnapshot };
+    setCharacter(charWithSnapshot);
     setEnabledFeatures(features);
     setAppMode("game");
     setCurrentLocation("游戏准备舱 (调查室)");
@@ -336,7 +345,7 @@ export default function App() {
       id: "sys_init_0",
       sender: "system",
       timestamp: new Date().toLocaleTimeString(),
-      text: `已成功创建调查员档案：\n- **姓名** ↬ ${chosenChar.name}\n- **职业** ↬ ${chosenChar.occupation}\n- **生命(HP)** ↬ ${chosenChar.hp}/${chosenChar.maxHp} | **理智(SAN)** ↬ ${chosenChar.san}/${chosenChar.maxSanLimit} | **幸运** ↬ ${chosenChar.attributes.luck}%\n- **内容模块** ↬ ${activeMods.join(", ")}\n\n联结世界已加载。正在为您秘密连接守密人(Keeper)...`,
+      text: `已成功创建调查员档案：\n- **姓名** ↬ ${chosenChar.name}\n- **职业** ↬ ${chosenChar.occupation}\n- **生命(HP)** ↬ ${chosenChar.hp}/${chosenChar.maxHp} | **理智(SAN)** ↬ ${chosenChar.san}/${chosenChar.maxSan} | **幸运** ↬ ${chosenChar.attributes.luck}%\n- **内容模块** ↬ ${activeMods.join(", ")}\n\n联结世界已加载。正在为您秘密连接守密人(Keeper)...`,
     };
 
     setMessages([initialSystemMsg]);
@@ -958,13 +967,19 @@ export default function App() {
     setCharacter((prev) => {
       if (!prev) return prev;
       const sanityState = prev.sanityState ?? DEFAULT_SANITY_STATE;
-      const nextMythos = prev.mythos + 1;
-      const nextMaxSanLimit = Math.max(0, 99 - nextMythos);
+      // 阶段 10.7b：mythos +1 后由 clampSanityLayers 统一收敛 maxSanLimit / maxSan / san。
+      const clamped = clampSanityLayers({
+        mythos: prev.mythos + 1,
+        maxSan: prev.maxSan,
+        san: prev.san,
+        maxSanLimit: prev.maxSanLimit,
+      });
       return {
         ...prev,
-        mythos: nextMythos,
-        maxSanLimit: nextMaxSanLimit,
-        san: Math.min(prev.san, nextMaxSanLimit),
+        mythos: clamped.mythos,
+        maxSanLimit: clamped.maxSanLimit,
+        maxSan: clamped.maxSan,
+        san: clamped.san,
         sanityState: {
           ...sanityState,
           madness: "bout",
@@ -1064,6 +1079,10 @@ export default function App() {
     const beforeChar = character!;
     let scenarioEndOverride: KeeperResponse["scenarioEnd"] = null;
 
+    // 阶段 10.7a：现金 / 弹药变动 LogEntry,在 characterUpdates 块里收集,
+    // 在下方 newMsgs 初始化后统一插入(置于 keeperRollReport 之后,主 keeper 消息之前)。
+    const cashAmmoLog: string[] = [];
+
     // Check for Character Attributes updates (HP / SAN / MP)
     if (keeperData.characterUpdates) {
       const updates = keeperData.characterUpdates;
@@ -1077,7 +1096,7 @@ export default function App() {
       let finalMp = character!.mp;
       let finalSan = character!.san;
       let finalMythos = character!.mythos;
-      let finalMaxSanLimit = character!.maxSanLimit;
+      let finalMaxSan = character!.maxSan;
 
       if (updates.hpChange && !skipHpChange) {
         finalHp = Math.max(
@@ -1098,9 +1117,11 @@ export default function App() {
       }
 
       if (updates.sanChange && !skipSanChange) {
+        // 仅做"不超过当前 maxSan + 不低于 0"的简单边界处理。
+        // mythos 引发的硬上限收敛由后续 clampSanityLayers 统一负责。
         finalSan = Math.max(
           0,
-          Math.min(character!.maxSanLimit, character!.san + updates.sanChange),
+          Math.min(character!.maxSan, character!.san + updates.sanChange),
         );
         setSanDiff(updates.sanChange);
         setTimeout(() => setSanDiff(0), 3000);
@@ -1108,8 +1129,64 @@ export default function App() {
 
       if (updates.sanitySkillGain) {
         finalMythos = character!.mythos + updates.sanitySkillGain;
-        finalMaxSanLimit = Math.max(0, 99 - finalMythos);
-        finalSan = Math.min(finalSan, finalMaxSanLimit);
+      }
+
+      // 阶段 10.7a：现金 / 弹药 KP 工具结算。
+      // 走与 hp/mp/san 同一通道，但下游不再承接 sanityImpact / 终局闸,所以单独计算
+      // finalCash / nextInventory + 一次性收集 LogEntry,在 setCharacter 时合并写入。
+      const prevCash = typeof character!.cashBalance === "number" ? character!.cashBalance : 0;
+      let finalCash = prevCash;
+      const cashSetGiven = typeof updates.cashSetTo === "number" && Number.isFinite(updates.cashSetTo);
+      const cashDeltaGiven = typeof updates.cashChange === "number" && Number.isFinite(updates.cashChange);
+      if (cashSetGiven) {
+        const target = Math.max(0, Math.floor(updates.cashSetTo!));
+        finalCash = target;
+        cashAmmoLog.push(`[现金变动] 现金余额重置：${prevCash} → ${finalCash}。`);
+      } else if (cashDeltaGiven && updates.cashChange !== 0) {
+        const delta = Math.floor(updates.cashChange!);
+        const raw = prevCash + delta;
+        finalCash = Math.max(0, raw);
+        const overdraft = raw < 0 ? `（透支 ${Math.abs(raw)} 已钳到 0）` : "";
+        const sign = delta > 0 ? "+" : "";
+        cashAmmoLog.push(`[现金变动] ${sign}${delta} → 现金余额 ${prevCash} → ${finalCash}${overdraft}。`);
+      }
+
+      const prevInventory = character!.inventory ?? [];
+      let nextInventory = prevInventory;
+      if (Array.isArray(updates.ammoUpdates) && updates.ammoUpdates.length > 0) {
+        const draftInv = prevInventory.slice();
+        for (const upd of updates.ammoUpdates) {
+          if (!upd || typeof upd.slotIndex !== "number") continue;
+          const idx = Math.floor(upd.slotIndex);
+          if (idx < 0 || idx >= draftInv.length) continue;
+          const entry = draftInv[idx];
+          if (!entry || entry.kind !== "weapon") continue;
+          const w = findWeapon(entry.weaponId);
+          if (!w || w.maxAmmo <= 0) continue;
+
+          const setGiven = typeof upd.ammoSetTo === "number" && Number.isFinite(upd.ammoSetTo);
+          const deltaGiven = typeof upd.ammoDelta === "number" && Number.isFinite(upd.ammoDelta);
+          if (!setGiven && !deltaGiven) continue;
+
+          const prevAmmo = entry.ammo;
+          let nextAmmo = prevAmmo;
+          if (setGiven) {
+            nextAmmo = Math.max(0, Math.min(w.maxAmmo, Math.floor(upd.ammoSetTo!)));
+            cashAmmoLog.push(`[弹药变动] [槽 ${idx}] ${w.nameZh} 弹药重置：${prevAmmo}/${w.maxAmmo} → ${nextAmmo}/${w.maxAmmo}。`);
+          } else {
+            const d = Math.floor(upd.ammoDelta!);
+            if (d === 0) continue;
+            const raw = prevAmmo + d;
+            nextAmmo = Math.max(0, Math.min(w.maxAmmo, raw));
+            const sign = d > 0 ? "+" : "";
+            const note = raw < 0 ? "（已耗尽）" : raw > w.maxAmmo ? "（已封顶）" : "";
+            cashAmmoLog.push(`[弹药变动] [槽 ${idx}] ${w.nameZh} ${sign}${d} → ${prevAmmo}/${w.maxAmmo} → ${nextAmmo}/${w.maxAmmo}${note}。`);
+          }
+          if (nextAmmo !== prevAmmo) {
+            draftInv[idx] = { ...entry, ammo: nextAmmo };
+          }
+        }
+        nextInventory = draftInv;
       }
 
       // 规则 10 SAN 影响裁决(整数路径) — 在 setCharacter 之前先算好 sanityState,
@@ -1125,14 +1202,27 @@ export default function App() {
         nextSanityState = pendingSanImpact.nextSanityState;
       }
 
+      // 阶段 10.7b：三层钳制 maxSanLimit → maxSan → san，由 cocRules.clampSanityLayers 单点收敛。
+      // mythos 上涨（sanitySkillGain）→ maxSanLimit 下降 → 必要时压低 maxSan / san；
+      // 仅 sanChange 路径时 mythos 不变，dependencies 无副作用。
+      const clamped = clampSanityLayers({
+        mythos: finalMythos,
+        maxSan: finalMaxSan,
+        san: finalSan,
+        maxSanLimit: character!.maxSanLimit,
+      });
+
       const nextCharState = {
         ...character!,
         hp: finalHp,
         mp: finalMp,
-        san: finalSan,
-        mythos: finalMythos,
-        maxSanLimit: finalMaxSanLimit,
+        san: clamped.san,
+        maxSan: clamped.maxSan,
+        mythos: clamped.mythos,
+        maxSanLimit: clamped.maxSanLimit,
         sanityState: nextSanityState,
+        cashBalance: finalCash,
+        inventory: nextInventory,
       };
 
       setCharacter(nextCharState);
@@ -1248,6 +1338,20 @@ export default function App() {
         sender: "system",
         timestamp: new Date().toLocaleTimeString(),
         text: keeperRollReport,
+      });
+    }
+
+    // 阶段 10.7a：现金 / 弹药变动逐条 LogEntry,排在 keeper 主消息前,
+    // 让玩家先看到面板会怎么动,再看 KP 的叙事。
+    if (cashAmmoLog.length > 0) {
+      const baseTs = Date.now();
+      cashAmmoLog.forEach((line, i) => {
+        newMsgs.push({
+          id: `sys_cash_ammo_${baseTs}_${i}`,
+          sender: "system",
+          timestamp: new Date().toLocaleTimeString(),
+          text: line,
+        });
       });
     }
 
@@ -1753,7 +1857,7 @@ export default function App() {
       ? ` (公式 ${lossFormula}，骰点 [${evaluated.rolls.join(", ")}]${evaluated.constant ? ` ${evaluated.constant >= 0 ? "+" : ""}${evaluated.constant}` : ""}${evaluated.divisor > 1 ? ` ÷${evaluated.divisor}` : ""})`
       : ` (公式 ${lossFormula})`;
 
-    const baseReport = `[系统的理智SAN值判定 - 意志: 投出 ${checkResult.total} / 目标 ${checkResult.targetValue} (${isSuccess ? "成功" : "失败"}) -> 扣减 SAN 值 ${rolledLoss} 点${breakdown}。当前理智值：${finalSan}/${beforeChar.maxSanLimit}。\n异常行为状态：${stateStr}]`;
+    const baseReport = `[系统的理智SAN值判定 - 意志: 投出 ${checkResult.total} / 目标 ${checkResult.targetValue} (${isSuccess ? "成功" : "失败"}) -> 扣减 SAN 值 ${rolledLoss} 点${breakdown}。当前理智值：${finalSan}/${beforeChar.maxSan}。\n异常行为状态：${stateStr}]`;
 
     finalizeSanityImpact(baseReport, beforeChar, impact);
   };

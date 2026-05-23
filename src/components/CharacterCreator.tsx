@@ -4,10 +4,11 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { CharacterSheet, CharacterAttributes, CharacterSkills, ApiSettings, LogEntry, MythicEncounters } from "../types";
+import { CharacterSheet, CharacterAttributes, CharacterSkills, ApiSettings, LogEntry, MythicEncounters, InventoryEntry } from "../types";
 import { TEMPLATE_PRESETS } from "../data/presets";
 import { getOccupations, findOccupation } from "../data/cocOccupations";
-import { dodgeOf, motherTongueValue } from "../lib/cocRules";
+import { dodgeOf, motherTongueValue, startingCashOf, livingStandardOf, livingStandardLabel, refreshCombatDerived } from "../lib/cocRules";
+import { getWeaponList, findWeapon, describeWeapon } from "../data/cocWeapons";
 import {
   SkillSheetDraft,
   SlotConstraint,
@@ -29,6 +30,9 @@ import {
   describeConstraint,
   INTEREST_SLOT_COUNT,
 } from "../lib/cocSkillSlots";
+import { randomizeSkillDraft, legalizeDraft } from "../lib/cocSkillRandomizer";
+import { validateCharacterSheet } from "../lib/characterValidation";
+import { downloadCharacterCard } from "../lib/characterCardRender";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Sparkles,
@@ -65,42 +69,8 @@ interface CharacterCreatorProps {
 }
 
 // Preset Investigators
-const CLASSIC_PRESETS: Omit<CharacterSheet, "background">[] = [
-  {
-    name: "赫尔辛·阿契博尔德 (Helsing)",
-    occupation: "时钟塔·现代魔术学科研究员",
-    gender: "男",
-    age: 26,
-    attributes: { str: 45, con: 55, siz: 50, dex: 65, app: 70, int: 80, pow: 75, edu: 85, luck: 60 },
-    skills: { "神秘学": 80, "图书馆使用": 75, "侦查": 60, "心理学": 50, "聆听": 50, "拉丁语": 65, "手枪": 20, "克苏鲁神话": 0 },
-    hp: 10, maxHp: 10, mp: 15, maxMp: 15, san: 75, maxSan: 75, maxSanLimit: 99, mythos: 0
-  },
-  {
-    name: "卡特外勤特工 (Agent Carter)",
-    occupation: "SCP基金会外勤机动特遣队 (MTF)",
-    gender: "女",
-    age: 31,
-    attributes: { str: 75, con: 70, siz: 65, dex: 70, app: 50, int: 70, pow: 60, edu: 60, luck: 55 },
-    skills: { "手枪": 75, "侦查": 70, "心理学": 45, "潜行": 65, "聆听": 60, "神秘学": 35, "急救": 50, "克苏鲁神话": 0 },
-    hp: 13, maxHp: 13, mp: 12, maxMp: 12, san: 60, maxSan: 60, maxSanLimit: 99, mythos: 0
-  },
-  {
-    name: "柳濑真一 (Prof. Yanase)",
-    occupation: "密斯卡托尼克大学民俗考古学家",
-    gender: "男",
-    age: 52,
-    attributes: { str: 40, con: 50, siz: 60, dex: 55, app: 60, int: 75, pow: 80, edu: 80, luck: 70 },
-    skills: { "考古学": 75, "历史": 75, "图书馆使用": 70, "神秘学": 60, "侦查": 55, "聆听": 50, "说服": 55, "克苏鲁神话": 0 },
-    hp: 11, maxHp: 11, mp: 16, maxMp: 16, san: 80, maxSan: 80, maxSanLimit: 99, mythos: 0
-  }
-];
-
-// Preset description descriptions to display when reviewing classical presets
-const PRESET_OVERVIEWS: Record<string, string> = {
-  "赫尔辛·阿契博尔德 (Helsing)": "毕业于伦敦时钟塔的精锐新秀魔术学者，专精于高维以太通道判定和魔术刻印修复，因追查远东地区的狂乱根源而开始搜集非自然异化样本。",
-  "卡特外勤特工 (Agent Carter)": "来自SCP基金会机动特遣队 (MTF) 的特级探员，多次参与特异收容失效现场营救。意志如钢，配有精良武器，能在最极端的深渊中保持理性开火。",
-  "柳濑真一 (Prof. Yanase)": "著名民俗学及考古学家，毕生致力于考据大洋洲古神庙和禁忌教典。经验博大精深，拥有非凡的古代文献解读直觉与神秘事物抗性。"
-};
+// 创建期可选的调查员预设来自 src/data/presets.ts (TEMPLATE_PRESETS)。
+// 旧版 CLASSIC_PRESETS / PRESET_OVERVIEWS 未在此组件被引用，已移除。
 
 export default function CharacterCreator({ onComplete, onBackToStart, apiSettings, onAddLog }: CharacterCreatorProps) {
   // 3-step preparation flow: 1 = Choose Era & Generate Module Outline, 2 = Select / Customize PC, 3 = Double verify Dossier & Module Intro
@@ -156,6 +126,24 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
   });
   // 阶段 7：技能区改为槽位草稿 (8 职业槽 + 4 兴趣槽)
   const [skillDraft, setSkillDraft] = useState<SkillSheetDraft>(() => emptyDraft(customOccupationConstraints()));
+
+  // 阶段 9：装备槽（House Rule：8 槽随身上限，详见 .docs/character-card-current.md 第 5 节）
+  const INVENTORY_SLOT_COUNT = 8;
+  const emptyInventory = (): InventoryEntry[] =>
+    Array.from({ length: INVENTORY_SLOT_COUNT }, () => ({ kind: "item" as const, text: "" }));
+  const [inventory, setInventory] = useState<InventoryEntry[]>(() => emptyInventory());
+
+  // 切换 era 时把"被独占在另一个 era 的武器槽"重置为空物品（兼容性兜底）
+  useEffect(() => {
+    setInventory((prev) =>
+      prev.map((e) => {
+        if (e.kind !== "weapon") return e;
+        const w = findWeapon(e.weaponId);
+        if (!w || w.era === "any" || w.era === selectedEra) return e;
+        return { kind: "item", text: "" };
+      }),
+    );
+  }, [selectedEra]);
 
   const [isRolling, setIsRolling] = useState(false);
   const [isGeneratingStats, setIsGeneratingStats] = useState(false);
@@ -275,212 +263,14 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
     }));
   }, [moduleOutline?.presets, selectedEra]);
 
-  // Helper inside click to construct PNG and add JSON payload
+  // 创建期 「深渊复核 → 下载调查员角色卡」 入口。运行期入口在 CharacterDossierPanel 里直接
+  // 调 downloadCharacterCard(sheet.creationSnapshot ?? sheet)；两者共享同一渲染模块。
   const handleDownloadCharacterCard = async () => {
     if (!reviewCharacter) return;
     setIsDownloading(true);
-
     try {
-      const canvas = document.createElement("canvas");
-      canvas.width = 400;
-      canvas.height = 400;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        throw new Error("Unable to create canvas 2D context.");
-      }
-
-      // Draw beautiful stylized background
-      ctx.fillStyle = "#121415";
-      ctx.fillRect(0, 0, 400, 400);
-
-      const radGradient = ctx.createRadialGradient(200, 200, 40, 200, 200, 280);
-      radGradient.addColorStop(0, "#1f2224");
-      radGradient.addColorStop(0.5, "#131516");
-      radGradient.addColorStop(1, "#070809");
-      ctx.fillStyle = radGradient;
-      ctx.fillRect(0, 0, 400, 400);
-
-      // Card frame golden details
-      ctx.strokeStyle = "#c1a067";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(12, 12, 376, 376);
-
-      ctx.strokeStyle = "rgba(193, 160, 103, 0.25)";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(18, 18, 364, 364);
-
-      // Corner triangles or brackets
-      const drawBracket = (x: number, y: number, hSign: number, vSign: number) => {
-        ctx.strokeStyle = "#c1a067";
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(x + hSign * 25, y);
-        ctx.lineTo(x, y);
-        ctx.lineTo(x, y + vSign * 25);
-        ctx.stroke();
-      };
-      drawBracket(12, 12, 1, 1);
-      drawBracket(388, 12, -1, 1);
-      drawBracket(12, 388, 1, -1);
-      drawBracket(388, 388, -1, -1);
-
-      // Decorative center top emblem representation
-      ctx.fillStyle = "#c1a067";
-      ctx.font = "bold 9px monospace";
-      ctx.textAlign = "center";
-      ctx.fillText("✥ KEEPER INVESTIGATOR SECURE DOSSIER ✥", 200, 36);
-
-      // Circular avatar rendering & async wait for visual image if set
-      const drawAvatarCircle = async () => {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(200, 108, 44, 0, Math.PI * 2);
-        ctx.fillStyle = "#0c0d0e";
-        ctx.fill();
-        ctx.strokeStyle = "#c1a067";
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-        ctx.restore();
-
-        if (reviewCharacter.avatar) {
-          const img = new Image();
-          img.crossOrigin = "anonymous";
-          img.src = reviewCharacter.avatar;
-          await new Promise<void>((resolveImg) => {
-            img.onload = () => {
-              ctx.save();
-              ctx.beginPath();
-              ctx.arc(200, 108, 42, 0, Math.PI * 2);
-              ctx.clip();
-              ctx.drawImage(img, 158, 66, 84, 84);
-              ctx.restore();
-              resolveImg();
-            };
-            img.onerror = () => {
-              // fallback
-              ctx.fillStyle = "#c1a067";
-              ctx.font = "bold 32px sans-serif";
-              ctx.textAlign = "center";
-              ctx.textBaseline = "middle";
-              ctx.fillText(reviewCharacter.name.trim().charAt(0).toUpperCase(), 200, 109);
-              resolveImg();
-            };
-          });
-        } else {
-          ctx.fillStyle = "#c1a067";
-          ctx.font = "bold 32px sans-serif";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(reviewCharacter.name.trim().charAt(0).toUpperCase(), 200, 109);
-        }
-      };
-
-      await drawAvatarCircle();
-
-      // Text Fields Configuration
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 17px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "alphabetic";
-      ctx.fillText(reviewCharacter.name, 200, 185);
-
-      ctx.fillStyle = "#c1a067";
-      ctx.font = "bold 11px sans-serif";
-      const occStr = `${reviewCharacter.occupation}  |  ${reviewCharacter.gender || "男"} • ${reviewCharacter.age || 30}岁`;
-      ctx.fillText(occStr, 200, 206);
-
-      // Separation Line
-      ctx.strokeStyle = "rgba(193, 160, 103, 0.2)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(60, 222);
-      ctx.lineTo(340, 222);
-      ctx.stroke();
-
-      // Separation central diamond mark
-      ctx.fillStyle = "#c1a067";
-      ctx.beginPath();
-      ctx.moveTo(200, 218);
-      ctx.lineTo(204, 222);
-      ctx.lineTo(200, 226);
-      ctx.lineTo(196, 222);
-      ctx.fill();
-
-      // HP/MP/SAN metrics display text
-      ctx.font = "bold 11px monospace";
-      ctx.fillStyle = "#f87171"; // Red
-      ctx.fillText(`HP: ${reviewCharacter.hp}/${reviewCharacter.maxHp}`, 95, 246);
-
-      ctx.fillStyle = "#60a5fa"; // Blue
-      ctx.fillText(`MP: ${reviewCharacter.mp}/${reviewCharacter.maxMp}`, 200, 246);
-
-      ctx.fillStyle = "#34d399"; // Green
-      ctx.fillText(`SAN: ${reviewCharacter.san}`, 305, 246);
-
-      // Attributes lines
-      ctx.fillStyle = "#9ca3af";
-      ctx.font = "9.5px monospace";
-      ctx.fillText(
-        `STR:${reviewCharacter.attributes.str} CON:${reviewCharacter.attributes.con} SIZ:${reviewCharacter.attributes.siz} DEX:${reviewCharacter.attributes.dex} APP:${reviewCharacter.attributes.app}`,
-        200,
-        278
-      );
-      ctx.fillText(
-        `INT:${reviewCharacter.attributes.int} POW:${reviewCharacter.attributes.pow} EDU:${reviewCharacter.attributes.edu} LUCK:${reviewCharacter.attributes.luck}`,
-        200,
-        296
-      );
-
-      // Skill tags displays of first 3 customized skills
-      let displaySkills = "SKILLS: ";
-      const filteredSortedSkills = Object.entries(reviewCharacter.skills)
-        .filter(([sk]) => sk !== "克苏鲁神话")
-        .slice(0, 3)
-        .map(([sk, val]) => `${sk}(${val}%)`);
-      displaySkills += filteredSortedSkills.length > 0 ? filteredSortedSkills.join(" | ") : "常规探查学者";
-
-      ctx.fillStyle = "#f3f4f6";
-      ctx.font = "10.5px sans-serif";
-      ctx.fillText(displaySkills, 200, 326);
-
-      // Aesthetic Bottom text stamp
-      ctx.fillStyle = "rgba(193, 160, 103, 0.35)";
-      ctx.font = "italic 9px monospace";
-      ctx.fillText(`CHRONOS SYSTEM SIGNATURE • TYPE-MOON & FOUNDATION DUAL COOPERATION`, 200, 355);
-
-      // Capture the basic image bytes from Canvas as PNG blob
-      const basePngBlob = await new Promise<Blob>((resBlob) => {
-        canvas.toBlob((b) => resBlob(b || new Blob()), "image/png");
-      });
-
-      const arrayBuffer = await basePngBlob.arrayBuffer();
-      const basePngBytes = new Uint8Array(arrayBuffer);
-
-      // Let's bundle structural JSON values
-      const jsonPayloadString = JSON.stringify(reviewCharacter);
-      const encoder = new TextEncoder();
-      const markerBytes = encoder.encode("KEEPER_CHARACTER_CARD_UTF8_PAYLOAD:");
-      const jsonPayloadBytes = encoder.encode(jsonPayloadString);
-
-      // Combine array binary: [PNG BYTES] + [MARKER_BYTES] + [JSON_PAYLOAD_BYTES]
-      const totalCombinedCardBytes = new Uint8Array(basePngBytes.length + markerBytes.length + jsonPayloadBytes.length);
-      totalCombinedCardBytes.set(basePngBytes, 0);
-      totalCombinedCardBytes.set(markerBytes, basePngBytes.length);
-      totalCombinedCardBytes.set(jsonPayloadBytes, basePngBytes.length + markerBytes.length);
-
-      // Assemble download trigger
-      const finishedCardBlob = new Blob([totalCombinedCardBytes], { type: "image/png" });
-      const dlLinkUrl = URL.createObjectURL(finishedCardBlob);
-
-      const triggerAnchor = document.createElement("a");
-      triggerAnchor.href = dlLinkUrl;
-      triggerAnchor.download = `${reviewCharacter.name}_investigator_sheet.png`;
-      triggerAnchor.click();
-
-      // Revoke memory allocations after download
-      setTimeout(() => URL.revokeObjectURL(dlLinkUrl), 400);
-
-    } catch (e: any) {
+      await downloadCharacterCard(reviewCharacter);
+    } catch (e) {
       console.error("Failure compiling downloadable investigator card representation:", e);
     } finally {
       setIsDownloading(false);
@@ -527,7 +317,25 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
 
       const jsonPayloadBytes = uint8.subarray(foundIndex + markerBytes.length);
       const decodedPayloadString = decoder.decode(jsonPayloadBytes);
-      const importedPC = JSON.parse(decodedPayloadString) as CharacterSheet;
+      let parsedPayload: unknown;
+      try {
+        parsedPayload = JSON.parse(decodedPayloadString);
+      } catch {
+        setImportError("解析失败：该 PNG 末尾的 JSON payload 无法解码。请重新由系统的「下载调查员角色卡」按钮导出后再尝试。");
+        return;
+      }
+
+      // 严格校验 — 与 .docs/character-dictionary.yaml 对齐。任何偏差直接拒绝。
+      const validation = validateCharacterSheet(parsedPayload);
+      if (!validation.ok) {
+        const lines = validation.issues.slice(0, 12).map((i) => `• [${i.path}] ${i.message}`);
+        const more = validation.issues.length > 12 ? `\n...其余 ${validation.issues.length - 12} 处偏差略。` : "";
+        setImportError(
+          `角色卡校验未通过（共 ${validation.issues.length} 处不符字典表）：\n${lines.join("\n")}${more}\n\n请在导出端按 .docs/character-dictionary.yaml 第 1–10 节规范修正后重试。`,
+        );
+        return;
+      }
+      const importedPC = validation.sheet!;
 
       // Extract image itself, converting into custom base64 avatar context
       const fileReader = new FileReader();
@@ -547,7 +355,10 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
         }
 
         if (!cleanAvatar) {
-          // Extract the circular avatar (x: 158, y: 66, w: 84, h: 84) from the 400x400 card dynamically with canvas
+          // 按图片实际尺寸推断头像区域：
+          //  - 新卡 (512×768)：中心 (256,150)，半径 56  → 源矩形 (200,94,112,112)
+          //  - 旧卡 (400×400)：中心 (200,108)，半径 42 → 源矩形 (158,66,84,84)
+          // 若两者都不匹配，按图像最小边的中心方形回退。
           cleanAvatar = await new Promise<string>((resolveCrop) => {
             const img = new Image();
             img.crossOrigin = "anonymous";
@@ -558,8 +369,18 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                 tempCanvas.height = 120;
                 const tempCtx = tempCanvas.getContext("2d");
                 if (tempCtx) {
-                  // Crop the circular avatar region and draw it scaled slightly larger for optimal resolution
-                  tempCtx.drawImage(img, 158, 66, 84, 84, 0, 0, 120, 120);
+                  let sx: number, sy: number, sw: number, sh: number;
+                  if (img.naturalWidth === 512 && img.naturalHeight === 768) {
+                    sx = 200; sy = 94; sw = 112; sh = 112;
+                  } else if (img.naturalWidth === 400 && img.naturalHeight === 400) {
+                    sx = 158; sy = 66; sw = 84; sh = 84;
+                  } else {
+                    const side = Math.min(img.naturalWidth, img.naturalHeight);
+                    sx = (img.naturalWidth - side) / 2;
+                    sy = (img.naturalHeight - side) / 2;
+                    sw = side; sh = side;
+                  }
+                  tempCtx.drawImage(img, sx, sy, sw, sh, 0, 0, 120, 120);
                   resolveCrop(tempCanvas.toDataURL("image/png"));
                   return;
                 }
@@ -621,7 +442,7 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
         }
 
         // Direct skip to confirmation step
-        setReviewCharacter(importedPC);
+        setReviewCharacter(refreshCombatDerived(importedPC));
         setImportError(null);
         setCurrentStep(3);
       };
@@ -881,7 +702,22 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
             customOccupationId;
           const matchedTpl = tplOccId ? findOccupation(selectedEra, tplOccId) : undefined;
           const constraints = matchedTpl ? expandOccupationSlots(matchedTpl) : customOccupationConstraints();
-          setSkillDraft(distributeSkillsToDraft(mappedSkills, constraints, selectedEra));
+          // 阶段 8：LLM 输出的"技能偏好"先落 picked 槽，点数交本地分配器按 EDU×4 / INT×2 双池合法切分。
+          const llmAttrs = charData.attributes
+            ? {
+                str: charData.attributes.str || 50,
+                con: charData.attributes.con || 50,
+                siz: charData.attributes.siz || 50,
+                dex: charData.attributes.dex || 50,
+                app: charData.attributes.app || 50,
+                int: charData.attributes.int || 50,
+                pow: charData.attributes.pow || 50,
+                edu: charData.attributes.edu || 50,
+                luck: charData.attributes.luck || 50,
+              }
+            : customAttrs;
+          const distributed = distributeSkillsToDraft(mappedSkills, constraints, selectedEra);
+          setSkillDraft(legalizeDraft(distributed, llmAttrs, selectedEra));
         }
       } else {
         onAddLog?.({
@@ -919,13 +755,33 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
   // Preset -> Proceed to review
   const handleSelectPreset = () => {
     const preset = activePresets[selectedPresetIndex] || activePresets[0];
+    // 字典表第 1 节 / 第 9 节 / 第 7 节 / 第 10 节：所有创建期字段必须落在 sheet 上。
+    // presets.ts 已对齐字典表，此处只补齐 era 切换 / avatar / 派生字段。
+    const presetCR = typeof (preset as CharacterSheet).creditRating === "number"
+      ? (preset as CharacterSheet).creditRating!
+      : 0;
+    const presetInventory: InventoryEntry[] = Array.isArray((preset as CharacterSheet).inventory)
+      && (preset as CharacterSheet).inventory!.length === 8
+      ? (preset as CharacterSheet).inventory!.map((e) =>
+          e.kind === "weapon"
+            ? { kind: "weapon" as const, weaponId: e.weaponId, ammo: e.ammo }
+            : { kind: "item" as const, text: e.text },
+        )
+      : Array.from({ length: 8 }, () => ({ kind: "item" as const, text: "" }));
+    const presetMythic: MythicEncounters = (preset as CharacterSheet).mythicEncounters ?? {
+      tomes: [], spells: [], artifacts: [], entities: [],
+    };
     const finalChar: CharacterSheet = {
-      ...preset,
+      ...(preset as CharacterSheet),
       background: selectedEra,
-      avatar: customAvatar || undefined,
-      backgroundStory: (preset as any).overview || undefined,
-    } as any;
-    setReviewCharacter(finalChar);
+      avatar: customAvatar || (preset as CharacterSheet).avatar || undefined,
+      backgroundStory: (preset as any).overview ?? (preset as any).backgroundText ?? (preset as CharacterSheet).backgroundStory,
+      mythicEncounters: presetMythic,
+      inventory: presetInventory,
+      cashBalance: startingCashOf(presetCR, selectedEra),
+      sanityState: { episodeSanLoss: 0, madness: null },
+    };
+    setReviewCharacter(refreshCombatDerived(finalChar));
     setCurrentStep(3);
   };
 
@@ -940,7 +796,11 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
     const selectedOccTemplate = customOccupationId ? findOccupation(selectedEra, customOccupationId) : undefined;
     const finalOccupation = selectedOccTemplate?.nameZh || customOccupationFreeText.trim() || "非主流秘仪学者";
 
-    const newChar: CharacterSheet = {
+    const finalCreditRating = Number.isFinite(customCreditRating)
+      ? Math.max(0, Math.min(99, Math.floor(customCreditRating)))
+      : 0;
+
+    const baseChar: CharacterSheet = {
       name: finalName,
       occupation: finalOccupation,
       gender: customGender,
@@ -963,10 +823,23 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
       nationality: customNationality.trim() || undefined,
       residence: customResidence.trim() || undefined,
       motherTongue: customMotherTongue.trim() || undefined,
-      creditRating: Number.isFinite(customCreditRating) ? Math.max(0, Math.min(99, Math.floor(customCreditRating))) : undefined,
+      creditRating: finalCreditRating,
       // 神秘接触：创建期空，KP 在游戏中下发
       mythicEncounters: { tomes: [], spells: [], artifacts: [], entities: [] } satisfies MythicEncounters,
+      // 阶段 9 装备槽：8 槽随身，空槽 = { kind:"item", text:"" } 占位
+      inventory: inventory.map((e) =>
+        e.kind === "weapon"
+          ? { kind: "weapon" as const, weaponId: e.weaponId, ammo: e.ammo }
+          : { kind: "item" as const, text: e.text },
+      ),
+      // 阶段 10：现金运行时余额初值 = 起始现金派生值
+      cashBalance: startingCashOf(finalCreditRating, selectedEra),
+      // 字典表第 10 节：疯狂状态机创建期默认
+      sanityState: { episodeSanLoss: 0, madness: null },
     };
+
+    // 阶段 10：派生战斗值快照（DB / Build / MOV / Dodge）写入持久化
+    const newChar = refreshCombatDerived(baseChar);
 
     setReviewCharacter(newChar);
     setCurrentStep(3);
@@ -1346,9 +1219,9 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
             </div>
 
             {importError && (
-              <div className="p-3 bg-red-950/40 border border-red-800/50 rounded flex items-center gap-2 text-xs text-red-300 font-sans">
-                <AlertCircle className="w-4 h-4 text-red-400" />
-                <span>{importError}</span>
+              <div className="p-3 bg-red-950/40 border border-red-800/50 rounded flex items-start gap-2 text-xs text-red-300 font-sans">
+                <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                <span className="whitespace-pre-wrap leading-relaxed">{importError}</span>
               </div>
             )}
 
@@ -1761,6 +1634,30 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                     </div>
                   </div>
 
+                  {/* 阶段 9 派生：起始现金 + 生活水准（CR 派生，创建期不可调） */}
+                  <div className="grid grid-cols-2 gap-3 bg-black/40 p-3 rounded border border-gray-800 text-xs">
+                    <div className="text-center">
+                      <span className="text-gray-400 block">
+                        起始现金 (CR × {selectedEra === "modern" ? "$20" : "$1"}):
+                      </span>
+                      <span className="font-mono text-[#c1a067] text-sm font-semibold">
+                        ${startingCashOf(customCreditRating, selectedEra)}
+                      </span>
+                      <span className="text-[9px] text-gray-500 font-sans block mt-0.5">
+                        CR {customCreditRating} × {selectedEra === "modern" ? "$20" : "$1"}
+                      </span>
+                    </div>
+                    <div className="text-center">
+                      <span className="text-gray-400 block">生活水准:</span>
+                      <span className="font-mono text-amber-200 text-sm font-semibold">
+                        {livingStandardLabel(livingStandardOf(customCreditRating))}
+                      </span>
+                      <span className="text-[9px] text-gray-500 font-sans block mt-0.5">
+                        资产 / 不动产由 KP 维护
+                      </span>
+                    </div>
+                  </div>
+
                   {/* 神秘接触占位：创建期空，KP 在游戏中通过神话事件下发 */}
                   <details className="bg-black/30 rounded border border-gray-850 text-xs font-sans">
                     <summary className="cursor-pointer px-3 py-2 text-[#c1a067]/80 hover:text-[#c1a067] select-none flex items-center justify-between">
@@ -1778,16 +1675,30 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
 
                 {/* 阶段 7：槽位化技能区 */}
                 <div className="bg-[#181a1c] border border-gray-800 p-5 rounded-lg space-y-4 font-sans">
-                  <div className="flex items-center justify-between border-b border-gray-800 pb-2">
+                  <div className="flex items-center justify-between border-b border-gray-800 pb-2 gap-3 flex-wrap">
                     <h4 className="text-sm font-semibold text-[#c1a067]">技能分配（职业槽 8 + 兴趣槽 4）</h4>
-                    <div className="flex items-center gap-3 text-[11px] font-mono">
-                      <span className={occSpent > pointPools.occupation ? "text-red-400" : "text-gray-400"}>
-                        职业池: <span className="text-gray-200">{occSpent}</span> / {pointPools.occupation}
-                      </span>
-                      <span className="text-gray-600">·</span>
-                      <span className={intSpent > pointPools.interest ? "text-red-400" : "text-gray-400"}>
-                        兴趣池: <span className="text-gray-200">{intSpent}</span> / {pointPools.interest}
-                      </span>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <button
+                        id="randomize-skills-btn"
+                        type="button"
+                        onClick={() =>
+                          setSkillDraft(
+                            randomizeSkillDraft(occupationConstraints, customAttrs, selectedEra),
+                          )
+                        }
+                        className="flex items-center gap-1.5 px-3 py-1 bg-black border border-[#c1a067]/40 text-[#c1a067] font-mono text-xs rounded hover:bg-[#c1a067]/15 transition active:scale-95"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" /> 随机宿命技能分配
+                      </button>
+                      <div className="flex items-center gap-3 text-[11px] font-mono">
+                        <span className={occSpent > pointPools.occupation ? "text-red-400" : "text-gray-400"}>
+                          职业池: <span className="text-gray-200">{occSpent}</span> / {pointPools.occupation}
+                        </span>
+                        <span className="text-gray-600">·</span>
+                        <span className={intSpent > pointPools.interest ? "text-red-400" : "text-gray-400"}>
+                          兴趣池: <span className="text-gray-200">{intSpent}</span> / {pointPools.interest}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <p className="text-[10px] text-gray-500 leading-relaxed">
@@ -1838,6 +1749,35 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                       ⚠ 有重复选择的技能（红框标记）。提交时会取最大值合并，不会重复加点；建议手动调整以充分利用槽位。
                     </div>
                   )}
+                </div>
+
+                {/* 阶段 9：装备与随身物品（House Rule 8 槽，武器 / 物品共用） */}
+                <div className="bg-[#181a1c] border border-gray-800 p-5 rounded-lg space-y-4 font-sans">
+                  <div className="flex items-center justify-between border-b border-gray-800 pb-2 gap-3 flex-wrap">
+                    <h4 className="text-sm font-semibold text-[#c1a067]">装备与随身物品（武器 / 物品 8 槽）</h4>
+                    <div className="text-[11px] font-mono text-gray-400">
+                      已用: <span className="text-gray-200">
+                        {inventory.filter((e) => (e.kind === "weapon") || (e.kind === "item" && e.text.trim() !== "")).length}
+                      </span> / {INVENTORY_SLOT_COUNT}
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-gray-500 leading-relaxed">
+                    随身上限 8 槽（House Rule，CoC 7e 原版无此限制）。武器与物品共用配额；空槽位不需要填写。
+                    武器栏只显示名称，伤害 / 射程 / 装弹 / 故障值由数据表派生；创建期 ammo 自动写入最大值，跑团时由 KP 维护。
+                  </p>
+                  <div className="space-y-2">
+                    {inventory.map((entry, idx) => (
+                      <InventorySlotRow
+                        key={`inv-${idx}`}
+                        index={idx}
+                        entry={entry}
+                        era={selectedEra}
+                        onChange={(next) =>
+                          setInventory((prev) => prev.map((e, i) => (i === idx ? next : e)))
+                        }
+                      />
+                    ))}
+                  </div>
                 </div>
 
                 <div className="flex justify-between pt-4">
@@ -2176,6 +2116,82 @@ function SlotRow({ slot, slotLabel, constraintHint, candidates, isDuplicate, onP
           </>
         ) : (
           <span className="text-gray-700">—</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// 阶段 9：装备槽行（左下拉切类型；右侧物品自由文本 / 武器名下拉）
+// =============================================================================
+
+interface InventorySlotRowProps {
+  index: number;
+  entry: InventoryEntry;
+  era: "1920s" | "modern";
+  onChange: (next: InventoryEntry) => void;
+}
+
+function InventorySlotRow({ index, entry, era, onChange }: InventorySlotRowProps) {
+  const weaponList = useMemo(() => getWeaponList(era), [era]);
+  const weapon = entry.kind === "weapon" ? findWeapon(entry.weaponId) : undefined;
+
+  return (
+    <div className="grid grid-cols-12 gap-2 items-center bg-black/30 p-2 rounded border border-gray-850 text-xs">
+      <div className="col-span-1 max-sm:col-span-2 text-[10px] text-gray-500 font-mono uppercase tracking-wider text-center">
+        #{index + 1}
+      </div>
+      <div className="col-span-2 max-sm:col-span-4">
+        <select
+          value={entry.kind}
+          onChange={(e) => {
+            const kind = e.target.value as "item" | "weapon";
+            if (kind === entry.kind) return;
+            if (kind === "item") onChange({ kind: "item", text: "" });
+            else {
+              const first = weaponList[0];
+              if (!first) return;
+              onChange({ kind: "weapon", weaponId: first.id, ammo: first.maxAmmo });
+            }
+          }}
+          className="w-full bg-[#161719] border border-gray-800 rounded px-2 py-1.5 text-gray-200 focus:outline-none focus:border-[#c1a067] text-xs font-sans"
+        >
+          <option value="item">物品</option>
+          <option value="weapon">武器</option>
+        </select>
+      </div>
+      <div className="col-span-9 max-sm:col-span-6">
+        {entry.kind === "item" ? (
+          <input
+            type="text"
+            value={entry.text}
+            onChange={(e) => onChange({ kind: "item", text: e.target.value })}
+            placeholder="物品 / 工具 / 重要个人物件"
+            className="w-full bg-[#161719] border border-gray-800 rounded px-2 py-1.5 text-gray-200 focus:outline-none focus:border-[#c1a067] text-xs font-sans placeholder:text-gray-700"
+          />
+        ) : (
+          <div className="space-y-1">
+            <select
+              value={entry.weaponId}
+              onChange={(e) => {
+                const w = findWeapon(e.target.value);
+                if (!w) return;
+                onChange({ kind: "weapon", weaponId: w.id, ammo: w.maxAmmo });
+              }}
+              className="w-full bg-[#161719] border border-gray-800 rounded px-2 py-1.5 text-gray-200 focus:outline-none focus:border-[#c1a067] text-xs font-sans"
+            >
+              {weaponList.map((w) => (
+                <option key={w.id} value={w.id}>{w.nameZh}</option>
+              ))}
+            </select>
+            {weapon && (
+              <div className="text-[10px] text-gray-500 font-mono px-1">
+                {describeWeapon(weapon)}
+                {weapon.malfunction && weapon.malfunction < 100 ? ` · 故障 ${weapon.malfunction}+` : ""}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

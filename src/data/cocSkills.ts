@@ -141,7 +141,7 @@ const BRANCHES_DRIVE: SkillBranchDefinition[] = [
   { parentId: "drive", id: "drive-carriage",   nameZh: "马车",        nameEn: "Carriage",    base: 20, eraOnly: "1920s" },
   { parentId: "drive", id: "drive-truck",      nameZh: "卡车 / 重型卡", nameEn: "Heavy Truck", base: 1,  eraOnly: "modern" },
   { parentId: "drive", id: "drive-boat",       nameZh: "船",          nameEn: "Boat",        base: 1,  eraOnly: "modern" },
-  { parentId: "drive", id: "drive-aircraft",   nameZh: "飞机",        nameEn: "Aircraft",    base: 1,  eraOnly: "modern" },
+  { parentId: "drive", id: "drive-aircraft",   nameZh: "飞机",        nameEn: "Aircraft",    base: 1 },
   { parentId: "drive", id: "drive-helicopter", nameZh: "直升机",      nameEn: "Helicopter",  base: 1,  eraOnly: "modern" },
 ];
 
