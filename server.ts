@@ -747,7 +747,7 @@ async function dispatchLlm({ apiSettings, systemInstruction, userText, schema, t
       });
       const block = msg.content.find((b: any) => b.type === "text") as any;
       if (!block?.text) throw new Error("Anthropic 返回空内容。");
-      text = stripCodeFence(block.text);
+      text = extractJsonObject(block.text);
     } else {
       // OpenAI 兼容: qiny, custom, grok, deepseek
       const baseUrl = resolveOpenAiBaseUrl(provider, apiSettings.llm.customBaseUrl, apiSettings.llm.qinyHost);
@@ -774,7 +774,7 @@ async function dispatchLlm({ apiSettings, systemInstruction, userText, schema, t
       const data: any = await resp.json();
       const raw: string | undefined = data?.choices?.[0]?.message?.content;
       if (!raw) throw new Error(`供应商 ${provider} 返回结构异常。`);
-      text = stripCodeFence(raw);
+      text = extractJsonObject(raw);
     }
 
     log({
@@ -810,6 +810,49 @@ async function dispatchLlm({ apiSettings, systemInstruction, userText, schema, t
 
 function stripCodeFence(s: string): string {
   return s.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+}
+
+// 部分非 Gemini 供应商即便要求 response_format=json_object，也可能输出
+// Markdown(## 标题…) 或在 JSON 前后夹杂解释文本。这里在 stripCodeFence
+// 之后再抓首个平衡的 { ... } 段，最大化容错。提不出来时返回原串，让上层
+// JSON.parse 给出明确错误。
+function extractJsonObject(s: string): string {
+  const stripped = stripCodeFence(s);
+  if (stripped.startsWith("{") || stripped.startsWith("[")) return stripped;
+  const start = stripped.indexOf("{");
+  if (start < 0) return stripped;
+  let depth = 0;
+  let inStr = false;
+  let escape = false;
+  for (let i = start; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === "\"") { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return stripped.slice(start, i + 1);
+    }
+  }
+  return stripped;
+}
+
+// 将后端各类异常翻译成对玩家友好的中文。识别上游 LLM 常见错误：
+// 配额不足、JSON 解析失败、API key 无效等。
+function humanizeLlmError(e: any): string {
+  const msg: string = e?.message || String(e);
+  if (/insufficient_user_quota|额度不足/i.test(msg)) {
+    return "上游 LLM 账户额度不足,请在「虚空连接的设置」里更换 API Key 或为账户充值后重试。";
+  }
+  if (e instanceof SyntaxError && /JSON|Unexpected token/i.test(msg)) {
+    return "模型未输出合法 JSON(可能违规吐出了 Markdown 或解释文字)。建议切换到结构化输出更稳定的模型(gemini / claude / gpt-4o 等)后重试。";
+  }
+  if (/invalid[_ ]api[_ ]key|incorrect api key|401/i.test(msg)) {
+    return "API Key 无效或已过期,请在「虚空连接的设置」里检查后重试。";
+  }
+  return msg;
 }
 
 // undici 的 fetch 在网络层失败时会抛 TypeError("fetch failed") 并把真实原因
@@ -1041,8 +1084,9 @@ app.post("/api/keeper/generate-module-outline", async (req, res) => {
     return res.json({ success: true, data: parsed, _serverLogs: logs });
   } catch (error: any) {
     console.error("API Error in /api/keeper/generate-module-outline:", error);
-    push({ direction: "error", content: `/api/keeper/generate-module-outline 失败`, meta: { error: error.message || "Unknown error" } });
-    return res.status(500).json({ error: error.message || "Unknown error", details: error.stack, _serverLogs: logs });
+    const friendly = humanizeLlmError(error);
+    push({ direction: "error", content: `/api/keeper/generate-module-outline 失败`, meta: { error: friendly, raw: error.message || "Unknown error" } });
+    return res.status(500).json({ error: friendly, details: error.stack, _serverLogs: logs });
   }
 });
 

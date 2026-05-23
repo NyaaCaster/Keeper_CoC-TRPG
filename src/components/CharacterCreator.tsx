@@ -84,10 +84,12 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
   const [featureScp, setFeatureScp] = useState<boolean>(true);
 
   // Dynamic generated Module Outline
+  // 字段全部按可选处理：上游 LLM(尤其非 Gemini 路径)偶尔会丢字段或输出 Markdown，
+  // 渲染处必须用可选链 + 数组守卫，避免整棵组件树因 undefined.map 白屏。
   const [moduleOutline, setModuleOutline] = useState<{
-    title: string;
-    intro: string;
-    recommendedOccupations: string[];
+    title?: string;
+    intro?: string;
+    recommendedOccupations?: string[];
     presets?: {
       name: string;
       occupation: string;
@@ -544,10 +546,12 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
 
       if (!response.ok) {
         let bodyText = "";
+        let upstreamMsg = "";
         try {
           const json = await response.clone().json();
           pushServerLogs(json);
           bodyText = JSON.stringify(json).slice(0, 400);
+          upstreamMsg = typeof json?.error === "string" ? json.error : "";
         } catch {
           try { bodyText = (await response.text()).slice(0, 400); } catch {}
         }
@@ -556,7 +560,7 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
           content: `POST /api/keeper/generate-module-outline ← HTTP ${response.status}`,
           meta: { status: response.status, durationMs: Date.now() - startedAt, body: bodyText },
         });
-        throw new Error("HTTP connection error or API issue when generating module outline.");
+        throw new Error(upstreamMsg || `生成模组失败 (HTTP ${response.status})`);
       }
 
       const resData = await response.json();
@@ -567,7 +571,17 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
           content: `POST /api/keeper/generate-module-outline ← outline ok`,
           meta: { durationMs: Date.now() - startedAt, moduleName: resData.data?.moduleName },
         });
-        setModuleOutline(resData.data);
+        // 规整 outline：模型偶尔会丢字段或把数组写成字符串，做最小兜底再入 state，
+        // 避免渲染层 .map(undefined) 直接整页白屏。
+        const raw = resData.data;
+        setModuleOutline({
+          title: typeof raw?.title === "string" ? raw.title : "",
+          intro: typeof raw?.intro === "string" ? raw.intro : "",
+          recommendedOccupations: Array.isArray(raw?.recommendedOccupations)
+            ? raw.recommendedOccupations.filter((s: any) => typeof s === "string")
+            : [],
+          presets: Array.isArray(raw?.presets) ? raw.presets : [],
+        });
       } else {
         onAddLog?.({
           direction: "error",
@@ -1065,14 +1079,14 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                 <div className="border-b border-[#c1a067]/15 pb-2.5">
                   <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase">模组标题 (Module Title)</span>
                   <h3 className="text-xl font-bold text-[#c1a067] mt-0.5 font-sans">
-                    {moduleOutline.title}
+                    {moduleOutline.title || "(标题缺失)"}
                   </h3>
                 </div>
 
                 <div className="text-sm leading-relaxed text-gray-300 font-sans space-y-2">
                   <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase">前言/背景低语 (No-Spoiler Intro)</span>
                   <p className="bg-black/30 p-4 border-l-2 border-[#c1a067] rounded-r italic text-gray-350 select-text">
-                    {moduleOutline.intro}
+                    {moduleOutline.intro || "(前言缺失,可重新生成)"}
                   </p>
                 </div>
 
@@ -1080,11 +1094,15 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                 <div className="pt-2">
                   <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase mb-1.5">契合本模组推荐PC职业方向 (Suggested PC Occupations)</span>
                   <div className="flex flex-wrap gap-2">
-                    {moduleOutline.recommendedOccupations.map((job) => (
-                      <span key={job} className="text-xs bg-[#c1a067]/10 text-[#c1a067] border border-[#c1a067]/30 px-2.5 py-1 rounded font-normal font-sans shadow-sm">
-                        {job}
-                      </span>
-                    ))}
+                    {Array.isArray(moduleOutline.recommendedOccupations) && moduleOutline.recommendedOccupations.length > 0 ? (
+                      moduleOutline.recommendedOccupations.map((job) => (
+                        <span key={job} className="text-xs bg-[#c1a067]/10 text-[#c1a067] border border-[#c1a067]/30 px-2.5 py-1 rounded font-normal font-sans shadow-sm">
+                          {job}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-gray-500 italic font-sans">(模型未给出推荐职业，可重新生成或自由选择)</span>
+                    )}
                   </div>
                 </div>
 
@@ -1143,13 +1161,13 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                     <span className="text-xs font-bold text-[#c1a067] uppercase tracking-wider font-sans">正在参阅当前模组背景情报 (Reference Dossier)</span>
                   </div>
                   <span className="text-[10px] font-mono bg-[#c1a067]/10 text-[#c1a067] px-2.5 py-0.5 rounded border border-[#c1a067]/35 uppercase tracking-wide">
-                    《{moduleOutline.title}》
+                    《{moduleOutline.title || "未命名模组"}》
                   </span>
                 </div>
                 <div className="space-y-1">
                   <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase">模组前言 / 深渊背景低语 :</span>
                   <div className="text-xs leading-relaxed text-gray-300 italic pl-3 border-l-2 border-[#c1a067]/60 py-1 bg-black/25 pr-2 select-text font-serif leading-normal whitespace-pre-line">
-                    {moduleOutline.intro}
+                    {moduleOutline.intro || "(前言缺失)"}
                   </div>
                 </div>
                 <div className="flex items-center flex-wrap gap-1.5 pt-1.5 text-[11px] text-gray-400 border-t border-gray-900/40">
@@ -1157,11 +1175,15 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                     <Shield className="w-3.5 h-3.5 text-[#c1a067]" />
                     <span>契合本案 PC 职业推荐:</span>
                   </span>
-                  {moduleOutline.recommendedOccupations.map((job) => (
-                    <span key={job} className="bg-black/50 text-[#c1a067] px-2 py-0.5 rounded font-medium border border-gray-800/80 font-sans text-[11px]">
-                      {job}
-                    </span>
-                  ))}
+                  {Array.isArray(moduleOutline.recommendedOccupations) && moduleOutline.recommendedOccupations.length > 0 ? (
+                    moduleOutline.recommendedOccupations.map((job) => (
+                      <span key={job} className="bg-black/50 text-[#c1a067] px-2 py-0.5 rounded font-medium border border-gray-800/80 font-sans text-[11px]">
+                        {job}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-gray-500 italic">(无推荐)</span>
+                  )}
                 </div>
               </div>
             )}
