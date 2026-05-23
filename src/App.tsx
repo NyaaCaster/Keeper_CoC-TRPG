@@ -794,6 +794,7 @@ export default function App() {
             scp: featuresToUse?.scp !== false,
           },
           apiSettings,
+          character: activeChar,
         }),
       });
 

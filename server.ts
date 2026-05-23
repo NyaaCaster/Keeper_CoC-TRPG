@@ -11,6 +11,8 @@ import { GoogleGenAI, Type } from "@google/genai";
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "fs";
 import crypto from "crypto";
+import { deriveCombatStats, breakpointOf } from "./src/lib/cocRules";
+import type { CharacterSheet } from "./src/types";
 
 dotenv.config();
 
@@ -859,7 +861,7 @@ function sanitizeKeeperResponse(data: any) {
 
 // 1. API - Keeper Chat Completion
 app.post("/api/keeper/chat", async (req, res) => {
-  const { messages, features, apiSettings } = req.body;
+  const { messages, features, apiSettings, character } = req.body;
   const logs: ServerLogDraft[] = [];
   const push: LogPush = (e) => logs.push(e);
 
@@ -883,7 +885,24 @@ app.post("/api/keeper/chat", async (req, res) => {
       elementSandboxLimiter += `2. 【SCP要素：${scpEnabled ? "已载入" : "未载入"}】\n`;
     }
 
-    const systemInstruction = SYSTEM_INSTRUCTION + dynamicInstructions + elementSandboxLimiter;
+    // CoC 7e 战斗派生数值（DB / Build / MOV）。
+    // 这些不存在角色卡上，前后端按需现算并注入 prompt，避免 LLM 自创伤害骰。
+    let combatDerivedBlock = "";
+    if (character && (character as CharacterSheet)?.attributes) {
+      const derived = deriveCombatStats(character as CharacterSheet);
+      combatDerivedBlock =
+        "\n\n=== [当前调查员战斗派生数值（CoC 7e 规则现算，不在角色卡上展示）] ===\n" +
+        `- 伤害加值 DB：${derived.db.display}\n` +
+        `- 体格 Build：${derived.build}\n` +
+        `- 移动力 MOV：${derived.mov}\n` +
+        "调用口径：\n" +
+        "  • DB 仅在【调查员主动用近战 / 投掷武器命中目标】时把伤害基数往上拉一档；火器、爆炸、超自然伤害与他人对调查员的伤害都不加 DB。\n" +
+        "  • 由于本项目的 hpDamageFormula 只支持单组骰（'NdM[+常数][/除数]'，不支持 '1d6+1d4'），遇到骰子型 DB 时不要硬拼骰；改成同期望值的单组骰或定值（例如 +1d4≈+2、+1d6≈+3、+2d6≈+7），并把 DB 已经计入的事实在 narrative 里隐含表达，不要让玩家看到具体的 DB 数值。\n" +
+        "  • Build 用于扭打 / 战斗距离判定；遇到双方 Build 差 ≥3 的对抗，提示玩家“力量悬殊”。\n" +
+        "  • MOV 用于追逐 / 逃脱场景的距离推进；不要让 LLM 自己估算移动力，按本字段为准。\n";
+    }
+
+    const systemInstruction = SYSTEM_INSTRUCTION + dynamicInstructions + elementSandboxLimiter + combatDerivedBlock;
     const userText = buildKeeperContext(messages);
 
     push({ direction: "info", content: `/api/keeper/chat ← ${messages.length} messages`, meta: { msgCount: messages.length, tmEnabled, scpEnabled } });
@@ -1061,11 +1080,12 @@ function localCocRoll(skill: any, bonus: any, penalty: any): string {
   const diceResult = (finalTensSelected === 0 && finalUnits === 0) ? 100 : finalTensSelected + finalUnits;
 
   let outcome = "失败";
+  const bp = breakpointOf(skillVal);
   if (diceResult === 1) outcome = "大成功";
   else if (skillVal < 50 && diceResult === 100) outcome = "大失败";
   else if (skillVal >= 50 && diceResult >= 96) outcome = "大失败";
-  else if (diceResult <= Math.floor(skillVal / 5)) outcome = "极难成功";
-  else if (diceResult <= Math.floor(skillVal / 2)) outcome = "困难成功";
+  else if (diceResult <= bp.fifth) outcome = "极难成功";
+  else if (diceResult <= bp.half) outcome = "困难成功";
   else if (diceResult <= skillVal) outcome = "普通成功";
 
   const tensRepresentation = tensRolls.map(t => {
