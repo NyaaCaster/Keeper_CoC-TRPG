@@ -158,36 +158,16 @@ export const GENERATE_MODULE_SCHEMA = {
       items: {
         type: "object",
         properties: {
-          name: { type: "string", description: "调查员姓名，仅中文汉字，禁止任何英文译名、括号注音或拼音" },
-          occupation: { type: "string", description: "职业" },
+          baseIndex: { type: "integer", description: "对应输入参考模板列表的下标(从 0 开始),必须与输入条目一一对应" },
+          name: { type: "string", description: "调查员姓名,仅中文汉字,禁止任何英文译名、括号注音或拼音" },
+          identity: { type: "string", description: "角色身份(自由文本,非空,贴合本模组主题)" },
           gender: { type: "string", description: "男 或 女" },
           age: { type: "integer", description: "年龄 23-55" },
-          overview: { type: "string", description: "100-150字概述" },
-          attributes: {
-            type: "object",
-            properties: {
-              str: { type: "integer" }, con: { type: "integer" }, siz: { type: "integer" },
-              dex: { type: "integer" }, app: { type: "integer" }, int: { type: "integer" },
-              pow: { type: "integer" }, edu: { type: "integer" }, luck: { type: "integer" },
-            },
-            required: ["str", "con", "siz", "dex", "app", "int", "pow", "edu", "luck"],
-          },
-          skills: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                value: { type: "integer" },
-              },
-              required: ["name", "value"],
-            },
-            description: "正好8~9门核心技能",
-          },
+          backgroundStory: { type: "string", description: "80-160字背景故事,与本模组主题契合,呼应模板的职业与技能侧写" },
         },
-        required: ["name", "occupation", "gender", "age", "overview", "attributes", "skills"],
+        required: ["baseIndex", "name", "identity", "gender", "age", "backgroundStory"],
       },
-      description: "正好3个预设调查员",
+      description: "对每个输入参考模板输出一份人皮覆写,数量与输入一致;只允许改写 name / identity / gender / age / backgroundStory,其余字段(职业 / 属性 / 技能 / 装备等)不允许覆写。",
     },
   },
   required: ["title", "intro", "recommendedOccupations", "presets"],

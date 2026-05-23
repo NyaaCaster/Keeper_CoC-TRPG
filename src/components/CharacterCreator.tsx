@@ -88,19 +88,14 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
   // Dynamic generated Module Outline
   // 字段全部按可选处理：上游 LLM(尤其非 Gemini 路径)偶尔会丢字段或输出 Markdown，
   // 渲染处必须用可选链 + 数组守卫，避免整棵组件树因 undefined.map 白屏。
+  // presets[i] 已是"客户端模板基底 + LLM 人皮 patch"合并后的完整 sheet,
+  // LLM 仅允许覆写 name / identity / gender / age / backgroundStory,
+  // 其余字段(职业 / 属性 / 技能 / 装备 / 派生战斗值)一律继承自 TEMPLATE_PRESETS。
   const [moduleOutline, setModuleOutline] = useState<{
     title?: string;
     intro?: string;
     recommendedOccupations?: string[];
-    presets?: {
-      name: string;
-      occupation: string;
-      gender?: string;
-      age?: number;
-      overview: string;
-      attributes: CharacterAttributes;
-      skills: CharacterSkills;
-    }[];
+    presets?: (CharacterSheet & { overview?: string; backgroundText?: string })[];
   } | null>(null);
   const [isGeneratingModule, setIsGeneratingModule] = useState(false);
   const [moduleGenerationError, setModuleGenerationError] = useState<string | null>(null);
@@ -201,71 +196,30 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
   const activePresets = React.useMemo(() => {
     const eraPresets = TEMPLATE_PRESETS.filter(p => {
       if (p.background !== selectedEra) return false;
-      const isTM = p.occupation.includes("时钟塔") || p.occupation.includes("代行者") || 
+      const isTM = p.occupation.includes("时钟塔") || p.occupation.includes("代行者") ||
                    (p.backgroundText && (p.backgroundText.includes("时钟塔") || p.backgroundText.includes("魔术") || p.backgroundText.includes("代行者")));
-      const isSCP = p.occupation.includes("基金会") || p.occupation.includes("SCP") || 
+      const isSCP = p.occupation.includes("基金会") || p.occupation.includes("SCP") ||
                     (p.backgroundText && (p.backgroundText.includes("基金会") || p.backgroundText.includes("SCP") || p.backgroundText.includes("收容")));
       if (isTM && !featureTypeMoon) return false;
       if (isSCP && !featureScp) return false;
       return true;
     });
 
+    // moduleOutline.presets 已经是"模板基底 + LLM 人皮 patch"合并完成的 sheet,
+    // 这里只补一个 overview 字段供卡面预览使用。
     if (moduleOutline?.presets && moduleOutline.presets.length > 0) {
-      const selected = moduleOutline.presets.map((pObj) => {
-        if (!pObj || typeof pObj !== "object") return null;
-
-        const calculatedHp = Math.floor(((pObj.attributes?.con || 50) + (pObj.attributes?.siz || 50)) / 10);
-        const calculatedMp = Math.floor((pObj.attributes?.pow || 50) / 5);
-        const calculatedSan = pObj.attributes?.pow || 50;
-
-        // Safe skills parser: maps Array<{name: string, value: number}> to Record<string, number>
-        let skillsObj: Record<string, number> = {};
-        const rawSkills: any = (pObj as any).skills;
-        if (Array.isArray(rawSkills)) {
-          rawSkills.forEach((s: any) => {
-            if (s && typeof s === "object" && s.name && s.value !== undefined) {
-              skillsObj[s.name] = Number(s.value);
-            } else if (typeof s === "string") {
-              skillsObj[s] = 40;
-            }
-          });
-        } else if (rawSkills && typeof rawSkills === "object") {
-          skillsObj = rawSkills;
-        } else {
-          skillsObj = { "神秘学": 60, "侦查": 60, "聆听": 50 };
-        }
-
-        return {
-          name: pObj.name,
-          occupation: pObj.occupation,
-          gender: pObj.gender || "男",
-          age: pObj.age || 30,
-          overview: pObj.overview || "此调查员被调遣协作对峙未知异常。",
-          attributes: pObj.attributes || { str: 50, con: 50, siz: 50, dex: 50, app: 50, int: 50, pow: 50, edu: 50, luck: 50 },
-          skills: skillsObj,
-          hp: calculatedHp,
-          maxHp: calculatedHp,
-          mp: calculatedMp,
-          maxMp: calculatedMp,
-          san: calculatedSan,
-          maxSan: calculatedSan,
-          maxSanLimit: 99,
-          mythos: 0,
-          background: selectedEra
-        };
-      }).filter((x): x is CharacterSheet & { overview: string } => x !== null);
-
-      if (selected.length > 0) {
-        return selected;
-      }
+      return moduleOutline.presets.map((p) => ({
+        ...p,
+        overview: p.overview || p.backgroundStory || p.backgroundText || "此调查员被调遣协作对峙未知异常。",
+      }));
     }
-    
+
     // Fallback constants from selected era
     return eraPresets.slice(0, 3).map(p => ({
       ...p,
       overview: p.backgroundText || "资深的前线秘仪探求者，屡次协助收容或发掘星神崇拜设施迹象。"
     }));
-  }, [moduleOutline?.presets, selectedEra]);
+  }, [moduleOutline?.presets, selectedEra, featureTypeMoon, featureScp]);
 
   // 创建期 「深渊复核 → 下载调查员角色卡」 入口。运行期入口在 CharacterDossierPanel 里直接
   // 调 downloadCharacterCard(sheet.creationSnapshot ?? sheet)；两者共享同一渲染模块。
@@ -536,7 +490,34 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
         elementsRule += scpEnabled ? "2. 【SCP要素已开启】可融合MTF、收容站等。\n" : "2. 【SCP要素已禁用】绝不可提及。\n";
       }
 
-      const userText = `玩家选择的历史帷幕/背景纪元为："${eraStr}"。\n\n系统内容配置协议：\n${elementsRule}\n\n请构思一个独特的CoC TRPG 模组：标题、150-250字引子、3-4个推荐PC职业、正好3个预设调查员（每人正好8~9门核心技能）。所有调查员姓名只能使用纯中文汉字，禁止出现任何英文译名、括号注音、拼音或外文别称。`;
+      // 客户端先按 era + 型月/SCP 开关从 TEMPLATE_PRESETS 随机抽 3 个模板作为基底,
+      // LLM 只负责输出 name / identity / gender / age / backgroundStory 这 5 个"人皮"字段。
+      // 职业、属性、技能、装备、派生战斗值等机制相关字段一律不允许 LLM 改动。
+      const candidates = TEMPLATE_PRESETS.filter((p) => {
+        if (p.background !== selectedEra) return false;
+        const isTM = p.occupation.includes("时钟塔") || p.occupation.includes("代行者") ||
+          (p.backgroundText && (p.backgroundText.includes("时钟塔") || p.backgroundText.includes("魔术") || p.backgroundText.includes("代行者")));
+        const isSCP = p.occupation.includes("基金会") || p.occupation.includes("SCP") ||
+          (p.backgroundText && (p.backgroundText.includes("基金会") || p.backgroundText.includes("SCP") || p.backgroundText.includes("收容")));
+        if (isTM && !tmEnabled) return false;
+        if (isSCP && !scpEnabled) return false;
+        return true;
+      });
+      const shuffled = candidates.slice().sort(() => Math.random() - 0.5);
+      const baseTemplates = shuffled.slice(0, Math.min(3, shuffled.length));
+      const referenceBlock = baseTemplates.length > 0
+        ? `\n本次模组使用以下 ${baseTemplates.length} 个调查员模板(职业、属性、技能、装备已锁定,你只能改写 name / identity / gender / age / backgroundStory 让其贴合本模组氛围):\n${baseTemplates.map((p, i) => {
+            const topSkills = Object.entries(p.skills)
+              .filter(([k]) => k !== "克苏鲁神话")
+              .sort((a, b) => (b[1] as number) - (a[1] as number))
+              .slice(0, 6)
+              .map(([k, v]) => `${k} ${v}`)
+              .join("、");
+            return `[baseIndex=${i}] 职业:${p.occupation} | 原型身份:${p.identity ?? "-"} | 原型国籍:${p.nationality ?? "-"} | 原型性别/年龄:${p.gender ?? "-"}/${p.age ?? "-"} | 主要技能:${topSkills} | 原型简述:${p.backgroundText ?? p.backgroundStory ?? "-"}`;
+          }).join("\n")}\n`
+        : "";
+
+      const userText = `玩家选择的历史帷幕/背景纪元为："${eraStr}"。\n\n系统内容配置协议：\n${elementsRule}${referenceBlock}\n请构思一个独特的CoC TRPG 模组：标题、150-250字引子、3-4个推荐PC职业。然后对上面每个 baseIndex 模板分别输出一份"人皮覆写"对象,数量与输入完全一致(共 ${baseTemplates.length} 个),每份必须包含 baseIndex(从 0 开始,与输入一一对应)、name、identity、gender、age、backgroundStory。所有姓名必须为纯中文汉字,禁止英文译名/括号注音/拼音/外文别称;新身份与背景故事要紧扣本模组主题,但必须与该模板的职业与主要技能呼应(例如「医师」就别写成战斗员,「私家侦探」就别写成学者)。`;
       const systemInstruction = "你是一个殿堂级的克苏鲁TRPG（CoC 7e）跑团守密人与顶尖文学构架师。";
 
       const textOutput = await dispatchLlm({
@@ -556,13 +537,37 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
 
       // 规整 outline：模型偶尔会丢字段或把数组写成字符串，做最小兜底再入 state，
       // 避免渲染层 .map(undefined) 直接整页白屏。
+      // presets 这一层把 LLM 输出的 5 字段 patch 合并到客户端预先抽好的模板基底上;
+      // 任何超出 5 字段范围的字段(occupation / attributes / skills 等)一律忽略,以模板为准。
+      const rawPatches: any[] = Array.isArray(raw?.presets) ? raw.presets : [];
+      const mergedPresets = baseTemplates.map((base, i) => {
+        const patch = rawPatches.find((x) => x && Number.isInteger(x.baseIndex) && x.baseIndex === i)
+          ?? rawPatches[i]
+          ?? {};
+        const safeName = typeof patch.name === "string" && patch.name.trim() ? patch.name.trim() : base.name;
+        const safeIdentity = typeof patch.identity === "string" && patch.identity.trim() ? patch.identity.trim() : base.identity;
+        const safeGender = typeof patch.gender === "string" && patch.gender.trim() ? patch.gender.trim() : base.gender;
+        const safeAge = Number.isFinite(patch.age) ? Math.max(15, Math.min(99, Math.floor(patch.age))) : base.age;
+        const safeBackground = typeof patch.backgroundStory === "string" && patch.backgroundStory.trim()
+          ? patch.backgroundStory.trim()
+          : base.backgroundStory;
+        return {
+          ...base,
+          name: safeName,
+          identity: safeIdentity,
+          gender: safeGender,
+          age: safeAge,
+          backgroundStory: safeBackground,
+        };
+      });
+
       setModuleOutline({
         title: typeof raw?.title === "string" ? raw.title : "",
         intro: typeof raw?.intro === "string" ? raw.intro : "",
         recommendedOccupations: Array.isArray(raw?.recommendedOccupations)
           ? raw.recommendedOccupations.filter((s: any) => typeof s === "string")
           : [],
-        presets: Array.isArray(raw?.presets) ? raw.presets : [],
+        presets: mergedPresets,
       });
     } catch (err: any) {
       console.error("Failed to generate module outline:", err);
