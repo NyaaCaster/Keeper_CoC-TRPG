@@ -226,10 +226,10 @@ export function nameOfSelection(sel: SkillSelection): string {
   return `${p}(${b})`;
 }
 
-/** 当前槽位最终值 = base + pointsAllocated。 */
+/** 当前槽位最终值 = base + pointsAllocated,字典表第 5 节硬上限 99。 */
 export function finalValueOfSlot(slot: SlotState): number {
   if (!slot.picked) return 0;
-  return baseOfSelection(slot.picked) + slot.pointsAllocated;
+  return Math.min(99, baseOfSelection(slot.picked) + slot.pointsAllocated);
 }
 
 /** 创建空槽（picked 未设、点数 0）。 */

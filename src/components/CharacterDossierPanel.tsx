@@ -8,6 +8,7 @@ import { X, FileText, Download } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import type { CharacterSheet } from "../types";
 import { downloadCharacterCard } from "../lib/characterCardRender";
+import { rebuildCreationSnapshot } from "../lib/rebuildCreationSnapshot";
 
 interface CharacterDossierPanelProps {
   isOpen: boolean;
@@ -35,12 +36,13 @@ export default function CharacterDossierPanel({
   }, [isOpen, onClose]);
 
   // 跑团中点击导出 = 创建期原貌（HP 满 / SAN 未扣 / 技能未涨值 / 现金未消 / 装备未变）。
-  // 旧存档没 creationSnapshot 时回退到当前 sheet，避免按钮失效。
+  // 老存档没有 creationSnapshot 字段,用 rebuildCreationSnapshot 从当前 sheet 现算一份合规快照,
+  // 保证导出物始终通过 .docs/character-dictionary.yaml 校验。
   const handleDownload = async () => {
     if (isDownloading) return;
     setIsDownloading(true);
     try {
-      const exportSheet = sheet.creationSnapshot ?? sheet;
+      const exportSheet = sheet.creationSnapshot ?? rebuildCreationSnapshot(sheet);
       await downloadCharacterCard(exportSheet);
     } catch (e) {
       console.error("Failure compiling downloadable investigator card representation:", e);

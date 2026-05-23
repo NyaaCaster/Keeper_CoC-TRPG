@@ -176,11 +176,12 @@ export function legalizeDraft(
   });
 
   const pools = computePointPools(attrs);
+  // CoC 7e RAW: 创角阶段任何技能不得超过 90% (Investigator Handbook · Step 4)。
   const occCaps = occupation.map((s) =>
-    s.picked ? Math.max(0, 99 - baseOfSelection(s.picked)) : 0,
+    s.picked ? Math.max(0, 90 - baseOfSelection(s.picked)) : 0,
   );
   const intCaps = interest.map((s) =>
-    s.picked ? Math.max(0, 99 - baseOfSelection(s.picked)) : 0,
+    s.picked ? Math.max(0, 90 - baseOfSelection(s.picked)) : 0,
   );
   const occPoints = allocatePool(occCaps, pools.occupation, rng);
   const intPoints = allocatePool(intCaps, pools.interest, rng);

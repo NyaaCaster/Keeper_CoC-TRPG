@@ -142,8 +142,10 @@ character_sheet:
       $type: "Record<string, number>"
       $required: true
       $description: |
-        键 = 技能中文名（多分支用 “父类(分支)” 表达，详见 skills 节）。
+        键 = 技能中文名（多分支用 "父类(分支)" 表达，详见 skills 节）。
         值 = 当前技能值（百分位，0–99）。
+        创建期 RAW 上限 90（CoC 7e Investigator Handbook · Step 4），
+        运行期通过经验成长可达 99；99 之上由 maxSanLimit 等其他机制约束。
         创建期硬性写入：skills["克苏鲁神话"] = 0（不占点池）。
         母语 / 信用评级 / 闪避 / 克苏鲁神话基础 0 不写入；母语派生 = EDU、闪避派生 = DEX/2。
 
@@ -340,15 +342,16 @@ combat_derived:
 skills:
 
   $description: |
-    sheet.skills 是 “技能中文名 → 当前值（0–99）”的字典。键名约定：
+    sheet.skills 是 "技能中文名 → 当前值（0–99）"的字典。键名约定：
     - 单技能：直接用 nameZh，例 "聆听" / "侦查" / "图书馆使用"。
-    - 多分支技能：用 “父类(分支)” 形式，例 "格斗(斗殴)" / "火器(手枪)" /
+    - 多分支技能：用 "父类(分支)" 形式，例 "格斗(斗殴)" / "火器(手枪)" /
       "艺术/手艺(摄影)" / "科学(化学)" / "驾驶(汽车)" / "求生(极地)" /
       "其他语种(拉丁语)"。
     - 不要写父类本身（fighting / firearms / drive / language-other 不可作为键）。
-    - 不要写 “闪避” / “母语” / “信用评级”：闪避 → combatDerived.dodge，
+    - 不要写 "闪避" / "母语" / "信用评级"：闪避 → combatDerived.dodge，
       母语技能值 → 由 EDU 现算，CR → character_sheet.creditRating。
     - 克苏鲁神话固定写 "克苏鲁神话": 0，创建期不可调。
+    - 上限分两层：创建期 RAW 90（per_skill_max_creation），运行期 99（per_skill_max_runtime）。
 
   slot_rules:
     occupation_slots: 8
@@ -356,10 +359,16 @@ skills:
     total_cap: 12
     occupation_pool_default: "EDU × 4"
     interest_pool: "INT × 2"
-    per_skill_max: 99
+    per_skill_max_creation: 90
+    per_skill_max_runtime: 99
     per_skill_min: "该技能基础值（不能低于 base）"
     pool_isolation: "职业池与兴趣池互不通用"
     duplicate_policy: "同一技能 / 分支不能在多个槽位重复（提交时按最大值合并）"
+    cap_rationale: |
+      创建期 RAW 上限 90：CoC 7e Investigator Handbook · Step 4 明确
+      "No skill may be raised over 90% during character creation"。
+      运行期硬顶 99：留给 KP 触发的经验成长（session 末 skill check）累加，
+      校验器在导入回流时按 99 兜底（兼容运行期成长后的存档）。
 
   registry:
     $note: "完整 base 值与 era 限定见 src/data/cocSkills.ts SKILL_REGISTRY_ALL。"

@@ -459,7 +459,13 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
     updater(idx, { picked, pointsAllocated: 0 });
   };
   const setSlotPoints = (kind: "occupation" | "interest", idx: number, points: number) => {
-    const clamped = Math.max(0, Math.min(99, Math.floor(points || 0)));
+    // CoC 7e RAW: 创角阶段任何技能不得超过 90% (Investigator Handbook · Step 4)。
+    // 这里按当前 picked 的 base 现算上限,避免「base=5 + 99 点 = 104」越界。
+    // 运行期经验成长可越过 90,但仍受字典表 99 硬顶约束(校验器兜底)。
+    const slot = (kind === "occupation" ? skillDraft.occupation : skillDraft.interest)[idx];
+    const base = slot?.picked ? baseOfSelection(slot.picked) : 0;
+    const cap = Math.max(0, 90 - base);
+    const clamped = Math.max(0, Math.min(cap, Math.floor(points || 0)));
     const updater = kind === "occupation" ? updateOccupationSlot : updateInterestSlot;
     updater(idx, { pointsAllocated: clamped });
   };
@@ -2069,7 +2075,7 @@ function SlotRow({ slot, slotLabel, constraintHint, candidates, isDuplicate, onP
         <input
           type="number"
           min={0}
-          max={99}
+          max={Math.max(0, 90 - base)}
           value={slot.pointsAllocated}
           onChange={(e) => onPoints(parseInt(e.target.value) || 0)}
           disabled={!slot.picked}
