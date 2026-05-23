@@ -314,6 +314,7 @@ const SYSTEM_INSTRUCTION = `你是一位专业且极具沉浸感的《克苏鲁�
        - 给奖励骰的合理时机：调查员有充裕时间、合适工具、有效的同伴协助（assisted roll）、有利地形、对方处于明显弱势或被束缚等。
        - 给惩罚骰的合理时机：调查员负伤、被催促、能见度差、装备不顺手、半心半意行动、地形/光线等不利条件。
        - **bonus 与 penalty 互斥**：同一次检定不能同时 > 0；若处境同时存在利弊，按规则相互抵消，最终都填 0。
+       - **取值上限固定为 0 / 1 / 2**：本项目家规将奖励骰/惩罚骰的净剩余数硬性截断在 2 以内，**不允许下发 3 或更多**。即便处境极端，也只能填 2，超出的优势/劣势请在 narrative 里以氛围/旁白渲染，而不是堆 bonus/penalty 数值。
        - 不要滥发：大多数检定都应当是标准 1d100，bonus/penalty 只在处境明显时使用。不给则填 0（或省略）。
 
    4.2 【明骰 vs 暗骰判断口径】：判断标准只有一个——"玩家提前知道这次掷骰发生过会不会破坏沉浸/破坏后续叙事张力"。
@@ -329,7 +330,13 @@ const SYSTEM_INSTRUCTION = `你是一位专业且极具沉浸感的《克苏鲁�
        - 玩家若提出有创意的解释（"我有防水手机+预先配对的舱门蓝牙"）并能自洽，可以让步并发起检定，必要时挂上 penalty 反映难度。
        - 情境可推进但无需骰（小事/必然成功失败）→ 直接叙事推进，narrative 里说明结果，不发 rollRequest。
 
-   4.4 【伤害与效果骰：带随机性走公式，确定性走整数】：当扣血/扣 MP/扣 SAN 的数值**带随机性**（武器伤害、咒语反噬、急救回血量、大失败附带 SAN 冲击等），用 'characterUpdates.hpDamageFormula' / 'hpHealFormula' / 'mpCostFormula' / 'sanLossFormula' 下发公式字符串（形如 'NdM'、'NdM+常数'、'NdM/除数'，例如 '1d6'、'2d4+1'、'1d10/2'），前端会弹"效果骰"浮窗演投。**确定性**的数值变动（剧情设定的固定 5 点 HP 恢复、定额魔力消耗等）继续用整数字段 'hpChange' / 'mpChange' / 'sanChange'，前端不弹浮窗直接结算。
+   4.4 【命运博弈（孤注一掷 / 燃运）：由前端硬规则裁定，KP 只负责叙事化】：玩家在普通技能检定**失败**后，可能主动采取以下两种"补救"动作之一。**判定权与执行权全部归前端**，你不需要决定是否允许、不需要否决——只在收到下列系统标记时，把结果合理地融进叙事：
+       - 收到 '[孤注一掷 (Push)] 玩家选择孤注一掷：首投 XX 失败 → 二投 YY → 强制大失败（Fumble）。' 时：**本项目家规——孤注一掷失败统一升格为大失败**。请按 fumble 口径处理，叙事**加重**后果（伤害、暴露、装备损毁、引发更多关注、引来不该来的东西等），不要写成"只是又失败一次"。
+       - 收到 '[孤注一掷 (Push)] ... 二投 YY → 真实成功（普通/困难/极难/大成功）。' 时：**保留真实成功等级**，正常按该等级叙事化推进，可以渲染"咬牙再来一次反而抓住了机会"的张力，但不要因为是 push 后的成功就反过来加重负面后果。
+       - 收到 '[燃运 (Burn Luck)] 玩家燃烧 N 点幸运，将 XX 改写为普通成功（剩余 LUC = M）。' 时：**本项目家规——燃运只能把失败压到普通成功线，不能升档**。叙事上请描写为"危急关头一闪念的好运 / 命运的眷顾 / 千钧一发的偶然 / 某个不起眼的细节恰好帮了忙"，**不要**写成"凭借扎实的技能功底"——这是命运在还人情，不是调查员能力真的发挥出来了。LUC 已被前端永久扣减，你不需要在 characterUpdates 里再扣 LUC。
+       - 命运博弈在**战斗骰、SAN 检定、幸运检定、KP 的 keeperRoll（明骰/暗骰均不允许）** 上前端已硬禁，所以你不会在这些场景下收到上述标记。若玩家在不允许的场景里口头要求"再投一次以救回"，可以在 narrative 里以 KP 口吻说明该场景不可补救（如战斗中已被命中、SAN 冲击已发生），不要给等价的叙事补偿。
+
+   4.5 【伤害与效果骰：带随机性走公式，确定性走整数】：当扣血/扣 MP/扣 SAN 的数值**带随机性**（武器伤害、咒语反噬、急救回血量、大失败附带 SAN 冲击等），用 'characterUpdates.hpDamageFormula' / 'hpHealFormula' / 'mpCostFormula' / 'sanLossFormula' 下发公式字符串（形如 'NdM'、'NdM+常数'、'NdM/除数'，例如 '1d6'、'2d4+1'、'1d10/2'），前端会弹"效果骰"浮窗演投。**确定性**的数值变动（剧情设定的固定 5 点 HP 恢复、定额魔力消耗等）继续用整数字段 'hpChange' / 'mpChange' / 'sanChange'，前端不弹浮窗直接结算。
        - 同一类属性**不要同时**下发整数字段与公式字段（例如不要既给 hpChange 又给 hpDamageFormula）。同时存在时前端按"公式优先"处理。
        - 公式只支持单组骰：'NdM'、'NdM+常数'、'NdM-常数'、'NdM/除数'。**不支持** '1d6+1d4' 这类多组相加，也不支持 keep highest/drop lowest。解析失败前端按 0 处理并把原字符串展示给玩家。
        - sanityCheck 路径已自带 lossOnSuccess / lossOnFailure，**不要**在 sanityCheck 触发的同一回合再下发 sanLossFormula——后者只在大失败/特殊叙事强制扣 SAN 时使用。
@@ -358,8 +365,8 @@ const KEEPER_RESPONSE_SCHEMA = {
         targetValue: { type: Type.INTEGER, description: "根据玩家卡片或规则，角色应该满足的该技能/属性的最大成功目标值（一般在 1-99 之间，包含该数值）" },
         difficulty: { type: Type.STRING, description: "检定难度等级，必须是 'regular' (常规成功即可), 'hard' (必须要困难成功, 即 <= 技能的一半), 'extreme' (必须要极难成功, 即 <= 技能的五分之一) 之一" },
         reason: { type: Type.STRING, description: "进行此检定的原因描述。例如：在书房的杂乱字迹中翻找关于型月魔术回路的隐秘记录" },
-        bonus: { type: Type.INTEGER, description: "守密人裁定的奖励骰数量（0/1/2）。处境对调查员明显有利（充裕时间、合适工具、同伴有效协助、有利地形等）时给出。与 penalty 互斥；不给则填 0。" },
-        penalty: { type: Type.INTEGER, description: "守密人裁定的惩罚骰数量（0/1/2）。处境对调查员明显不利（负伤、被催促、能见度差、装备不顺、半心半意行动等）时给出。与 bonus 互斥；不给则填 0。" }
+        bonus: { type: Type.INTEGER, description: "守密人裁定的奖励骰数量，取值**必须**是 0、1 或 2 之一。处境对调查员明显有利（充裕时间、合适工具、同伴有效协助、有利地形等）时给出。与 penalty 互斥；不给则填 0。**禁止下发 3 或更大**——前端会硬裁剪到 2。" },
+        penalty: { type: Type.INTEGER, description: "守密人裁定的惩罚骰数量，取值**必须**是 0、1 或 2 之一。处境对调查员明显不利（负伤、被催促、能见度差、装备不顺、半心半意行动等）时给出。与 bonus 互斥；不给则填 0。**禁止下发 3 或更大**——前端会硬裁剪到 2。" }
       },
       required: ["skillName", "targetValue", "difficulty", "reason"],
       description: "如果当前的玩家意图或遭遇触发了技能/属性检定需求，将其填充，这将在前端拦截并让玩家进行双十面骰动画掷骰。无则设为 null。"
@@ -416,8 +423,8 @@ const KEEPER_RESPONSE_SCHEMA = {
         difficulty: { type: Type.STRING, description: "判定难度级别，'regular', 'hard', 'extreme' 之一" },
         isSecret: { type: Type.BOOLEAN, description: "是否暗骰。判定原则：玩家若提前知道掷骰发生过会破坏沉浸（隐藏的侦查/聆听、潜行被发现判定、被欺瞒方的心理学、揭露恐怖前的SAN等）→ 暗骰；公开后果且玩家应直接看到的 → 明骰" },
         reason: { type: Type.STRING, description: "原因。暗骰时务必写得叙事化、避免暴露机制（不要提技能名/数值/难度），可以表达氛围（如：'某个细节让她后背一阵发凉'）" },
-        bonus: { type: Type.INTEGER, description: "守密人裁定的奖励骰数量（0/1/2）。与 penalty 互斥；不给则填 0。" },
-        penalty: { type: Type.INTEGER, description: "守密人裁定的惩罚骰数量（0/1/2）。与 bonus 互斥；不给则填 0。" }
+        bonus: { type: Type.INTEGER, description: "守密人裁定的奖励骰数量，取值**必须**是 0、1 或 2 之一。与 penalty 互斥；不给则填 0。**禁止下发 3 或更大**——前端会硬裁剪到 2。" },
+        penalty: { type: Type.INTEGER, description: "守密人裁定的惩罚骰数量，取值**必须**是 0、1 或 2 之一。与 bonus 互斥；不给则填 0。**禁止下发 3 或更大**——前端会硬裁剪到 2。" }
       },
       required: ["skillName", "targetValue", "difficulty", "isSecret", "reason"],
       description: "守秘人需要替非玩家动作进行客观判定时填写。无则设为 null。"
@@ -703,6 +710,24 @@ function buildKeeperContext(messages: Array<{ sender: string; text: string }>): 
   }).join("\n\n");
 }
 
+// Guardrail: LLM 偶尔会无视提示词下发 bonus/penalty = 3+ (来自注入文档里"净剩余 3 个惩罚骰"
+// 等模糊措辞的诱导)。前端 RollDiceModal 直接信任该值,会摇额外十位骰,破坏奖励/惩罚骰规则。
+// 这里做最后一道兜底:把 rollRequest 和 keeperRoll 上的 bonus/penalty 硬截断到 [0, 2]。
+function clampBonusPenalty(req: any) {
+  if (!req || typeof req !== "object") return;
+  for (const k of ["bonus", "penalty"] as const) {
+    const v = req[k];
+    if (typeof v !== "number" || !Number.isFinite(v)) continue;
+    req[k] = Math.max(0, Math.min(2, Math.floor(v)));
+  }
+}
+
+function sanitizeKeeperResponse(data: any) {
+  if (!data || typeof data !== "object") return;
+  clampBonusPenalty(data.rollRequest);
+  clampBonusPenalty(data.keeperRoll);
+}
+
 // 1. API - Keeper Chat Completion
 app.post("/api/keeper/chat", async (req, res) => {
   const { messages, features, apiSettings } = req.body;
@@ -745,6 +770,7 @@ app.post("/api/keeper/chat", async (req, res) => {
     });
 
     const parsed = JSON.parse(textOutput);
+    sanitizeKeeperResponse(parsed);
     return res.json({ success: true, data: parsed, _serverLogs: logs });
   } catch (error: any) {
     console.error("API Error in /api/keeper/chat:", error);

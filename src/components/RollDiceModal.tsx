@@ -317,7 +317,8 @@ export default function RollDiceModal({
     const target = request.targetValue;
     const roll = calculatedTotal;
 
-    // Map successType directly to match .docs/roll_coc_rule.md specification output
+    // 成功档位 → 中文文案。基础格式祖本来自早期的 .docs/roll_coc_rule.md，
+    // 现已被 .docs/fate-gamble.md 的命运博弈段落扩展（fateGambleNote），完整规范以后者为准。
     let successZh = "判定失败";
     switch (successType) {
       case "critical": successZh = "大成功"; break;
@@ -360,7 +361,9 @@ export default function RollDiceModal({
 > **✨ 结果：${successZh}**`;
       }
     } else {
-      // Structured exactly corresponding to .docs/roll_coc_rule.md for normal player roll
+      // 玩家明骰输出格式：基础结构源自早期的 .docs/roll_coc_rule.md（🎲/十位骰/个位骰/✨/阈值），
+      // 末尾的 fateGambleNote 由 .docs/fate-gamble.md 定义的命运博弈机制拼接；
+      // SAN 检定（isSanityCheck）走同一格式但禁用 fateGambleNote（见 fate-gamble.md §二路径 D）。
       message = `
 [系统的客观投骰检定结果 - ${isSanityCheck ? "理智判定(SAN)" : skill}]
 > **🎲 ${formattedDiceResult}**
