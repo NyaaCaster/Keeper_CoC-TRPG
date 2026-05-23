@@ -4,8 +4,10 @@
  */
 
 import React, { useState } from "react";
-import { CharacterSheet, CharacterAttributes, CharacterSkills, ApiSettings, LogEntry } from "../types";
+import { CharacterSheet, CharacterAttributes, CharacterSkills, ApiSettings, LogEntry, MythicEncounters } from "../types";
 import { TEMPLATE_PRESETS } from "../data/presets";
+import { getOccupations, findOccupation } from "../data/cocOccupations";
+import { dodgeOf, motherTongueValue } from "../lib/cocRules";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Sparkles,
@@ -117,7 +119,14 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
 
   // Custom Character Form State
   const [customName, setCustomName] = useState("");
-  const [customOccupation, setCustomOccupation] = useState("民间神秘事件调查员");
+  // 阶段 6：职业改为"标准模板 id 下拉 + 自由文本兜底"。空字符串 = 走 customOccupationFreeText。
+  const [customOccupationId, setCustomOccupationId] = useState<string>("");
+  const [customOccupationFreeText, setCustomOccupationFreeText] = useState<string>("民间神秘事件调查员");
+  const [customIdentity, setCustomIdentity] = useState("");
+  const [customNationality, setCustomNationality] = useState("");
+  const [customResidence, setCustomResidence] = useState("");
+  const [customMotherTongue, setCustomMotherTongue] = useState("");
+  const [customCreditRating, setCustomCreditRating] = useState<number>(50);
   const [customGender, setCustomGender] = useState("男");
   const [customAge, setCustomAge] = useState<number>(30);
   const [customOverview, setCustomOverview] = useState("");
@@ -512,7 +521,24 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
 
         // Populate step 2 states in case they want to revert or tune
         setCustomName(importedPC.name);
-        setCustomOccupation(importedPC.occupation);
+        // 阶段 6：尝试匹配标准职业模板 id；匹配不到则把整字符串作为自由文本回填
+        {
+          const occRaw = importedPC.occupation || "";
+          const era = (importedPC.background as "1920s" | "modern") || selectedEra;
+          const matched = getOccupations(era).find((o) => o.id === occRaw || o.nameZh === occRaw);
+          if (matched) {
+            setCustomOccupationId(matched.id);
+            setCustomOccupationFreeText("");
+          } else {
+            setCustomOccupationId("");
+            setCustomOccupationFreeText(occRaw || "民间神秘事件调查员");
+          }
+        }
+        setCustomIdentity(importedPC.identity || "");
+        setCustomNationality(importedPC.nationality || "");
+        setCustomResidence(importedPC.residence || "");
+        setCustomMotherTongue(importedPC.motherTongue || "");
+        setCustomCreditRating(typeof importedPC.creditRating === "number" ? importedPC.creditRating : 50);
         setCustomGender(importedPC.gender || "男");
         setCustomAge(importedPC.age || 30);
         setCustomAttrs({ ...importedPC.attributes });
@@ -725,8 +751,22 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
           setCustomName(charData.name);
         }
         if (charData.occupation) {
-          setCustomOccupation(charData.occupation);
+          // 阶段 6：LLM 输出的职业字符串先尝试匹配模板 id / 中文名，匹配不到则作为自由文本
+          const occRaw = String(charData.occupation || "").trim();
+          const matched = getOccupations(selectedEra).find((o) => o.id === occRaw || o.nameZh === occRaw);
+          if (matched) {
+            setCustomOccupationId(matched.id);
+            setCustomOccupationFreeText("");
+          } else {
+            setCustomOccupationId("");
+            setCustomOccupationFreeText(occRaw);
+          }
         }
+        if (typeof charData.identity === "string") setCustomIdentity(charData.identity);
+        if (typeof charData.nationality === "string") setCustomNationality(charData.nationality);
+        if (typeof charData.residence === "string") setCustomResidence(charData.residence);
+        if (typeof charData.motherTongue === "string") setCustomMotherTongue(charData.motherTongue);
+        if (typeof charData.creditRating === "number") setCustomCreditRating(Math.max(0, Math.min(99, Math.floor(charData.creditRating))));
         if (charData.attributes) {
           setCustomAttrs({
             str: charData.attributes.str || 50,
@@ -802,9 +842,13 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
     const calculatedMp = Math.floor(customAttrs.pow / 5);
     const calculatedSan = customAttrs.pow;
 
+    // 阶段 6：职业 = 选中模板的中文名 / 否则自由文本兜底
+    const selectedOccTemplate = customOccupationId ? findOccupation(selectedEra, customOccupationId) : undefined;
+    const finalOccupation = selectedOccTemplate?.nameZh || customOccupationFreeText.trim() || "非主流秘仪学者";
+
     const newChar: CharacterSheet = {
       name: finalName,
-      occupation: customOccupation || "非主流秘仪学者",
+      occupation: finalOccupation,
       gender: customGender,
       age: customAge,
       background: selectedEra,
@@ -820,6 +864,14 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
       mythos: 0,
       avatar: customAvatar || undefined,
       backgroundStory: customOverview.trim() || undefined,
+      // 阶段 6 新增基本信息字段（全部 optional，空串不写入）
+      identity: customIdentity.trim() || undefined,
+      nationality: customNationality.trim() || undefined,
+      residence: customResidence.trim() || undefined,
+      motherTongue: customMotherTongue.trim() || undefined,
+      creditRating: Number.isFinite(customCreditRating) ? Math.max(0, Math.min(99, Math.floor(customCreditRating))) : undefined,
+      // 神秘接触：创建期空，KP 在游戏中下发
+      mythicEncounters: { tomes: [], spells: [], artifacts: [], entities: [] } satisfies MythicEncounters,
     };
 
     setReviewCharacter(newChar);
@@ -1377,7 +1429,7 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                 <div className="grid grid-cols-4 max-md:grid-cols-2 max-sm:grid-cols-1 gap-4">
                   <div className="col-span-1 max-md:col-span-2 max-sm:col-span-1">
                     <label className="block text-xs font-semibold text-[#c1a067] uppercase tracking-wider mb-2">角色名称</label>
-                    <input 
+                    <input
                       id="custom-name-input"
                       type="text"
                       value={customName}
@@ -1387,15 +1439,30 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                     />
                   </div>
                   <div className="col-span-1 max-md:col-span-2 max-sm:col-span-1">
-                    <label className="block text-xs font-semibold text-[#c1a067] uppercase tracking-wider mb-2">角色职业（自拟/智能大纲参考）</label>
-                    <input 
-                      id="custom-occupation-input"
-                      type="text"
-                      value={customOccupation}
-                      onChange={(e) => setCustomOccupation(e.target.value)}
-                      placeholder="例如: SCP特工 / 圣堂教会代行老兵 / 本地探长"
-                      className="w-full bg-black/40 border border-gray-800 rounded p-2.5 text-gray-200 placeholder-gray-650 focus:outline-none focus:border-[#c1a067] text-sm font-sans"
-                    />
+                    <label className="block text-xs font-semibold text-[#c1a067] uppercase tracking-wider mb-2">
+                      角色职业（{customOccupationId ? "标准模板" : "自拟"}）
+                    </label>
+                    <select
+                      id="custom-occupation-select"
+                      value={customOccupationId}
+                      onChange={(e) => setCustomOccupationId(e.target.value)}
+                      className="w-full bg-[#161719] border border-gray-800 rounded p-2.5 text-gray-200 focus:outline-none focus:border-[#c1a067] text-sm font-sans"
+                    >
+                      <option value="">— 自拟（使用下方文本） —</option>
+                      {getOccupations(selectedEra).map((occ) => (
+                        <option key={occ.id} value={occ.id}>{occ.nameZh}</option>
+                      ))}
+                    </select>
+                    {!customOccupationId && (
+                      <input
+                        id="custom-occupation-freetext"
+                        type="text"
+                        value={customOccupationFreeText}
+                        onChange={(e) => setCustomOccupationFreeText(e.target.value)}
+                        placeholder="例如: SCP特工 / 圣堂教会代行老兵 / 本地探长"
+                        className="mt-1.5 w-full bg-black/40 border border-gray-800 rounded p-2.5 text-gray-200 placeholder-gray-650 focus:outline-none focus:border-[#c1a067] text-sm font-sans"
+                      />
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-[#c1a067] uppercase tracking-wider mb-2">性别</label>
@@ -1412,13 +1479,76 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-[#c1a067] uppercase tracking-wider mb-2">年龄</label>
-                    <input 
+                    <input
                       id="custom-age-input"
                       type="number"
                       min={10}
                       max={100}
                       value={customAge}
                       onChange={(e) => setCustomAge(parseInt(e.target.value) || 30)}
+                      className="w-full bg-black/40 border border-gray-800 rounded p-2.5 text-gray-200 focus:outline-none focus:border-[#c1a067] text-sm font-sans font-mono"
+                    />
+                  </div>
+                </div>
+
+                {/* 阶段 6 新增：身份 / 国籍 / 居住地 / 母语 / 信用评级 */}
+                <div className="grid grid-cols-5 max-lg:grid-cols-3 max-sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#c1a067] uppercase tracking-wider mb-2">角色身份</label>
+                    <input
+                      id="custom-identity-input"
+                      type="text"
+                      value={customIdentity}
+                      onChange={(e) => setCustomIdentity(e.target.value)}
+                      placeholder="自由文本"
+                      className="w-full bg-black/40 border border-gray-800 rounded p-2.5 text-gray-200 placeholder-gray-650 focus:outline-none focus:border-[#c1a067] text-sm font-sans"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#c1a067] uppercase tracking-wider mb-2">国籍</label>
+                    <input
+                      id="custom-nationality-input"
+                      type="text"
+                      value={customNationality}
+                      onChange={(e) => setCustomNationality(e.target.value)}
+                      placeholder="如：英国 / 中国"
+                      className="w-full bg-black/40 border border-gray-800 rounded p-2.5 text-gray-200 placeholder-gray-650 focus:outline-none focus:border-[#c1a067] text-sm font-sans"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#c1a067] uppercase tracking-wider mb-2">居住地</label>
+                    <input
+                      id="custom-residence-input"
+                      type="text"
+                      value={customResidence}
+                      onChange={(e) => setCustomResidence(e.target.value)}
+                      placeholder="自由文本"
+                      className="w-full bg-black/40 border border-gray-800 rounded p-2.5 text-gray-200 placeholder-gray-650 focus:outline-none focus:border-[#c1a067] text-sm font-sans"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#c1a067] uppercase tracking-wider mb-2">母语</label>
+                    <input
+                      id="custom-mother-tongue-input"
+                      type="text"
+                      value={customMotherTongue}
+                      onChange={(e) => setCustomMotherTongue(e.target.value)}
+                      placeholder={`如：英语（基础值 ${customAttrs.edu}）`}
+                      className="w-full bg-black/40 border border-gray-800 rounded p-2.5 text-gray-200 placeholder-gray-650 focus:outline-none focus:border-[#c1a067] text-sm font-sans"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#c1a067] uppercase tracking-wider mb-2">信用评级 (0–99)</label>
+                    <input
+                      id="custom-credit-rating-input"
+                      type="number"
+                      min={0}
+                      max={99}
+                      value={customCreditRating}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value);
+                        setCustomCreditRating(Number.isFinite(v) ? Math.max(0, Math.min(99, v)) : 0);
+                      }}
                       className="w-full bg-black/40 border border-gray-800 rounded p-2.5 text-gray-200 focus:outline-none focus:border-[#c1a067] text-sm font-sans font-mono"
                     />
                   </div>
@@ -1520,6 +1650,36 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                       <span className="font-mono text-emerald-300 text-sm font-semibold">{customAttrs.pow}</span>
                     </div>
                   </div>
+
+                  {/* 阶段 6 新增派生层：闪避（DEX/2）+ 母语（EDU）+ 信用评级 */}
+                  <div className="grid grid-cols-3 gap-3 bg-black/40 p-3 rounded border border-gray-800 text-xs">
+                    <div className="text-center">
+                      <span className="text-gray-400 block">闪避 Dodge (DEX/2):</span>
+                      <span className="font-mono text-cyan-300 text-sm font-semibold">{dodgeOf(customAttrs.dex)}</span>
+                    </div>
+                    <div className="text-center">
+                      <span className="text-gray-400 block">母语 (EDU):</span>
+                      <span className="font-mono text-amber-200 text-sm font-semibold">{motherTongueValue(customAttrs.edu)}</span>
+                    </div>
+                    <div className="text-center">
+                      <span className="text-gray-400 block">信用评级:</span>
+                      <span className="font-mono text-[#c1a067] text-sm font-semibold">{customCreditRating}</span>
+                    </div>
+                  </div>
+
+                  {/* 神秘接触占位：创建期空，KP 在游戏中通过神话事件下发 */}
+                  <details className="bg-black/30 rounded border border-gray-850 text-xs font-sans">
+                    <summary className="cursor-pointer px-3 py-2 text-[#c1a067]/80 hover:text-[#c1a067] select-none flex items-center justify-between">
+                      <span>◎ 神秘接触档案 (Mythic Encounters)</span>
+                      <span className="text-[10px] text-gray-500 font-mono">创建期为空 · KP 下发</span>
+                    </summary>
+                    <div className="px-3 py-2.5 grid grid-cols-2 max-sm:grid-cols-1 gap-2 text-[10px] text-gray-500 leading-relaxed">
+                      <div>· 神话著作：未接触</div>
+                      <div>· 习得法术：未掌握</div>
+                      <div>· 神器器物：未持有</div>
+                      <div>· 接触实体：无记录</div>
+                    </div>
+                  </details>
                 </div>
 
                 {/* Skill panel custom adjustments */}
@@ -1670,6 +1830,31 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                       <div className="text-xs text-gray-400 bg-gray-900 px-2.5 py-0.5 rounded border border-gray-800">
                         年龄: <span className="text-[#c1a067] font-medium">{reviewCharacter.age || 30} 岁</span>
                       </div>
+                      {reviewCharacter.identity && (
+                        <div className="text-xs text-gray-400 bg-gray-900 px-2.5 py-0.5 rounded border border-gray-800">
+                          身份: <span className="text-[#c1a067] font-medium">{reviewCharacter.identity}</span>
+                        </div>
+                      )}
+                      {reviewCharacter.nationality && (
+                        <div className="text-xs text-gray-400 bg-gray-900 px-2.5 py-0.5 rounded border border-gray-800">
+                          国籍: <span className="text-[#c1a067] font-medium">{reviewCharacter.nationality}</span>
+                        </div>
+                      )}
+                      {reviewCharacter.residence && (
+                        <div className="text-xs text-gray-400 bg-gray-900 px-2.5 py-0.5 rounded border border-gray-800">
+                          居住地: <span className="text-[#c1a067] font-medium">{reviewCharacter.residence}</span>
+                        </div>
+                      )}
+                      {reviewCharacter.motherTongue && (
+                        <div className="text-xs text-gray-400 bg-gray-900 px-2.5 py-0.5 rounded border border-gray-800">
+                          母语: <span className="text-[#c1a067] font-medium">{reviewCharacter.motherTongue} ({motherTongueValue(reviewCharacter.attributes.edu)})</span>
+                        </div>
+                      )}
+                      {typeof reviewCharacter.creditRating === "number" && (
+                        <div className="text-xs text-gray-400 bg-gray-900 px-2.5 py-0.5 rounded border border-gray-800">
+                          信用评级: <span className="text-[#c1a067] font-medium">{reviewCharacter.creditRating}</span>
+                        </div>
+                      )}
                     </div>
                     <p className="text-[10px] text-gray-500 mt-1">
                       {mode === "choose" ? "经典预设角色卡模板" : "自定义构建的调查员角色设定卡"}

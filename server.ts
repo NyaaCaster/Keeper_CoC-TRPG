@@ -627,7 +627,12 @@ const GENERATE_STATS_SCHEMA = {
   type: Type.OBJECT,
   properties: {
     name: { type: Type.STRING, description: "调查员中文姓名，仅汉字，禁止任何英文译名、括号注音或拼音" },
-    occupation: { type: Type.STRING, description: "职业" },
+    occupation: { type: Type.STRING, description: "职业（CoC 7e 标准模板中文名优先，例如「医师」「私家侦探」；非标准时输出自由文本）" },
+    identity: { type: Type.STRING, description: "角色身份（自由文本，非空）" },
+    nationality: { type: Type.STRING, description: "国籍（如「英国」「中国」「美国」等中文短语）" },
+    residence: { type: Type.STRING, description: "居住地（具体城市/地区）" },
+    motherTongue: { type: Type.STRING, description: "母语（中文短语，例如「汉语」「英语」）" },
+    creditRating: { type: Type.INTEGER, description: "信用评级（0-99，按职业合理估算）" },
     attributes: {
       type: Type.OBJECT,
       properties: {
@@ -1143,7 +1148,7 @@ app.post("/api/keeper/generate-stats", async (req, res) => {
   push({ direction: "info", content: `POST /api/keeper/generate-stats`, meta: { era, name: name || undefined, descPreview: previewText(description, 160) } });
 
   try {
-    const userText = `根据玩家提供的角色故事或概述："${description}"\n姓名（若有）："${name || ''}"\n时代背景为："${era === '1920s' ? '1920年代' : '21世纪现代'}"\n\n请依据《克苏鲁的呼唤》第七版设定，为该角色生成属性（八维 15-99）和 5-8 个核心技能（值 20-95）。若玩家未提供姓名，请仅使用纯中文汉字为其命名（不要附加任何英文译名、括号注音、拼音或外文别称）。`;
+    const userText = `根据玩家提供的角色故事或概述："${description}"\n姓名（若有）："${name || ''}"\n时代背景为："${era === '1920s' ? '1920年代' : '21世纪现代'}"\n\n请依据《克苏鲁的呼唤》第七版设定，为该角色生成以下内容：\n- 八维属性 (15-99)\n- 5-8 个核心技能 (值 20-95)\n- 角色身份 / 国籍 / 居住地 / 母语 / 信用评级（0-99，按职业合理估算）\n职业字段优先输出 7e 标准模板中文名（例：医师 / 私家侦探 / 警探 / 教授 / 工程师 / 神秘学家）；若描述明显非标准（含「时钟塔代行者」「SCP特工」等设定），可保留原描述作为自由文本。\n若玩家未提供姓名，请仅使用纯中文汉字为其命名（不要附加任何英文译名、括号注音、拼音或外文别称）。`;
     const systemInstruction = "你是一个专业的《克苏鲁的呼唤》第七版TRPG跑团角色卡智脑。";
 
     const textOutput = await dispatchLlm({
