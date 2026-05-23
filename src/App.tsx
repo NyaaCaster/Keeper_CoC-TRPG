@@ -55,6 +55,17 @@ import { ConsoleLogPanel } from "./components/ConsoleLogPanel";
 import { rollDiceFormula, DiceFormulaResult } from "./lib/diceFormula";
 import { clampSanityLayers } from "./lib/cocRules";
 import { findWeapon } from "./data/cocWeapons";
+import { dispatchLlm, humanizeLlmError } from "./lib/llmClient";
+import {
+  SYSTEM_INSTRUCTION,
+  loadDynamicInstructions,
+  buildKeeperContext,
+  buildElementSandboxLimiter,
+  buildCombatDerivedBlock,
+  buildInventoryBlock,
+  sanitizeKeeperResponse,
+} from "./lib/keeperPrompt";
+import { KEEPER_RESPONSE_SCHEMA } from "./lib/llmSchemas";
 import SettingsPanel from "./components/SettingsPanel";
 import { WebGameSave, ApiSettings } from "./types";
 import { getImagePublicPrefix } from "./lib/publicConfig";
@@ -779,60 +790,44 @@ export default function App() {
     setIsKeeperLoading(true);
 
     const startedAt = Date.now();
+    const tmEnabled = featuresToUse?.typemoon !== false;
+    const scpEnabled = featuresToUse?.scp !== false;
     addLog({
       direction: "request",
-      content: `POST /api/keeper/chat → ${apiSettings.llm.provider} ${apiSettings.llm.model || "(default)"}`,
+      content: `LLM dispatch → ${apiSettings.llm.provider} ${apiSettings.llm.model || "(default)"}`,
       meta: {
-        url: "/api/keeper/chat",
+        provider: apiSettings.llm.provider,
+        model: apiSettings.llm.model,
         msgCount: currentHistory.length,
-        features: {
-          typemoon: featuresToUse?.typemoon !== false,
-          scp: featuresToUse?.scp !== false,
-        },
+        features: { typemoon: tmEnabled, scp: scpEnabled },
       },
     });
 
     try {
-      const response = await fetch("/api/keeper/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: currentHistory,
-          features: {
-            typemoon: featuresToUse?.typemoon !== false,
-            scp: featuresToUse?.scp !== false,
-          },
-          apiSettings,
-          character: activeChar,
-        }),
+      const dynamicInstructions = await loadDynamicInstructions();
+      const systemInstruction =
+        SYSTEM_INSTRUCTION +
+        dynamicInstructions +
+        buildElementSandboxLimiter(tmEnabled, scpEnabled) +
+        buildCombatDerivedBlock(activeChar) +
+        buildInventoryBlock(activeChar);
+      const userText = buildKeeperContext(currentHistory);
+
+      const textOutput = await dispatchLlm({
+        apiSettings,
+        systemInstruction,
+        userText,
+        schema: KEEPER_RESPONSE_SCHEMA,
+        temperature: 0.85,
+        topP: 0.95,
       });
 
-      if (!response.ok) {
-        let bodyText = "";
-        try { bodyText = await response.text(); } catch {}
-        addLog({
-          direction: "error",
-          content: `POST /api/keeper/chat ← HTTP ${response.status}`,
-          meta: { status: response.status, durationMs: Date.now() - startedAt, body: bodyText.slice(0, 400) },
-        });
-        throw new Error("与守密人虚无连接断开，请检查网络或刷新");
-      }
+      const keeperData: KeeperResponse = JSON.parse(textOutput);
+      sanitizeKeeperResponse(keeperData);
 
-      const raw = await response.json();
-      ingestServerLogs(raw?._serverLogs);
-      if (!raw.success || !raw.data) {
-        addLog({
-          direction: "error",
-          content: `POST /api/keeper/chat ← invalid payload`,
-          meta: { durationMs: Date.now() - startedAt, error: raw?.error },
-        });
-        throw new Error(raw.error || "守密人低语失败，返回格式有误");
-      }
-
-      const keeperData: KeeperResponse = raw.data;
       addLog({
         direction: "response",
-        content: `POST /api/keeper/chat ← narrative ${(keeperData.narrative || "").length} chars`,
+        content: `LLM dispatch ← narrative ${(keeperData.narrative || "").length} chars`,
         meta: {
           durationMs: Date.now() - startedAt,
           hasRollRequest: !!keeperData.rollRequest,
@@ -859,16 +854,17 @@ export default function App() {
       }
     } catch (error: any) {
       console.error(error);
+      const friendly = humanizeLlmError(error);
       addLog({
         direction: "error",
-        content: `POST /api/keeper/chat exception`,
-        meta: { durationMs: Date.now() - startedAt, message: error?.message },
+        content: `LLM dispatch exception`,
+        meta: { durationMs: Date.now() - startedAt, message: friendly, raw: error?.message },
       });
       const errCard: ChatMessage = {
         id: `err_${Date.now()}`,
         sender: "system",
         timestamp: new Date().toLocaleTimeString(),
-        text: `【异常低语阻断】⚠️ ${error.message || "连接终点异常失效，请检查您的 API 配置。"}`,
+        text: `【异常低语阻断】⚠️ ${friendly || "连接终点异常失效，请检查您的 API 配置。"}`,
       };
       setMessages((prev) => [...prev, errCard]);
     } finally {

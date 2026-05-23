@@ -452,6 +452,11 @@ export const QINY_BASE_URLS: Record<QinyHostKind, string> = {
   icu: "https://love.qinyan.icu/v1",
 };
 
+export const QINY_REGISTER_URLS: Record<QinyHostKind, string> = {
+  com: "https://openai.chatnewai.com/register?aff=btB0",
+  icu: "https://love.qinyan.icu/register?aff=btB0",
+};
+
 export type ModelCapability =
   | "vision"
   | "web"
@@ -486,6 +491,10 @@ export const QINY_BASE_URL = QINY_BASE_URLS.com;
 
 export function resolveQinyBaseUrl(host: QinyHostKind | undefined): string {
   return QINY_BASE_URLS[host ?? "com"];
+}
+
+export function resolveQinyRegisterUrl(host: QinyHostKind | undefined): string {
+  return QINY_REGISTER_URLS[host ?? "com"];
 }
 
 export interface LogEntry {

@@ -33,6 +33,8 @@ import {
 import { randomizeSkillDraft, legalizeDraft } from "../lib/cocSkillRandomizer";
 import { validateCharacterSheet } from "../lib/characterValidation";
 import { downloadCharacterCard } from "../lib/characterCardRender";
+import { dispatchLlm, humanizeLlmError } from "../lib/llmClient";
+import { GENERATE_MODULE_SCHEMA, GENERATE_STATS_SCHEMA } from "../lib/llmSchemas";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Sparkles,
@@ -514,90 +516,63 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
     setModuleGenerationError(null);
 
     const startedAt = Date.now();
-    const pushServerLogs = (raw: any) => {
-      if (!onAddLog || !Array.isArray(raw?._serverLogs)) return;
-      onAddLog(
-        raw._serverLogs
-          .filter((e: any) => e && typeof e === "object")
-          .map((e: any) => ({
-            direction: (e.direction as LogEntry["direction"]) ?? "info",
-            content: typeof e.content === "string" ? e.content : "",
-            meta: e.meta,
-          })),
-      );
-    };
     onAddLog?.({
       direction: "request",
-      content: `POST /api/keeper/generate-module-outline → ${apiSettings.llm.provider} ${apiSettings.llm.model || "(default)"}`,
+      content: `LLM dispatch (module-outline) → ${apiSettings.llm.provider} ${apiSettings.llm.model || "(default)"}`,
       meta: { era: selectedEra, typemoon: featureTypeMoon, scp: featureScp },
     });
 
     try {
-      const response = await fetch("/api/keeper/generate-module-outline", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          era: selectedEra,
-          typemoon: featureTypeMoon,
-          scp: featureScp,
-          apiSettings
-        })
+      const tmEnabled = featureTypeMoon !== false;
+      const scpEnabled = featureScp !== false;
+      const is1920s = selectedEra === "1920s";
+      const eraStr = is1920s ? "1920年代爵士旧日" : "21世纪现代霓虹与高墙";
+
+      let elementsRule = "";
+      if (!tmEnabled && !scpEnabled) {
+        elementsRule = "⚠️【极严格约束：经典CoC纯净跑团模式】绝不允许提及型月或SCP要素。";
+      } else {
+        elementsRule += tmEnabled ? "1. 【型月要素已开启】可融合时钟塔魔术等。\n" : "1. 【型月要素已禁用】绝不可提及。\n";
+        elementsRule += scpEnabled ? "2. 【SCP要素已开启】可融合MTF、收容站等。\n" : "2. 【SCP要素已禁用】绝不可提及。\n";
+      }
+
+      const userText = `玩家选择的历史帷幕/背景纪元为："${eraStr}"。\n\n系统内容配置协议：\n${elementsRule}\n\n请构思一个独特的CoC TRPG 模组：标题、150-250字引子、3-4个推荐PC职业、正好3个预设调查员（每人正好8~9门核心技能）。所有调查员姓名只能使用纯中文汉字，禁止出现任何英文译名、括号注音、拼音或外文别称。`;
+      const systemInstruction = "你是一个殿堂级的克苏鲁TRPG（CoC 7e）跑团守密人与顶尖文学构架师。";
+
+      const textOutput = await dispatchLlm({
+        apiSettings,
+        systemInstruction,
+        userText,
+        schema: GENERATE_MODULE_SCHEMA,
+        temperature: 0.85,
+      });
+      const raw = JSON.parse(textOutput);
+
+      onAddLog?.({
+        direction: "response",
+        content: `LLM dispatch (module-outline) ← outline ok`,
+        meta: { durationMs: Date.now() - startedAt, moduleName: raw?.title },
       });
 
-      if (!response.ok) {
-        let bodyText = "";
-        let upstreamMsg = "";
-        try {
-          const json = await response.clone().json();
-          pushServerLogs(json);
-          bodyText = JSON.stringify(json).slice(0, 400);
-          upstreamMsg = typeof json?.error === "string" ? json.error : "";
-        } catch {
-          try { bodyText = (await response.text()).slice(0, 400); } catch {}
-        }
-        onAddLog?.({
-          direction: "error",
-          content: `POST /api/keeper/generate-module-outline ← HTTP ${response.status}`,
-          meta: { status: response.status, durationMs: Date.now() - startedAt, body: bodyText },
-        });
-        throw new Error(upstreamMsg || `生成模组失败 (HTTP ${response.status})`);
-      }
-
-      const resData = await response.json();
-      pushServerLogs(resData);
-      if (resData.success && resData.data) {
-        onAddLog?.({
-          direction: "response",
-          content: `POST /api/keeper/generate-module-outline ← outline ok`,
-          meta: { durationMs: Date.now() - startedAt, moduleName: resData.data?.moduleName },
-        });
-        // 规整 outline：模型偶尔会丢字段或把数组写成字符串，做最小兜底再入 state，
-        // 避免渲染层 .map(undefined) 直接整页白屏。
-        const raw = resData.data;
-        setModuleOutline({
-          title: typeof raw?.title === "string" ? raw.title : "",
-          intro: typeof raw?.intro === "string" ? raw.intro : "",
-          recommendedOccupations: Array.isArray(raw?.recommendedOccupations)
-            ? raw.recommendedOccupations.filter((s: any) => typeof s === "string")
-            : [],
-          presets: Array.isArray(raw?.presets) ? raw.presets : [],
-        });
-      } else {
-        onAddLog?.({
-          direction: "error",
-          content: `POST /api/keeper/generate-module-outline ← invalid payload`,
-          meta: { durationMs: Date.now() - startedAt, error: resData?.error },
-        });
-        throw new Error(resData.error || "获取模组信息失败");
-      }
+      // 规整 outline：模型偶尔会丢字段或把数组写成字符串，做最小兜底再入 state，
+      // 避免渲染层 .map(undefined) 直接整页白屏。
+      setModuleOutline({
+        title: typeof raw?.title === "string" ? raw.title : "",
+        intro: typeof raw?.intro === "string" ? raw.intro : "",
+        recommendedOccupations: Array.isArray(raw?.recommendedOccupations)
+          ? raw.recommendedOccupations.filter((s: any) => typeof s === "string")
+          : [],
+        presets: Array.isArray(raw?.presets) ? raw.presets : [],
+      });
     } catch (err: any) {
       console.error("Failed to generate module outline:", err);
+      const friendly = humanizeLlmError(err);
       onAddLog?.({
         direction: "error",
-        content: `POST /api/keeper/generate-module-outline exception`,
-        meta: { durationMs: Date.now() - startedAt, message: err?.message },
+        content: `LLM dispatch (module-outline) exception`,
+        meta: { durationMs: Date.now() - startedAt, message: friendly, raw: err?.message },
       });
-      setModuleGenerationError(err.message || "由于未知的异度力场干扰，模组生成失败。请重试。");
+      setModuleGenerationError(friendly || "由于未知的异度力场干扰，模组生成失败。请重试。");
     } finally {
       setIsGeneratingModule(false);
     }
@@ -610,145 +585,111 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
     setGenerationError(null);
 
     const startedAt = Date.now();
-    const pushServerLogs = (raw: any) => {
-      if (!onAddLog || !Array.isArray(raw?._serverLogs)) return;
-      onAddLog(
-        raw._serverLogs
-          .filter((e: any) => e && typeof e === "object")
-          .map((e: any) => ({
-            direction: (e.direction as LogEntry["direction"]) ?? "info",
-            content: typeof e.content === "string" ? e.content : "",
-            meta: e.meta,
-          })),
-      );
-    };
     onAddLog?.({
       direction: "request",
-      content: `POST /api/keeper/generate-stats → ${apiSettings.llm.provider} ${apiSettings.llm.model || "(default)"}`,
+      content: `LLM dispatch (generate-stats) → ${apiSettings.llm.provider} ${apiSettings.llm.model || "(default)"}`,
       meta: { era: selectedEra, name: customName || undefined, descPreview: (customOverview || "").slice(0, 160) },
     });
 
     try {
-      const response = await fetch("/api/keeper/generate-stats", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          description: customOverview,
-          era: selectedEra,
-          name: customName,
-          apiSettings
-        })
+      const userText = `根据玩家提供的角色故事或概述："${customOverview}"\n姓名（若有）："${customName || ''}"\n时代背景为："${selectedEra === '1920s' ? '1920年代' : '21世纪现代'}"\n\n请依据《克苏鲁的呼唤》第七版设定，为该角色生成以下内容：\n- 八维属性 (15-99)\n- 5-8 个核心技能 (值 20-95)\n- 角色身份 / 国籍 / 居住地 / 母语 / 信用评级（0-99，按职业合理估算）\n职业字段优先输出 7e 标准模板中文名（例：医师 / 私家侦探 / 警探 / 教授 / 工程师 / 神秘学家）；若描述明显非标准（含「时钟塔代行者」「SCP特工」等设定），可保留原描述作为自由文本。\n若玩家未提供姓名，请仅使用纯中文汉字为其命名（不要附加任何英文译名、括号注音、拼音或外文别称）。`;
+      const systemInstruction = "你是一个专业的《克苏鲁的呼唤》第七版TRPG跑团角色卡智脑。";
+
+      const textOutput = await dispatchLlm({
+        apiSettings,
+        systemInstruction,
+        userText,
+        schema: GENERATE_STATS_SCHEMA,
+        temperature: 0.7,
+      });
+      const charData = JSON.parse(textOutput);
+
+      onAddLog?.({
+        direction: "response",
+        content: `LLM dispatch (generate-stats) ← stats ok`,
+        meta: {
+          durationMs: Date.now() - startedAt,
+          occupation: charData?.occupation,
+          skillsCount: Array.isArray(charData?.skills) ? charData.skills.length : undefined,
+        },
       });
 
-      if (!response.ok) {
-        let bodyText = "";
-        try {
-          const json = await response.clone().json();
-          pushServerLogs(json);
-          bodyText = JSON.stringify(json).slice(0, 400);
-        } catch {
-          try { bodyText = (await response.text()).slice(0, 400); } catch {}
-        }
-        onAddLog?.({
-          direction: "error",
-          content: `POST /api/keeper/generate-stats ← HTTP ${response.status}`,
-          meta: { status: response.status, durationMs: Date.now() - startedAt, body: bodyText },
-        });
-        throw new Error("HTTP connection error or API issue when generating attributes.");
+      if (charData.name && !customName.trim()) {
+        setCustomName(charData.name);
       }
-
-      const resData = await response.json();
-      pushServerLogs(resData);
-      if (resData.success && resData.data) {
-        onAddLog?.({
-          direction: "response",
-          content: `POST /api/keeper/generate-stats ← stats ok`,
-          meta: { durationMs: Date.now() - startedAt, occupation: resData.data?.occupation, skillsCount: Array.isArray(resData.data?.skills) ? resData.data.skills.length : undefined },
-        });
-        const charData = resData.data;
-        if (charData.name && !customName.trim()) {
-          setCustomName(charData.name);
+      if (charData.occupation) {
+        // 阶段 6：LLM 输出的职业字符串先尝试匹配模板 id / 中文名，匹配不到则作为自由文本
+        const occRaw = String(charData.occupation || "").trim();
+        const matched = getOccupations(selectedEra).find((o) => o.id === occRaw || o.nameZh === occRaw);
+        if (matched) {
+          setCustomOccupationId(matched.id);
+          setCustomOccupationFreeText("");
+        } else {
+          setCustomOccupationId("");
+          setCustomOccupationFreeText(occRaw);
         }
-        if (charData.occupation) {
-          // 阶段 6：LLM 输出的职业字符串先尝试匹配模板 id / 中文名，匹配不到则作为自由文本
-          const occRaw = String(charData.occupation || "").trim();
-          const matched = getOccupations(selectedEra).find((o) => o.id === occRaw || o.nameZh === occRaw);
-          if (matched) {
-            setCustomOccupationId(matched.id);
-            setCustomOccupationFreeText("");
-          } else {
-            setCustomOccupationId("");
-            setCustomOccupationFreeText(occRaw);
+      }
+      if (typeof charData.identity === "string") setCustomIdentity(charData.identity);
+      if (typeof charData.nationality === "string") setCustomNationality(charData.nationality);
+      if (typeof charData.residence === "string") setCustomResidence(charData.residence);
+      if (typeof charData.motherTongue === "string") setCustomMotherTongue(charData.motherTongue);
+      if (typeof charData.creditRating === "number") setCustomCreditRating(Math.max(0, Math.min(99, Math.floor(charData.creditRating))));
+      if (charData.attributes) {
+        setCustomAttrs({
+          str: charData.attributes.str || 50,
+          con: charData.attributes.con || 50,
+          siz: charData.attributes.siz || 50,
+          dex: charData.attributes.dex || 50,
+          app: charData.attributes.app || 50,
+          int: charData.attributes.int || 50,
+          pow: charData.attributes.pow || 50,
+          edu: charData.attributes.edu || 50,
+          luck: charData.attributes.luck || 50
+        });
+      }
+      if (charData.skills && Array.isArray(charData.skills)) {
+        const mappedSkills: CharacterSkills = {};
+        charData.skills.forEach((s: { name: string; value: number }) => {
+          if (s.name && s.value) {
+            mappedSkills[s.name] = s.value;
           }
-        }
-        if (typeof charData.identity === "string") setCustomIdentity(charData.identity);
-        if (typeof charData.nationality === "string") setCustomNationality(charData.nationality);
-        if (typeof charData.residence === "string") setCustomResidence(charData.residence);
-        if (typeof charData.motherTongue === "string") setCustomMotherTongue(charData.motherTongue);
-        if (typeof charData.creditRating === "number") setCustomCreditRating(Math.max(0, Math.min(99, Math.floor(charData.creditRating))));
-        if (charData.attributes) {
-          setCustomAttrs({
-            str: charData.attributes.str || 50,
-            con: charData.attributes.con || 50,
-            siz: charData.attributes.siz || 50,
-            dex: charData.attributes.dex || 50,
-            app: charData.attributes.app || 50,
-            int: charData.attributes.int || 50,
-            pow: charData.attributes.pow || 50,
-            edu: charData.attributes.edu || 50,
-            luck: charData.attributes.luck || 50
-          });
-        }
-        if (charData.skills && Array.isArray(charData.skills)) {
-          const mappedSkills: CharacterSkills = {};
-          charData.skills.forEach((s: { name: string; value: number }) => {
-            if (s.name && s.value) {
-              mappedSkills[s.name] = s.value;
-            }
-          });
-          // 阶段 7：LLM 回填要按"当前选择的职业"来落槽位，未选职业 = 8 free 槽。
-          // 此处直接用最新的 customOccupationId（charData.occupation 已经在前面写入 state）。
-          const tplOccId =
-            (typeof charData.occupation === "string" &&
-              getOccupations(selectedEra).find(
-                (o) => o.id === charData.occupation || o.nameZh === charData.occupation,
-              )?.id) ||
-            customOccupationId;
-          const matchedTpl = tplOccId ? findOccupation(selectedEra, tplOccId) : undefined;
-          const constraints = matchedTpl ? expandOccupationSlots(matchedTpl) : customOccupationConstraints();
-          // 阶段 8：LLM 输出的"技能偏好"先落 picked 槽，点数交本地分配器按 EDU×4 / INT×2 双池合法切分。
-          const llmAttrs = charData.attributes
-            ? {
-                str: charData.attributes.str || 50,
-                con: charData.attributes.con || 50,
-                siz: charData.attributes.siz || 50,
-                dex: charData.attributes.dex || 50,
-                app: charData.attributes.app || 50,
-                int: charData.attributes.int || 50,
-                pow: charData.attributes.pow || 50,
-                edu: charData.attributes.edu || 50,
-                luck: charData.attributes.luck || 50,
-              }
-            : customAttrs;
-          const distributed = distributeSkillsToDraft(mappedSkills, constraints, selectedEra);
-          setSkillDraft(legalizeDraft(distributed, llmAttrs, selectedEra));
-        }
-      } else {
-        onAddLog?.({
-          direction: "error",
-          content: `POST /api/keeper/generate-stats ← invalid payload`,
-          meta: { durationMs: Date.now() - startedAt, error: resData?.error },
         });
-        throw new Error(resData.error || "获取属性失败");
+        // 阶段 7：LLM 回填要按"当前选择的职业"来落槽位，未选职业 = 8 free 槽。
+        // 此处直接用最新的 customOccupationId（charData.occupation 已经在前面写入 state）。
+        const tplOccId =
+          (typeof charData.occupation === "string" &&
+            getOccupations(selectedEra).find(
+              (o) => o.id === charData.occupation || o.nameZh === charData.occupation,
+            )?.id) ||
+          customOccupationId;
+        const matchedTpl = tplOccId ? findOccupation(selectedEra, tplOccId) : undefined;
+        const constraints = matchedTpl ? expandOccupationSlots(matchedTpl) : customOccupationConstraints();
+        // 阶段 8：LLM 输出的"技能偏好"先落 picked 槽，点数交本地分配器按 EDU×4 / INT×2 双池合法切分。
+        const llmAttrs = charData.attributes
+          ? {
+              str: charData.attributes.str || 50,
+              con: charData.attributes.con || 50,
+              siz: charData.attributes.siz || 50,
+              dex: charData.attributes.dex || 50,
+              app: charData.attributes.app || 50,
+              int: charData.attributes.int || 50,
+              pow: charData.attributes.pow || 50,
+              edu: charData.attributes.edu || 50,
+              luck: charData.attributes.luck || 50,
+            }
+          : customAttrs;
+        const distributed = distributeSkillsToDraft(mappedSkills, constraints, selectedEra);
+        setSkillDraft(legalizeDraft(distributed, llmAttrs, selectedEra));
       }
     } catch (err: any) {
       console.error("Failed to generate character stats:", err);
+      const friendly = humanizeLlmError(err);
       onAddLog?.({
         direction: "error",
-        content: `POST /api/keeper/generate-stats exception`,
-        meta: { durationMs: Date.now() - startedAt, message: err?.message },
+        content: `LLM dispatch (generate-stats) exception`,
+        meta: { durationMs: Date.now() - startedAt, message: friendly, raw: err?.message },
       });
-      setGenerationError(err.message || "生成属性失败，请稍后重试。");
+      setGenerationError(friendly || "生成属性失败，请稍后重试。");
     } finally {
       setIsGeneratingStats(false);
     }

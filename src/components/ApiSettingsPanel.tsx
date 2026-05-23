@@ -18,6 +18,7 @@ import {
   LlmProviderKind,
   ImageProviderKind,
   QinyHostKind,
+  resolveQinyRegisterUrl,
 } from "../types";
 import {
   saveApiSettings,
@@ -210,6 +211,11 @@ export default function ApiSettingsPanel({
                 onChange={(v) =>
                   setSettings((s) => ({ ...s, llm: { ...s.llm, apiKey: v } }))
                 }
+                helpUrl={
+                  settings.llm.provider === "qiny"
+                    ? resolveQinyRegisterUrl(settings.llm.qinyHost)
+                    : undefined
+                }
               />
 
               <ModelField
@@ -254,6 +260,11 @@ export default function ApiSettingsPanel({
                 value={settings.image.apiKey}
                 onChange={(v) =>
                   setSettings((s) => ({ ...s, image: { ...s.image, apiKey: v } }))
+                }
+                helpUrl={
+                  settings.image.provider === "qiny"
+                    ? resolveQinyRegisterUrl(settings.image.qinyHost)
+                    : undefined
                 }
               />
 
@@ -394,7 +405,7 @@ function Field({
   children,
 }: {
   label: string;
-  hint?: string;
+  hint?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -498,16 +509,32 @@ function ApiKeyField({
   label,
   value,
   onChange,
+  helpUrl,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
+  helpUrl?: string;
 }) {
   const [reveal, setReveal] = useState(false);
 
   // mousedown reveals, mouseup/leave hides — matches SillyTavern's "press to peek" pattern
   return (
-    <Field label={label}>
+    <Field
+      label={label}
+      hint={
+        helpUrl ? (
+          <a
+            href={helpUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#10b981] hover:text-[#c1a067] transition-colors underline-offset-2 hover:underline"
+          >
+            获取 API Key
+          </a>
+        ) : undefined
+      }
+    >
       <div className="relative">
         <input
           type={reveal ? "text" : "password"}
