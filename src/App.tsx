@@ -17,6 +17,7 @@ import {
 import CharacterCreator from "./components/CharacterCreator";
 import RollDiceModal from "./components/RollDiceModal";
 import EffectRollModal from "./components/EffectRollModal";
+import MadnessIntCheckModal from "./components/MadnessIntCheckModal";
 import CharacterSheetPanel from "./components/CharacterSheetPanel";
 import CluesNotebook, { ImageViewer } from "./components/CluesNotebook";
 import {
@@ -79,6 +80,88 @@ const EFFECT_VERB: Record<EffectKind, string> = {
   heal: "恢复 HP",
   mpCost: "扣减 MP",
   sanLoss: "扣减 SAN",
+};
+
+/**
+ * 单回合"垂死"的局部 1d10 命运代价(规则 9 救起分支)。
+ * 与全局 luckBurn 不同——这是前端在 dying 状态下硬规则强制扣的"命运赎金",
+ * 用来防止 LLM 永远救人导致玩家无任何代价。LUC 不足时直接 dead,不再走救起。
+ */
+function rollD10(): number {
+  return 1 + Math.floor(Math.random() * 10);
+}
+
+/** 推断当前会话的终局态(从最后一条 keeper 消息的 parsedResponse.scenarioEnd 派生)。 */
+function deriveScenarioStatus(
+  messages: ChatMessage[],
+): "dying" | "dead" | "insane" | "victory" | "ambiguous" | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.sender !== "keeper") continue;
+    const end = m.parsedResponse?.scenarioEnd;
+    if (end?.kind === "dead") return "dead";
+    if (end?.kind === "insane") return "insane";
+    if (end?.kind === "dying") return "dying";
+    if (end?.kind === "victory") return "victory";
+    if (end?.kind === "ambiguous") return "ambiguous";
+    return null;
+  }
+  return null;
+}
+
+/**
+ * 终局闸前端硬规则裁决(规则 9)。返回本回合 keeper 响应应该被覆盖成的 scenarioEnd。
+ * - 非 dying 上下文 + HP 正常 → null
+ * - 非 dying 上下文 + HP 归零 + 单次伤害 ≥ maxHp → dead(一次性致命)
+ * - 非 dying 上下文 + HP 归零 + 单次伤害 < maxHp → dying(单回合垂死窗口)
+ * - dying 上下文 + finalHp ≥ 1 → null(LLM 选择了救起)
+ * - dying 上下文 + finalHp ≤ 0 → dead(单回合裁决,不允许 LLM 拖到第二个 dying 回合)
+ */
+function computeScenarioEnd(
+  before: CharacterSheet,
+  finalHp: number,
+  damageMagnitude: number,
+  prevStatus: "dying" | "dead" | "insane" | "victory" | "ambiguous" | null,
+): KeeperResponse["scenarioEnd"] {
+  // victory/ambiguous/dead/insane 已是终局态,直接保留(不会再扣血)
+  if (prevStatus === "dead" || prevStatus === "insane" || prevStatus === "victory" || prevStatus === "ambiguous") {
+    return { kind: prevStatus };
+  }
+  if (prevStatus === "dying") {
+    if (finalHp >= 1) return null;
+    return { kind: "dead" };
+  }
+  if (before.hp <= 0) return null;
+  if (finalHp > 0) return null;
+  if (damageMagnitude >= before.maxHp) return { kind: "dead" };
+  return { kind: "dying" };
+}
+
+/**
+ * 疯狂表(规则 10) — 1d10 表项与简短叙事代号。表项编号与 7e KRB p.158 一致。
+ */
+const MADNESS_TABLE: { id: number; name: string; brief: string }[] = [
+  { id: 1, name: "失忆", brief: "她忽然记不起自己怎么会出现在这里" },
+  { id: 2, name: "心理性残障", brief: "她突然短暂失明 / 失聪 / 一侧肢体不听使唤" },
+  { id: 3, name: "狂暴攻击", brief: "她不分敌我地袭击身边最近的目标" },
+  { id: 4, name: "偏执", brief: "她确信周围所有人都在密谋害她" },
+  { id: 5, name: "关键人物错认", brief: "她把现场某人错认为背景里的故人" },
+  { id: 6, name: "昏厥", brief: "她膝盖一软,世界向后退去" },
+  { id: 7, name: "恐慌逃离", brief: "她不顾一切转身逃跑,丢下所有物品" },
+  { id: 8, name: "歇斯底里", brief: "她爆发为大笑、大哭或尖叫,无法停止" },
+  { id: 9, name: "获得恐惧症", brief: "她对眼前某具体物件产生不可遏制的恐惧" },
+  { id: 10, name: "获得狂躁症", brief: "她对某具体物件产生不可遏制的强迫执念" },
+];
+
+/** 1-10 表项查询;越界回退到 1。 */
+function lookupMadness(id: number) {
+  return MADNESS_TABLE.find((m) => m.id === id) ?? MADNESS_TABLE[0];
+}
+
+/** 默认空 sanityState — 旧存档迁移时回填用,避免 undefined 解构报错。 */
+const DEFAULT_SANITY_STATE: NonNullable<CharacterSheet["sanityState"]> = {
+  episodeSanLoss: 0,
+  madness: null,
 };
 
 export default function App() {
@@ -194,6 +277,16 @@ export default function App() {
   const [luckDiff, setLuckDiff] = useState<number>(0);
 
   /**
+   * 疯狂态 INT 检定挂起态(规则 10 A 路径)。SAN 单次扣 ≥ 5 触发,
+   * 弹出复用 RollDiceModal 的紫红主题检定;onResolve 后由 finalizer 处理后效。
+   * 与 pendingEffectRoll 同级,但视觉上独立。
+   */
+  const [pendingMadnessCheck, setPendingMadnessCheck] = useState<{
+    targetValue: number; // 调查员 INT 当前值
+    onResolve: (passed: boolean) => void;
+  } | null>(null);
+
+  /**
    * 二阶段效果骰挂起态。技能判定 modal 关闭后，若需要再掷一次"效果公式"
    * （SAN 失败的 1d6、武器伤害等），由调用方 setPendingEffectRoll 推一份描述。
    * EffectRollModal 演完动画后调用 onResolve(diceResult)，业务侧再扣属性、回报 KP。
@@ -283,6 +376,17 @@ export default function App() {
     if (!textToSend.trim() || isKeeperLoading) return;
     // CoC 7e 严格合规：SAN 检定挂起期间，玩家不可推进剧情。系统回报例外（SAN 检定结束后会以 system 身份发回）。
     if (activeSanity && !isSystemReport) return;
+    // 规则 10:INT 检定 modal 挂起期间也不允许玩家发声(系统回报除外)
+    if (pendingMadnessCheck && !isSystemReport) return;
+
+    // 终局闸:dead / insane / victory / ambiguous 状态封盘——玩家所有输入(包括 system 回报)都不再推进 LLM。
+    const currentStatus = deriveScenarioStatus(messages);
+    if (
+      currentStatus === "dead" ||
+      currentStatus === "insane" ||
+      currentStatus === "victory" ||
+      currentStatus === "ambiguous"
+    ) return;
 
     // [sys_test] 测试命令拦截 — 不入消息流、不入日志、不调 LLM
     if (!isSystemReport && textToSend.trim().startsWith("[sys_test]")) {
@@ -318,7 +422,56 @@ export default function App() {
       text: textToSend,
     };
 
-    const updated = [...messages, ...cancellationMsgs, playerMsg];
+    // 终局闸:dying 状态下,玩家本次发言即"遗言/挣扎"窗口结束,
+    // 接下来 LLM 必须二选一(救起 / 死亡)。在玩家消息后追加一条系统提示,
+    // 由 buildKeeperContext 透传给 LLM。规则 9 已经在 SYSTEM_INSTRUCTION 里展开,
+    // 这里只放精简提示,触发 LLM 进入二选一模式。
+    const dyingGateMsgs: ChatMessage[] = [];
+    if (currentStatus === "dying") {
+      const luc = character?.attributes.luck ?? 0;
+      dyingGateMsgs.push({
+        id: `sys_dying_gate_${Date.now()}`,
+        sender: "system",
+        timestamp: new Date().toLocaleTimeString(),
+        text: `[终局闸] 调查员处于 dying 状态(剩余 LUC = ${luc})。本回合 KP 必须二选一并严格执行(详见 SYSTEM_INSTRUCTION 规则 9):\n① 救起:scenarioEnd 设为 null;characterUpdates.hpChange 给一个 ≥ 1 的正整数把 HP 拉回 ≥ 1;narrative 写叙事性救起(被路人/反派/巧合救起,不能原地满血复活);gameState.currentLocation 必须改成与原致命场景不同的物理地点;叙事上必须包含代价(俘虏/欠人情/丢物/被注视)。LUC 已由前端扣除 1d10 不需再扣。\n② 死亡:scenarioEnd = { kind: "dead", epilogue: "<150-300 字 Markdown 死亡尾声>" };narrative 写 80-150 字临终感官记忆;其它字段全部 null。\n禁止维持 dying / 继续战斗 / 拖到下一回合再投 CON。`,
+      });
+    }
+
+    // 规则 10 疯狂干涉:在玩家消息进入 LLM 前,把当前疯狂态注入为 system 标记,
+    // 让 LLM 按规则 10 曲解玩家声明。bout/temporary/indefinite 三态对应三套提示。
+    const madnessGateMsgs: ChatMessage[] = [];
+    const sanityState = character?.sanityState ?? null;
+    if (sanityState && sanityState.madness) {
+      const t = lookupMadness(sanityState.boutRoll ?? 1);
+      let madnessText = "";
+      if (sanityState.madness === "bout") {
+        madnessText = `[疯狂干涉·急性发作 · 表项 #${t.id} ${t.name} · 仅本回合] ${t.brief}。规则 10 铁律:你必须接管玩家本次声明,按表项 #${t.id} ${t.name} 改写为对应行为,玩家声明的技能动作不得真正生效;narrative 渲染本次发作;禁止下发 rollRequest/sanityCheck;keeperRoll/sceneImage/clue 必须与发作行为相关。本回合结束后该急性态自动解除转入临时疯狂。`;
+      } else if (sanityState.madness === "temporary") {
+        madnessText = `[疯狂干涉·临时疯狂 · 起源表项 #${t.id} ${t.name} · 剩余 ${sanityState.temporaryTurnsRemaining ?? 0} 个守密人回合] 调查员仍在精神浑浊期。规则 10 铁律:narrative 持续渗透症状(${t.brief});玩家声明的 rollRequest 默认升一级 difficulty 或挂 1 penalty(只在症状直接干扰时);允许轻度感官错觉(她以为听到/看到),但禁止幻觉成为真实线索;禁止下发 sanityCheck。`;
+      } else if (sanityState.madness === "indefinite") {
+        madnessText = `[疯狂干涉·不定期疯狂 · 起源表项 #${t.id} ${t.name} · 持续整个模组] 调查员的精神已永久(本剧本范围内)失常。规则 10 铁律:每回合 narrative 必须渗透症状(${t.brief});rollRequest 默认挂 1 penalty;只有当本回合剧情中发生明确的心理治疗事件(NPC 医生介入 / Psychotherapy 技能成功 / 长期休养)且你判断治疗合理时,才可下发 madnessRecover: true 解除;禁止因玩家说"我冷静下来"就解除;禁止下发 sanityCheck。`;
+      }
+      if (madnessText) {
+        madnessGateMsgs.push({
+          id: `sys_madness_gate_${Date.now()}`,
+          sender: "system",
+          timestamp: new Date().toLocaleTimeString(),
+          text: madnessText,
+        });
+      }
+    }
+
+    // 玩家发声消耗 1 个 bout 回合;temporary 在 keeper 回合结束时递减(applyKeeperResponse)。
+    if (sanityState?.madness === "bout") {
+      // bout 持续 1 个玩家输入回合 — 这次发声后立刻清零。
+      // 这里我们标记为"已经触发过",keeper 回合结束时由 advanceMadnessAfterKeeper 转 temporary。
+      setCharacter((prev) => prev ? {
+        ...prev,
+        sanityState: prev.sanityState ? { ...prev.sanityState, boutTurnsRemaining: 0 } : prev.sanityState,
+      } : prev);
+    }
+
+    const updated = [...messages, ...cancellationMsgs, playerMsg, ...dyingGateMsgs, ...madnessGateMsgs];
     setMessages(updated);
     setInputText("");
 
@@ -713,10 +866,189 @@ export default function App() {
     }
   };
 
+  /**
+   * 规则 10 SAN 影响裁决(纯函数,不写 state)。
+   * 给定 SAN 损失值与角色当前状态,计算下一刻 sanityState 与待办 sideEffects。
+   * 优先级:C(insane) > B(indefinite) > A(INT 检定 → bout/temporary)。
+   * - sanLoss <= 0 → 无副作用(回血或无变化)
+   * - finalSan === 0 → triggerInsane(终局闸 insane)
+   * - episodeSanLoss + sanLoss >= currentSan / 5(取整,且 ≥ 1) → triggerIndefinite
+   * - sanLoss >= 5 → triggerIntCheck(让调用方弹 INT 检定 modal)
+   */
+  const computeSanityImpact = (
+    char: CharacterSheet,
+    sanLoss: number,
+    finalSan: number,
+  ): {
+    nextSanityState: NonNullable<CharacterSheet["sanityState"]>;
+    triggerInsane: boolean;
+    triggerIndefinite: boolean;
+    triggerIntCheck: boolean;
+  } => {
+    const prev = char.sanityState ?? DEFAULT_SANITY_STATE;
+    const next = { ...prev };
+
+    if (sanLoss <= 0) {
+      return {
+        nextSanityState: next,
+        triggerInsane: false,
+        triggerIndefinite: false,
+        triggerIntCheck: false,
+      };
+    }
+
+    next.episodeSanLoss = (prev.episodeSanLoss ?? 0) + sanLoss;
+
+    // C 路径:SAN 归零 → 永久疯狂终局
+    if (finalSan === 0) {
+      return {
+        nextSanityState: next,
+        triggerInsane: true,
+        triggerIndefinite: false,
+        triggerIntCheck: false,
+      };
+    }
+
+    // B 路径:本模组累计 ≥ 当前 SAN 的 1/5(向下取整,最低阈值 1)→ 不定期疯狂
+    // 注意:规则原文用"每日"但 7e KRB 也接受"每个剧本/调查段"作为 episode,
+    //   单人桌没有日历,本游戏以模组为 episode。
+    const indefiniteThreshold = Math.max(1, Math.floor(char.san / 5));
+    const alreadyIndefinite = prev.madness === "indefinite";
+    if (!alreadyIndefinite && next.episodeSanLoss >= indefiniteThreshold) {
+      next.madness = "indefinite";
+      next.boutRoll = next.boutRoll ?? (1 + Math.floor(Math.random() * 10));
+      next.indefiniteAnchor = {
+        moduleName: gameModuleName,
+        turnId: `turn_${Date.now()}`,
+      };
+      return {
+        nextSanityState: next,
+        triggerInsane: false,
+        triggerIndefinite: true,
+        triggerIntCheck: false,
+      };
+    }
+
+    // A 路径:单次 ≥ 5 触发 INT 检定(由调用方弹 modal,通过则进 bout/temporary)
+    if (sanLoss >= 5) {
+      return {
+        nextSanityState: next,
+        triggerInsane: false,
+        triggerIndefinite: false,
+        triggerIntCheck: true,
+      };
+    }
+
+    return {
+      nextSanityState: next,
+      triggerInsane: false,
+      triggerIndefinite: false,
+      triggerIntCheck: false,
+    };
+  };
+
+  /**
+   * INT 检定通过后的处理(规则 10 A 通过路径):
+   * 急性发作(bout) 1 个玩家输入回合,然后转 temporary 1d6 个 keeper 回合。
+   * 同时给 +1 mythos 作为"理解了不可名状"的奖励,自动调低 maxSanLimit。
+   * 调用方需要先在外部滚好 boutRoll(1-10),保证 setState 与回报文本一致。
+   */
+  const enterBoutFromIntCheck = (boutRoll: number, temporaryTurns: number) => {
+    setCharacter((prev) => {
+      if (!prev) return prev;
+      const sanityState = prev.sanityState ?? DEFAULT_SANITY_STATE;
+      const nextMythos = prev.mythos + 1;
+      const nextMaxSanLimit = Math.max(0, 99 - nextMythos);
+      return {
+        ...prev,
+        mythos: nextMythos,
+        maxSanLimit: nextMaxSanLimit,
+        san: Math.min(prev.san, nextMaxSanLimit),
+        sanityState: {
+          ...sanityState,
+          madness: "bout",
+          boutRoll,
+          boutTurnsRemaining: 1,
+          temporaryTurnsRemaining: temporaryTurns,
+        },
+      };
+    });
+  };
+
+  /**
+   * 每个 keeper 回合完成后递减疯狂状态机。
+   * - bout(boutTurnsRemaining 已在玩家发声时清零)→ 转 temporary,清空 boutTurnsRemaining
+   * - temporary → temporaryTurnsRemaining -= 1,归 0 时清零 madness/boutRoll/temporaryTurnsRemaining
+   * - indefinite → 不递减(等 madnessRecover 或模组终结清零)
+   * 同时:返回一个"是否需要在下一轮注入 [疯狂干涉·临时疯狂解除] 提示"的标记给调用方。
+   */
+  const advanceMadnessAfterKeeper = (recoverByLLM: boolean): { announceRecover: boolean } => {
+    let announceRecover = false;
+    setCharacter((prev) => {
+      if (!prev?.sanityState) return prev;
+      const ss = prev.sanityState;
+
+      // LLM 下发 madnessRecover 解除 indefinite(C 路径)
+      if (recoverByLLM && ss.madness === "indefinite") {
+        return {
+          ...prev,
+          sanityState: {
+            ...ss,
+            madness: null,
+            boutRoll: undefined,
+            indefiniteAnchor: undefined,
+          },
+        };
+      }
+
+      if (ss.madness === "bout") {
+        // 玩家发声已经把 boutTurnsRemaining 清零;这里 keeper 回合结束转 temporary。
+        return {
+          ...prev,
+          sanityState: {
+            ...ss,
+            madness: "temporary",
+            boutTurnsRemaining: undefined,
+            // temporaryTurnsRemaining 已经在 enterBoutFromIntCheck 时滚好,不重复滚
+          },
+        };
+      }
+
+      if (ss.madness === "temporary") {
+        const remaining = (ss.temporaryTurnsRemaining ?? 0) - 1;
+        if (remaining <= 0) {
+          announceRecover = true;
+          return {
+            ...prev,
+            sanityState: {
+              ...ss,
+              madness: null,
+              boutRoll: undefined,
+              temporaryTurnsRemaining: undefined,
+            },
+          };
+        }
+        return {
+          ...prev,
+          sanityState: {
+            ...ss,
+            temporaryTurnsRemaining: remaining,
+          },
+        };
+      }
+
+      return prev;
+    });
+    return { announceRecover };
+  };
+
   const applyKeeperResponse = (
     keeperData: KeeperResponse,
     keeperRollReport?: string,
   ) => {
+    // 派生当前会话的"上一回合"终局态——用于判断 LLM 当前是否身处 dying 救起回合。
+    const prevStatus = deriveScenarioStatus(messages);
+
     // Check for GameState updates
     if (keeperData.gameState) {
       if (keeperData.gameState.moduleName) {
@@ -724,6 +1056,12 @@ export default function App() {
       }
       setCurrentLocation(keeperData.gameState.currentLocation || "未知禁区");
     }
+
+    // 终局闸:dying / dead 硬规则护栏(规则 9)。
+    // 我们在 characterUpdates 之前先快照角色,在结算之后判断 HP/maxHp 阈值,
+    // 并强制覆盖 LLM 的 scenarioEnd——LLM 只负责叙事,触发权归前端。
+    const beforeChar = character!;
+    let scenarioEndOverride: KeeperResponse["scenarioEnd"] = null;
 
     // Check for Character Attributes updates (HP / SAN / MP)
     if (keeperData.characterUpdates) {
@@ -773,6 +1111,19 @@ export default function App() {
         finalSan = Math.min(finalSan, finalMaxSanLimit);
       }
 
+      // 规则 10 SAN 影响裁决(整数路径) — 在 setCharacter 之前先算好 sanityState,
+      // 避免 setCharacter 多次覆盖。triggerIntCheck 时 modal 在异步处理,但此时
+      // sanityState 已经反映"扣减事实"(episodeSanLoss 累计),通过的话再补 madness。
+      let pendingSanImpact:
+        | ReturnType<typeof computeSanityImpact>
+        | null = null;
+      let nextSanityState = character!.sanityState ?? DEFAULT_SANITY_STATE;
+      if (!skipSanChange && updates.sanChange !== undefined && updates.sanChange < 0) {
+        const sanLoss = Math.abs(updates.sanChange);
+        pendingSanImpact = computeSanityImpact(beforeChar, sanLoss, finalSan);
+        nextSanityState = pendingSanImpact.nextSanityState;
+      }
+
       const nextCharState = {
         ...character!,
         hp: finalHp,
@@ -780,9 +1131,38 @@ export default function App() {
         san: finalSan,
         mythos: finalMythos,
         maxSanLimit: finalMaxSanLimit,
+        sanityState: nextSanityState,
       };
 
       setCharacter(nextCharState);
+
+      // 终局闸:整数字段路径 — 同步结算完毕,立刻按 HP 阈值判定终局态。
+      // 公式字段路径(下方 formulaQueue)结算在 runEffectRollQueue 异步进行,
+      // 那条路的判定需要在 applyEffectItem(damage)完成后单独触发,见 onEffectQueueResolved。
+      if (!skipHpChange && updates.hpChange !== undefined && updates.hpChange < 0) {
+        const damageMagnitude = Math.abs(updates.hpChange);
+        scenarioEndOverride = computeScenarioEnd(
+          beforeChar,
+          finalHp,
+          damageMagnitude,
+          prevStatus,
+        );
+      }
+
+      // 规则 10:整数路径 sanChange 触发的疯狂裁决用 inline 模式(不发回报,
+      // 仅追加 system 消息让下一轮 LLM 看到 + 可能弹 INT 检定 modal)。
+      // insane 触发时会同时把 scenarioEnd 改写,优先级高于下面的 dying/dead 终局闸。
+      if (pendingSanImpact && (
+        pendingSanImpact.triggerInsane ||
+        pendingSanImpact.triggerIndefinite ||
+        pendingSanImpact.triggerIntCheck
+      )) {
+        finalizeSanityImpact("[SAN 整数扣减]", beforeChar, pendingSanImpact, "inline");
+        if (pendingSanImpact.triggerInsane) {
+          // SAN=0 优先于其它终局态;覆盖之前可能算出的 dying。
+          scenarioEndOverride = { kind: "insane" };
+        }
+      }
 
       // 二阶段效果骰:收集公式字段,串行演投,演完汇总回报 KP。
       const formulaQueue: PendingEffectItem[] = [];
@@ -815,11 +1195,50 @@ export default function App() {
         });
       }
       if (formulaQueue.length > 0) {
-        runEffectRollQueue(formulaQueue, []);
+        // 终局闸/疯狂裁决基线:把"应用 characterUpdates 整数字段之后"的 HP/SAN 快照传进去。
+        // 真正影响是 hpDamageFormula / sanLossFormula 累计扣的部分,baseline.beforeHp/SAN 是这些公式开始之前的值。
+        runEffectRollQueue(formulaQueue, [], {
+          beforeHp: finalHp,
+          maxHp: beforeChar.maxHp,
+          beforeSan: finalSan,
+          beforeChar,
+        });
       }
     }
 
     const newMsgs: ChatMessage[] = [];
+
+    // 终局闸:dying 救起回合的 1d10 LUC 命运代价(规则 9 救起分支)。
+    // 若 LLM 在 dying 上下文里选择了救起(prevStatus === "dying" && scenarioEndOverride === null),
+    // 前端在此处强制扣 1d10 LUC,作为命运在还人情的代价。LUC 不足 → 直接 dead。
+    let luckSacrificeReport: string | null = null;
+    if (prevStatus === "dying" && scenarioEndOverride === null) {
+      const cost = rollD10();
+      const currentLuck = beforeChar.attributes.luck;
+      if (currentLuck < cost) {
+        // 命运无可挥霍——救起失败,降级为 dead。
+        scenarioEndOverride = { kind: "dead" };
+        luckSacrificeReport = `[终局闸·命运赎金] 救起需消耗 1d10 = ${cost} 点幸运,但当前 LUC 仅 ${currentLuck} 点不足支付。命运不再眷顾,救起失败。`;
+      } else {
+        const nextLuck = currentLuck - cost;
+        // 在 setCharacter 之外再 patch 一次 LUC(整数路径已 setCharacter 过一次,这里追加幸运扣减)
+        setCharacter((prev) => prev ? {
+          ...prev,
+          attributes: { ...prev.attributes, luck: nextLuck },
+        } : prev);
+        setLuckDiff(-cost);
+        setTimeout(() => setLuckDiff(0), 3000);
+        luckSacrificeReport = `[终局闸·命运赎金] 调查员被叙事性救起,命运的代价已支付:1d10 = ${cost} 点幸运被永久扣除(剩余 LUC = ${nextLuck})。`;
+      }
+    }
+    if (luckSacrificeReport) {
+      newMsgs.push({
+        id: `sys_luck_sacrifice_${Date.now()}`,
+        sender: "system",
+        timestamp: new Date().toLocaleTimeString(),
+        text: luckSacrificeReport,
+      });
+    }
 
     // Prior narrative roll report (Keeper action text) if provided
     if (keeperRollReport) {
@@ -836,38 +1255,91 @@ export default function App() {
       keeperData.gameState?.moduleName || gameModuleName;
     const snapshotLocation =
       keeperData.gameState?.currentLocation || currentLocation;
+
+    // 终局闸:scenarioEndOverride 优先级高于 LLM 自行下发的 keeperData.scenarioEnd。
+    // - dead / insane:抹除所有"还能继续推剧情"的字段,只保留 narrative + scenarioEnd + gameState。
+    // - dying:保留 LLM 的 narrative,但抹除 rollRequest/keeperRoll/sanityCheck/clue/sceneImage —
+    //   单回合垂死窗口内不允许任何技能/检定触发,玩家本回合只能输入纯叙事遗言。
+    // - null(救起):不强制抹除,LLM 可能在救起 narrative 中包含次回合的钩子(npcDialogue 等)。
+    const finalScenarioEnd = scenarioEndOverride ?? keeperData.scenarioEnd ?? null;
+    const isTerminalKind = finalScenarioEnd && (
+      finalScenarioEnd.kind === "dead" ||
+      finalScenarioEnd.kind === "dying" ||
+      finalScenarioEnd.kind === "insane" ||
+      finalScenarioEnd.kind === "victory" ||
+      finalScenarioEnd.kind === "ambiguous"
+    );
+    const sealedKeeperData: KeeperResponse = isTerminalKind
+      ? {
+          narrative: keeperData.narrative,
+          gameState: keeperData.gameState,
+          scenarioEnd: finalScenarioEnd,
+          rollRequest: null,
+          keeperRoll: null,
+          sanityCheck: null,
+          clue: null,
+          sceneImage: null,
+          characterUpdates: keeperData.characterUpdates ?? null,
+          // dying 单回合垂死还需要 npc 临终对白;其它终局态(dead/insane/victory/ambiguous)不需要
+          npcDialogue: finalScenarioEnd!.kind === "dying" ? keeperData.npcDialogue ?? null : null,
+        }
+      : { ...keeperData, scenarioEnd: finalScenarioEnd };
+
     newMsgs.push({
       id: `keeper_${Date.now()}`,
       sender: "keeper",
       timestamp: new Date().toLocaleTimeString(),
-      text: keeperData.narrative,
-      parsedResponse: keeperData,
+      text: sealedKeeperData.narrative,
+      parsedResponse: sealedKeeperData,
       model: apiSettings.llm.model || apiSettings.llm.provider,
       moduleName: snapshotModuleName,
       location: snapshotLocation,
-      sceneImage: keeperData.sceneImage
+      sceneImage: sealedKeeperData.sceneImage
         ? {
-            caption: keeperData.sceneImage.caption,
-            type: keeperData.sceneImage.type,
-            prompt: keeperData.sceneImage.prompt,
+            caption: sealedKeeperData.sceneImage.caption,
+            type: sealedKeeperData.sceneImage.type,
+            prompt: sealedKeeperData.sceneImage.prompt,
           }
         : undefined,
     });
 
+    // 终局闸:dying 状态下,在玩家"遗言"消息发出后(handleSendPlayerMessage 入口)
+    // 注入下一轮的 [终局闸 dying] 系统提示;dead/insane 不需要此提示因为后续无 LLM 调用。
+    // 这里我们把"是否注入 dying 提示"标记到一条延迟生效的 system 消息里:
+    // 改为更直接的做法 — handleSendPlayerMessage 派发时根据 deriveScenarioStatus 自行注入。
+
     setMessages((prev) => [...prev, ...newMsgs]);
+
+    // 终局态(dead / insane / victory / ambiguous)→ 跳过所有 modal 触发,直接 return。
+    if (
+      finalScenarioEnd?.kind === "dead" ||
+      finalScenarioEnd?.kind === "insane" ||
+      finalScenarioEnd?.kind === "victory" ||
+      finalScenarioEnd?.kind === "ambiguous"
+    ) {
+      setActiveRoll(null);
+      setActiveSanity(null);
+      return;
+    }
+    // 终局态(dying)→ 同样不弹任何 modal,但保留输入框给玩家发送遗言。
+    if (finalScenarioEnd?.kind === "dying") {
+      setActiveRoll(null);
+      setActiveSanity(null);
+      return;
+    }
 
     // Handle roll triggers or Sanity check triggers in response
     // ALWAYS clear active roll state so player can click to trigger manually
     setActiveRoll(null);
 
-    if (keeperData.sanityCheck) {
+    if (sealedKeeperData.sanityCheck) {
       // CoC 7e 严格合规：SAN 冲击是不可回避的——直接弹 modal，不走聊天卡片按钮。
-      setActiveSanity(keeperData.sanityCheck);
+      setActiveSanity(sealedKeeperData.sanityCheck);
       setActiveRoll({
         skillName: "理智意志 (SAN)",
         targetValue: character!.san,
         difficulty: "regular",
-        reason: keeperData.sanityCheck.reason,
+        reason: sealedKeeperData.sanityCheck.reason,
       });
     } else {
       setActiveSanity(null);
@@ -876,18 +1348,53 @@ export default function App() {
     // Handle custom discovered CLUES items visually and add to local Notebook.
     // 注意:这里只把线索登记进档案,**不主动**请求画图;真正的画图调用延迟到玩家
     // 在调查笔记本中首次点击放大镜时按需触发(见 requestClueImage)。
-    if (keeperData.clue) {
-      const cluePayload = keeperData.clue;
+    if (sealedKeeperData.clue) {
+      const cluePayload = sealedKeeperData.clue;
       const nextClueItem: ClueItem = {
         id: `clue_${Date.now()}`,
         title: cluePayload.title,
         type: cluePayload.type,
         description: cluePayload.description,
         prompt: cluePayload.prompt,
-        discoveredAt: keeperData.gameState?.currentLocation || currentLocation,
+        discoveredAt: sealedKeeperData.gameState?.currentLocation || currentLocation,
         read: false,
       };
       setClues((p) => [...p, nextClueItem]);
+    }
+
+    // 规则 10:keeper 回合应用完毕后递减疯狂状态机。
+    // - bout(boutTurnsRemaining=0)→ temporary
+    // - temporary → -1,归 0 时清零(announceRecover=true 时下一轮注入解除提示)
+    // - indefinite + LLM 下发 madnessRecover → 清零
+    // - 终局态(dead/insane/dying)不递减:dead/insane 已封盘;dying 只剩 1 回合,递减无意义
+    if (!isTerminalKind) {
+      const recoverByLLM = !!keeperData.madnessRecover;
+      const { announceRecover } = advanceMadnessAfterKeeper(recoverByLLM);
+      if (announceRecover) {
+        // 注入"临时疯狂解除"提示,下一轮 LLM 自然读到
+        const t = lookupMadness(beforeChar.sanityState?.boutRoll ?? 1);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `sys_madness_recover_${Date.now()}`,
+            sender: "system",
+            timestamp: new Date().toLocaleTimeString(),
+            text: `[疯狂干涉·临时疯狂解除] 调查员重新清醒,但 #${t.id} ${t.name} 的余韵留下来了。下一回合 narrative 可以淡淡呼应一下解除——但克系叙事不会真正让人康复,不要写成"她终于康复了"。`,
+          },
+        ]);
+      }
+      if (recoverByLLM && beforeChar.sanityState?.madness === "indefinite") {
+        const t = lookupMadness(beforeChar.sanityState.boutRoll ?? 1);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `sys_madness_indefinite_recover_${Date.now()}`,
+            sender: "system",
+            timestamp: new Date().toLocaleTimeString(),
+            text: `[疯狂干涉·不定期疯狂解除确认] 前端已收到 madnessRecover: true,调查员从不定期疯狂中暂时压制了 #${t.id} ${t.name} 的症状。后续回合不再要求渗透症状,但可以在叙事上留有余响。`,
+          },
+        ]);
+      }
     }
   };
 
@@ -1206,7 +1713,16 @@ export default function App() {
     });
   };
 
-  /** 把 SAN 损失实际写入角色并回报 KP — 抽出来给"静态/动态公式"两条路径共用。 */
+  /**
+   * 把 SAN 损失实际写入角色,跑规则 10 SAN 影响裁决,并回报 KP。
+   * 静态/动态公式两条路径共用此出口。
+   *
+   * 流程:
+   *   1. 应用 SAN 扣减 + 写 sanityState(triggerInsane/Indefinite 同步到 nextSanityState)
+   *   2. 若 triggerInsane → 强制注入 scenarioEnd: insane,发回报后封盘,return
+   *   3. 若 triggerIntCheck → 弹 INT 检定 modal,modal onResolve 时再发回报(把"通过/失败 → 进入 bout/平安"追加到 reportMsg)
+   *   4. 若都不触发 → 直接发回报
+   */
   const applySanityLoss = (
     checkResult: RollResult,
     lossFormula: string,
@@ -1214,30 +1730,134 @@ export default function App() {
     isSuccess: boolean,
   ) => {
     const rolledLoss = evaluated.total;
-    const nextSan = Math.max(0, character!.san - rolledLoss);
+    const beforeChar = character!;
+    const finalSan = Math.max(0, beforeChar.san - rolledLoss);
     setSanDiff(-rolledLoss);
     setTimeout(() => setSanDiff(0), 3000);
 
+    const impact = computeSanityImpact(beforeChar, rolledLoss, finalSan);
+
     setCharacter({
-      ...character!,
-      san: nextSan,
+      ...beforeChar,
+      san: finalSan,
+      sanityState: impact.nextSanityState,
     });
 
     let stateStr = "理智受到剧烈压迫，脑叶产生诡异轰鸣";
     if (rolledLoss === 0) {
       stateStr = "意志在绝望中维持了坚韧，未受到创伤";
-    } else if (rolledLoss >= 5) {
-      stateStr =
-        "【临时性精神失常 (Temporary Insanity)】：你目睹了超出三维常识之物，大脑防御崩溃！陷入了短暂的狂乱幻想、歇斯底里！";
     }
 
     const breakdown = evaluated.dice
       ? ` (公式 ${lossFormula}，骰点 [${evaluated.rolls.join(", ")}]${evaluated.constant ? ` ${evaluated.constant >= 0 ? "+" : ""}${evaluated.constant}` : ""}${evaluated.divisor > 1 ? ` ÷${evaluated.divisor}` : ""})`
       : ` (公式 ${lossFormula})`;
 
-    const reportMsg = `[系统的理智SAN值判定 - 意志: 投出 ${checkResult.total} / 目标 ${checkResult.targetValue} (${isSuccess ? "成功" : "失败"}) -> 扣减 SAN 值 ${rolledLoss} 点${breakdown}。当前理智值：${nextSan}/${character!.maxSanLimit}。\n异常行为状态：${stateStr}]`;
+    const baseReport = `[系统的理智SAN值判定 - 意志: 投出 ${checkResult.total} / 目标 ${checkResult.targetValue} (${isSuccess ? "成功" : "失败"}) -> 扣减 SAN 值 ${rolledLoss} 点${breakdown}。当前理智值：${finalSan}/${beforeChar.maxSanLimit}。\n异常行为状态：${stateStr}]`;
 
-    handleSendPlayerMessage(reportMsg, true);
+    finalizeSanityImpact(baseReport, beforeChar, impact);
+  };
+
+  /**
+   * SAN 影响后效集中处理 — 给 applySanityLoss / 整数路径 sanChange / 公式路径 sanLoss 共用。
+   * 根据 impact.trigger* 字段决定:封盘(insane)/ 注入 indefinite 提示 / 弹 INT modal / 直接回报。
+   *
+   * - mode = "report":有 baseReport 需要回报给 LLM(SAN 检定路径 + 公式 sanLossFormula 路径)
+   * - mode = "inline":发生在 applyKeeperResponse 内部(整数 sanChange),不发回报,
+   *   只把疯狂态变更追加成 system 消息进 messages,等玩家下一回合发声时被一并带给 LLM
+   */
+  const finalizeSanityImpact = (
+    baseReport: string,
+    beforeChar: CharacterSheet,
+    impact: ReturnType<typeof computeSanityImpact>,
+    mode: "report" | "inline" = "report",
+  ) => {
+    const dispatchReport = (text: string) => {
+      if (mode === "report") {
+        handleSendPlayerMessage(text, true);
+      } else {
+        // inline:仅追加进 messages,等下一轮 LLM 自然读到
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `sys_madness_inline_${Date.now()}`,
+            sender: "system",
+            timestamp: new Date().toLocaleTimeString(),
+            text,
+          },
+        ]);
+      }
+    };
+
+    // C 路径:SAN=0 → insane 终局
+    if (impact.triggerInsane) {
+      // patch 队尾 keeper 消息的 scenarioEnd: insane 并抹除其它字段
+      setMessages((prev) => {
+        const tail = prev[prev.length - 1];
+        if (!tail || tail.sender !== "keeper" || !tail.parsedResponse) {
+          return [
+            ...prev,
+            {
+              id: `sys_insane_${Date.now()}`,
+              sender: "system",
+              timestamp: new Date().toLocaleTimeString(),
+              text: `[终局闸] 调查员 SAN 归零,精神被吞噬,永久疯狂。本回合只能输出:narrative(精神崩塌的最后一幕,80-150 字) + scenarioEnd { kind: "insane", epilogue (150-300 字) }。其它字段全部 null。`,
+            },
+          ];
+        }
+        const patched: ChatMessage = {
+          ...tail,
+          parsedResponse: {
+            ...tail.parsedResponse,
+            scenarioEnd: { kind: "insane" },
+            rollRequest: null,
+            keeperRoll: null,
+            sanityCheck: null,
+            clue: null,
+            sceneImage: null,
+          },
+        };
+        return [...prev.slice(0, -1), patched];
+      });
+      const finalReport = `${baseReport}\n\n[终局闸] 上述 SAN 损失结算后调查员进入 insane 状态(SAN=0)。`;
+      dispatchReport(finalReport);
+      return;
+    }
+
+    // B 路径:不定期疯狂
+    if (impact.triggerIndefinite) {
+      const t = lookupMadness(impact.nextSanityState.boutRoll ?? 1);
+      const finalReport = `${baseReport}\n\n[疯狂干涉·不定期疯狂触发] 本模组累计 SAN 损失已达到 ⌊当前 SAN / 5⌋ 阈值,调查员进入不定期疯狂(起源症状 #${t.id} ${t.name})。后续每一回合 narrative 都需渗透该症状,详见规则 10。`;
+      dispatchReport(finalReport);
+      return;
+    }
+
+    // A 路径:单次 SAN 损失 ≥ 5,弹 INT 检定 modal
+    if (impact.triggerIntCheck) {
+      const intValue = beforeChar.attributes.int;
+      setPendingMadnessCheck({
+        targetValue: intValue,
+        onResolve: (passed) => {
+          setPendingMadnessCheck(null);
+          if (passed) {
+            const boutRoll = 1 + Math.floor(Math.random() * 10);
+            const temporaryTurns = 1 + Math.floor(Math.random() * 6);
+            enterBoutFromIntCheck(boutRoll, temporaryTurns);
+            const t = lookupMadness(boutRoll);
+            const finalReport = `${baseReport}\n\n[疯狂干涉·急性发作触发] INT 检定通过(理解了不可名状),调查员进入急性发作(表项 #${t.id} ${t.name},持续 1 个玩家输入回合),之后转为临时疯狂(剩余 ${temporaryTurns} 个守密人回合)。同时 +1 克苏鲁神话技能,maxSanLimit 自动下调。`;
+            dispatchReport(finalReport);
+          } else {
+            const finalReport = `${baseReport}\n\n[疯狂干涉·INT 检定失败] 调查员的心智在最后一刻封闭了,没能"理解"眼前的恐怖,反而保住了清醒。无后效。`;
+            dispatchReport(finalReport);
+          }
+        },
+      });
+      return;
+    }
+
+    // 无任何疯狂态触发 → 直接回报(inline 模式无需做任何事)
+    if (mode === "report") {
+      handleSendPlayerMessage(baseReport, true);
+    }
   };
 
   /**
@@ -1248,10 +1868,76 @@ export default function App() {
   const runEffectRollQueue = (
     queue: PendingEffectItem[],
     resolved: PendingEffectItem[],
+    /**
+     * 终局闸基线 — applyKeeperResponse 调用时通过 beforeChar 把"应用 characterUpdates 之前
+     * 的角色快照"传进来。runEffectRollQueue 在最终回报时,据此 + resolved damage 总值
+     * 计算 finalHp,并按规则 9 决定 dying/dead。
+     * 不传(handleSendPlayerMessage 直接调用等场景) → 不做终局闸触发。
+     */
+    terminalGateBaseline?: { beforeHp: number; maxHp: number; beforeSan: number; beforeChar: CharacterSheet },
   ) => {
     if (queue.length === 0) {
       if (resolved.length > 0) {
-        const reportMsg = formatEffectQueueReport(resolved);
+        // 终局闸:公式字段路径完成时检测总 damage 是否把 HP 打到 ≤ 0。
+        let triggeredKind: "dying" | "dead" | null = null;
+        if (terminalGateBaseline) {
+          const totalDamage = resolved
+            .filter((r) => r.kind === "damage")
+            .reduce((s, r) => s + (r.evaluated.total || 0), 0);
+          if (totalDamage > 0) {
+            const finalHp = Math.max(0, terminalGateBaseline.beforeHp - totalDamage);
+            if (finalHp <= 0 && terminalGateBaseline.beforeHp > 0) {
+              triggeredKind = totalDamage >= terminalGateBaseline.maxHp ? "dead" : "dying";
+            }
+          }
+        }
+
+        let reportMsg = formatEffectQueueReport(resolved);
+        if (triggeredKind) {
+          // patch 队尾 keeper 消息的 parsedResponse.scenarioEnd 与抹除其它字段
+          setMessages((prev) => {
+            const tail = prev[prev.length - 1];
+            if (!tail || tail.sender !== "keeper" || !tail.parsedResponse) return prev;
+            const patched: ChatMessage = {
+              ...tail,
+              parsedResponse: {
+                ...tail.parsedResponse,
+                scenarioEnd: { kind: triggeredKind! },
+                rollRequest: null,
+                keeperRoll: null,
+                sanityCheck: null,
+                clue: null,
+                sceneImage: null,
+              },
+            };
+            return [...prev.slice(0, -1), patched];
+          });
+          reportMsg += `\n\n[终局闸] 上述伤害结算后调查员进入 ${triggeredKind} 状态。`;
+          // 终局闸 dying/dead 优先级高于疯狂裁决,直接回报 return
+          handleSendPlayerMessage(reportMsg, true);
+          return;
+        }
+
+        // 规则 10 SAN 影响裁决:公式路径累计 sanLoss 总值,过 finalize 走 INT 检定 / indefinite / insane
+        if (terminalGateBaseline) {
+          const totalSanLoss = resolved
+            .filter((r) => r.kind === "sanLoss")
+            .reduce((s, r) => s + (r.evaluated.total || 0), 0);
+          if (totalSanLoss > 0) {
+            const beforeChar = terminalGateBaseline.beforeChar;
+            const finalSan = Math.max(0, terminalGateBaseline.beforeSan - totalSanLoss);
+            const impact = computeSanityImpact(beforeChar, totalSanLoss, finalSan);
+            // 注意:applyEffectItem 已经把 SAN 写入 character,但 sanityState 还没改 —
+            // 这里 patch sanityState 单独写入。
+            setCharacter((prev) => prev ? {
+              ...prev,
+              sanityState: impact.nextSanityState,
+            } : prev);
+            finalizeSanityImpact(reportMsg, beforeChar, impact);
+            return;
+          }
+        }
+
         handleSendPlayerMessage(reportMsg, true);
       }
       return;
@@ -1261,7 +1947,7 @@ export default function App() {
 
     if (head.evaluated.isStatic) {
       applyEffectItem(head);
-      runEffectRollQueue(rest, [...resolved, head]);
+      runEffectRollQueue(rest, [...resolved, head], terminalGateBaseline);
       return;
     }
 
@@ -1274,7 +1960,7 @@ export default function App() {
         setPendingEffectRoll(null);
         const final = { ...head, evaluated: resolvedDice };
         applyEffectItem(final);
-        runEffectRollQueue(rest, [...resolved, final]);
+        runEffectRollQueue(rest, [...resolved, final], terminalGateBaseline);
       },
     });
   };
@@ -1650,6 +2336,76 @@ export default function App() {
                         </div>
                       )}
 
+                      {/* 终局闸:dying 状态横幅 — 单回合垂死,告知玩家本回合只能输入纯叙事遗言。 */}
+                      {m.parsedResponse?.scenarioEnd?.kind === "dying" && (
+                        <div
+                          id={`scenario-dying-box-${m.id}`}
+                          className="border border-red-900/60 bg-red-950/30 p-4 rounded mt-2"
+                        >
+                          <div className="text-[10px] uppercase font-mono tracking-widest text-red-400 mb-1">
+                            ✦ 垂死 / DYING ✦
+                          </div>
+                          <div className="text-xs text-red-200/90 font-sans leading-relaxed">
+                            调查员的视野正在变窄。这是最后的窗口——可以留下遗言或一次徒劳的挣扎,
+                            但已无法再声明任何技能。下一回合,守密人将裁决救起或死亡。
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 终局闸:dead / insane / victory / ambiguous 状态尾声 — 渲染 epilogue,封盘。 */}
+                      {(m.parsedResponse?.scenarioEnd?.kind === "dead" ||
+                        m.parsedResponse?.scenarioEnd?.kind === "insane" ||
+                        m.parsedResponse?.scenarioEnd?.kind === "victory" ||
+                        m.parsedResponse?.scenarioEnd?.kind === "ambiguous") && (() => {
+                        const endKind = m.parsedResponse!.scenarioEnd!.kind;
+                        // 颜色与文案按 kind 分:坏结局 = 红;victory = 暖金;ambiguous = 灰蓝。
+                        const theme =
+                          endKind === "victory"
+                            ? { border: "border-amber-700/70", glow: "shadow-amber-900/30", title: "text-amber-300", divider: "border-amber-900/40", footer: "text-amber-700/70" }
+                            : endKind === "ambiguous"
+                              ? { border: "border-slate-600/70", glow: "shadow-slate-900/40", title: "text-slate-300", divider: "border-slate-800/50", footer: "text-slate-500" }
+                              : { border: "border-red-950/80", glow: "shadow-red-950/40", title: "text-red-500", divider: "border-red-950/40", footer: "text-gray-600" };
+                        const headerLabel =
+                          endKind === "insane"
+                            ? "━━━ 调查员精神被吞噬 / MIND CONSUMED ━━━"
+                            : endKind === "dead"
+                              ? "━━━ 调查员档案 · 已封存 / CASE CLOSED ━━━"
+                              : endKind === "victory"
+                                ? "━━━ 调查员从恐怖中归来 / VICTORY ━━━"
+                                : "━━━ 真相悬而未决 / AMBIGUOUS END ━━━";
+                        const footerLabel =
+                          endKind === "insane"
+                            ? "她依然在呼吸,但已经不是她了。请新建调查员或加载其它存档。"
+                            : endKind === "dead"
+                              ? "幕已落下。请从档案库新建调查员或加载其它存档。"
+                              : endKind === "victory"
+                                ? "调查员活着回来了——但夜里依然不敢关灯。本次模组结束。"
+                                : "故事走到了尽头,答案没有给完。本次模组结束。";
+                        return (
+                          <div
+                            id={`scenario-${endKind}-box-${m.id}`}
+                            className={`border ${theme.border} bg-black/70 p-5 rounded mt-2 shadow-inner ${theme.glow}`}
+                          >
+                            <div className={`text-[10px] uppercase tracking-widest ${theme.title} mb-2 text-center font-mono`}>
+                              {headerLabel}
+                            </div>
+                            {m.parsedResponse!.scenarioEnd!.epilogue ? (
+                              <MarkdownText
+                                text={m.parsedResponse!.scenarioEnd!.epilogue!}
+                                className="text-sm text-gray-300 italic leading-relaxed font-sans"
+                              />
+                            ) : (
+                              <div className="text-xs text-gray-500 italic font-sans text-center">
+                                (没有尾声留下来。)
+                              </div>
+                            )}
+                            <div className={`mt-3 pt-3 border-t ${theme.divider} text-[10px] ${theme.footer} font-mono text-center`}>
+                              {footerLabel}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       {/* Discovered item card visual directly within message */}
                       {m.parsedResponse?.clue && (
                         <div
@@ -1851,15 +2607,23 @@ export default function App() {
             {/* Bottom dialogue user prompt input console.
                 玩家明骰挂起期间禁用输入与发送(详见 .docs/roll-cancellation.md 第四节);
                 keeperRoll 不阻塞(暗骰阻塞会破暗骰、明骰动画很快无干预权);
-                SAN 路径已由 activeSanity 兜底。 */}
+                SAN 路径已由 activeSanity 兜底;
+                终局闸 dead → 输入完全锁死;dying → 输入仍开放允许玩家发遗言。 */}
             <div className="p-4 bg-[#111314] border-t border-gray-950 z-10 flex gap-2">
               {(() => {
                 const playerRollPending =
                   !!activeRoll &&
                   !activeRoll.isKeeperRoll &&
                   !activeRoll.skillName.includes("SAN");
+                const scenarioStatus = deriveScenarioStatus(messages);
                 const inputDisabled =
-                  isKeeperLoading || !!activeSanity || playerRollPending;
+                  isKeeperLoading ||
+                  !!activeSanity ||
+                  playerRollPending ||
+                  scenarioStatus === "dead" ||
+                  scenarioStatus === "insane" ||
+                  scenarioStatus === "victory" ||
+                  scenarioStatus === "ambiguous";
                 const sendDisabled = inputDisabled || !inputText.trim();
                 return (
                   <>
@@ -1877,11 +2641,21 @@ export default function App() {
                 placeholder={
                   isKeeperLoading
                     ? "守密人沉浸叙述中，请稍候..."
-                    : activeSanity
-                      ? "【理智冲击降临】请先完成理智检定，理智冲击不可回避..."
-                      : playerRollPending
-                        ? "【判定挂起中】请投骰，或点 'X 我再想想' 退出查看面板/线索册"
-                        : "叙言你的侦查与侦测意图（如：我拿出魔术提灯、潜行走前去检查...）"
+                    : scenarioStatus === "dead"
+                      ? "【调查员档案已封存】幕已落下,故事到此为止..."
+                      : scenarioStatus === "insane"
+                        ? "【精神被吞噬】她依然在呼吸,但认不出镜中那张脸了..."
+                        : scenarioStatus === "victory"
+                          ? "【模组已通关】她从这场不可名状的恐怖中全身而退——但夜里依然不敢关灯..."
+                          : scenarioStatus === "ambiguous"
+                            ? "【模组终结】她合上笔记本,知道自己永远不会再回到那里..."
+                            : scenarioStatus === "dying"
+                              ? "【垂死之际】请输入您的遗言或最后挣扎(纯叙事,无法声明技能)..."
+                              : activeSanity
+                                ? "【理智冲击降临】请先完成理智检定，理智冲击不可回避..."
+                                : playerRollPending
+                                  ? "【判定挂起中】请投骰，或点 'X 我再想想' 退出查看面板/线索册"
+                                  : "叙言你的侦查与侦测意图（如：我拿出魔术提灯、潜行走前去检查...）"
                 }
                 className="flex-1 bg-black/50 border border-gray-800 rounded px-4 py-2.5 text-sm placeholder-gray-650 focus:outline-[#c1a067]/40 focus:outline-1 focus:border-[#c1a067] text-gray-200 outline-none disabled:opacity-40"
               />
@@ -1943,6 +2717,12 @@ export default function App() {
                       if (isKeeperLoading) return;
                       // SAN 挂起期间，禁止"声明意图"的预填动作；查看属性/技能仍可。
                       if (activeSanity) return;
+                      // 终局闸:任意终局 kind(dying/dead/insane/victory/ambiguous)下都不允许声明技能。
+                      const status = deriveScenarioStatus(messages);
+                      if (status !== null) return;
+                      // 规则 10:bout 急性发作期不允许声明技能(玩家声明会被 LLM 接管曲解);
+                      // temporary / indefinite 允许声明,但 LLM 会在下发 rollRequest 时自行加 penalty。
+                      if (character?.sanityState?.madness === "bout") return;
                       const draft = `我想用【${skill}】(${val}%) 来`;
                       setInputText((prev) => (prev.trim() ? `${prev.trimEnd()} ${draft}` : draft));
                       requestAnimationFrame(() => {
@@ -2059,6 +2839,16 @@ export default function App() {
                 result={pendingEffectRoll.result}
                 theme={pendingEffectRoll.theme}
                 onResolve={pendingEffectRoll.onResolve}
+              />
+            )}
+
+            {/* 规则 10:INT 检定 modal — SAN 单次扣 ≥ 5 时触发,通过 = 进急性发作。 */}
+            {pendingMadnessCheck && (
+              <MadnessIntCheckModal
+                key="modal_madness_int_check"
+                targetValue={pendingMadnessCheck.targetValue}
+                sanLoss={Math.abs(sanDiff) || 5}
+                onResolve={(passed) => pendingMadnessCheck.onResolve(passed)}
               />
             )}
 

@@ -162,6 +162,40 @@ export default function CharacterSheetPanel({
         </div>
       </div>
 
+      {/* 规则 10:疯狂态横幅 — 仅当 sanityState.madness 非 null 时显示。
+          bout = 急性发作(红紫闪烁) / temporary = 临时疯狂(紫) / indefinite = 不定期疯狂(深紫,持续) */}
+      {sheet.sanityState?.madness && (() => {
+        const m = sheet.sanityState!.madness;
+        const boutId = sheet.sanityState!.boutRoll ?? 1;
+        const tableNames = [
+          "失忆", "心理性残障", "狂暴攻击", "偏执", "关键人物错认",
+          "昏厥", "恐慌逃离", "歇斯底里", "获得恐惧症", "获得狂躁症",
+        ];
+        const symptomName = tableNames[Math.max(0, Math.min(9, boutId - 1))];
+        const tone =
+          m === "bout"
+            ? "border-red-500/60 bg-red-950/40 text-red-200 animate-pulse"
+            : m === "temporary"
+              ? "border-fuchsia-600/60 bg-fuchsia-950/30 text-fuchsia-200"
+              : "border-purple-700/70 bg-purple-950/40 text-purple-200";
+        const label =
+          m === "bout"
+            ? "急性发作 · BOUT OF MADNESS"
+            : m === "temporary"
+              ? `临时疯狂 · TEMPORARY (剩余 ${sheet.sanityState!.temporaryTurnsRemaining ?? 0} 守密人回合)`
+              : "不定期疯狂 · INDEFINITE (持续整个模组)";
+        return (
+          <div className={`mx-3.5 mt-3 px-3 py-2 border-2 rounded-md font-mono ${tone}`}>
+            <div className="text-[10px] uppercase tracking-widest font-semibold mb-0.5">
+              ⚠ {label}
+            </div>
+            <div className="text-[11px] font-sans">
+              起源症状 #{boutId} <span className="font-semibold">{symptomName}</span>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Stats Quick Meters */}
       <div className="grid grid-cols-4 gap-2 p-3.5 bg-black/30 border-b border-gray-900 leading-none relative">
         

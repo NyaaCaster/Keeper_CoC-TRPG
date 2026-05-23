@@ -37,6 +37,24 @@ export interface CharacterSheet {
   mythos: number; // 克苏鲁神话技能
   avatar?: string; // 角色头像 (Base64 data URI)
   backgroundStory?: string; // 调查员背景介绍/生平概述
+  /**
+   * 疯狂状态机(规则 10) — 每次 SAN 扣减后由前端硬规则维护:
+   * - episodeSanLoss:本模组累计 SAN 损失,用于 1/5 阈值判断;通关或新模组时清零
+   * - madness:null=正常 / "bout"=急性发作(单玩家回合) / "temporary"=临时疯狂(N 个 keeper 回合)
+   *   / "indefinite"=不定期疯狂(持续整个模组,需 LLM 或剧情解除)
+   * - boutTurnsRemaining:急性发作剩余玩家输入次数(本游戏简化为 1)
+   * - temporaryTurnsRemaining:临时疯狂剩余 keeper 回合数(1d6,折算 7e 的 1d10 小时)
+   * - boutRoll:1-10,对应规则 10 中的疯狂表项;indefinite 持续渗透该症状
+   * - indefiniteAnchor:不定期疯狂触发时的锚点,用于剧情恢复路径判断
+   */
+  sanityState?: {
+    episodeSanLoss: number;
+    madness: null | "bout" | "temporary" | "indefinite";
+    boutTurnsRemaining?: number;
+    temporaryTurnsRemaining?: number;
+    boutRoll?: number;
+    indefiniteAnchor?: { moduleName: string; turnId: string };
+  };
 }
 
 export interface ClueItem {
@@ -168,6 +186,42 @@ export interface KeeperResponse {
     moduleName: string;
     currentLocation: string;
   } | null;
+  /**
+   * 终局闸 — 模组结束时使用。一旦本字段非 null,前端会在该回合结束后封锁所有玩家输入与技能声明,
+   * 把存档标记为"已封存",并屏蔽 LLM 后续输出。共五种 kind:
+   *
+   *   坏结局(由前端硬规则护栏自动注入,LLM 也可主动下发):
+   *   - dying: 单回合垂死窗口。HP 从正值掉到 ≤ 0 且单次伤害 < maxHp 时由前端自动注入。
+   *     玩家本回合可输入纯叙事(遗言/挣扎),不能声明技能。
+   *     下一回合 KP 必须二选一:① 把 HP 拉回 ≥ 1 + 强制场景跳转(救起,scenarioEnd 改为 null);
+   *     ② 写死亡尾声并下发 scenarioEnd: dead。详见规则 9。
+   *   - dead: 调查员死亡。HP 归零(一次性致命伤 / dying 救起时 LUC 不足 / dying 选择死亡)。封盘。
+   *   - insane: 调查员永久疯狂。SAN 归零(规则 10 C 路径)。叙事上精神被吞噬,与 dead 同等终局。
+   *
+   *   好/灰结局(只能由 LLM 主动判定模组完成度后下发,前端不会硬注入):
+   *   - victory: 模组好结局。调查员阻止了核心威胁、活着、SAN/HP 仍可继续探索。
+   *     LLM 应在 epilogue 里写"调查员从这场不可名状的恐怖中全身而退"的克制叙事
+   *     (但克系基调依然保留——没有人真正"全身而退",只是侥幸)。
+   *   - ambiguous: 灰色结局。线索断了 / 阻止部分失败 / 调查员活着但被卷入更大阴谋 /
+   *     真相只揭开了一角等。模组主线已经走完,但答案没给完。LLM 应在 epilogue 里写
+   *     "她活着,故事却才刚刚开始"或"她合上笔记本,知道自己永远不会再回到那里"等悬而未决的尾声。
+   *
+   * 注:dying/dead/insane 也可由前端硬规则强制注入(LLM 忘记下发时)——详见 App.tsx
+   * 中的"终局闸"代码,以及 server.ts SYSTEM_INSTRUCTION 规则 9 / 规则 10。
+   * victory/ambiguous 必须由 LLM 主动下发,前端不会自动触发,因为"模组通关"的判定
+   * 只有 LLM 知道剧情进度。
+   */
+  scenarioEnd?: {
+    kind: "dying" | "dead" | "insane" | "victory" | "ambiguous";
+    epilogue?: string;
+  } | null;
+  /**
+   * 疯狂态解除信号(规则 10 indefinite 解除路径之一)。
+   * LLM 在不定期疯狂状态下,只有当**剧情明确出现**心理治疗(NPC 医生 / Psychotherapy 技能 / 长期休养)
+   * 且玩家显式接受时,才允许下发 madnessRecover: true。前端收到后清零 sanityState.madness。
+   * 普通的疯狂状态(bout/temporary)由前端自动倒计时解除,**不**需要 LLM 下发本字段。
+   */
+  madnessRecover?: boolean | null;
 }
 
 export interface WebGameSave {
