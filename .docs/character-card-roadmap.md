@@ -27,7 +27,7 @@
 | 3 | (已合并入 2) | — | — |
 | 4 | 1920s 职业模板 | ✅ 已完成 | `OCCUPATIONS_1920S` 43 条 |
 | 5 | 现代职业模板 | ✅ 已完成 | `OCCUPATIONS_MODERN` 39 条 |
-| 6 | UI 改造：基本信息 + 派生层 | ⏳ 待开始 | `CharacterCreator.tsx` Custom PC 非技能部分 |
+| 6 | UI 改造：基本信息 + 派生层 | ✅ 已完成 | `CharacterCreator.tsx` Custom PC 非技能部分 + `server.ts` generate-stats schema |
 | 7 | UI 改造：技能区重做 | ⏳ 待开始 | 三栏（候选 / 8 职业 / 4 兴趣）、双点池校验 |
 | 8 | 随机宿命技能分配 | ⏳ 待开始 | 一键合法分配器，复用同一份分配规则给 LLM 智能生成路径 |
 
@@ -104,24 +104,33 @@
 
 ## 待办阶段（推进时优先级与依赖）
 
-### 阶段 6：UI 改造 · 基本信息 + 派生层
+### 阶段 6：✅ 已完成（commit `021dd74`）
 
-依赖：阶段 1/4/5（已就绪）
+**文件改动**
+- `src/components/CharacterCreator.tsx`
+  - 职业字段：自由文本框 → "标准模板下拉（按 `selectedEra` 过滤）+ 自由文本兜底"二段式。state 拆为 `customOccupationId`（空串 = 自拟）+ `customOccupationFreeText`。
+  - 表单新增 5 个 input：身份 / 国籍 / 居住地 / 母语 / 信用评级（0–99 数字）
+  - 派生区追加第二行：闪避（DEX/2）/ 母语（EDU）/ 信用评级，全部经 `dodgeOf` / `motherTongueValue` 现算
+  - 派生区追加"神秘接触档案"折叠占位：4 类条目静态显示"未接触"，标注"创建期为空 · KP 下发"
+  - PNG 导入回填 + LLM generate-stats 回填都扩到 5 个新字段；职业字符串先尝试匹配模板 id / 中文名，匹配不到才落自由文本
+  - Step 3 dossier 头部预览栏在性别/年龄后追加 5 个新字段的 chip（仅非空时显示）
+  - `handleCreateCustom` 写入 `identity` / `nationality` / `residence` / `motherTongue` / `creditRating` / `mythicEncounters: { tomes: [], spells: [], artifacts: [], entities: [] }`
+- `server.ts`
+  - `GENERATE_STATS_SCHEMA` 扩 5 个字段（identity / nationality / residence / motherTongue / creditRating，creditRating 为 INTEGER 0–99）
+  - generate-stats userText 改写：明确要求职业字段优先输出 7e 标准模板中文名（医师/警探/教授等），非标准设定（时钟塔代行者 / SCP特工等）才走自由文本
 
-**改造点**
-1. `CharacterCreator.tsx` Custom PC 分页里的"角色职业"自由文本框 → 下拉。下拉项数据源：`getOccupations(selectedEra)`。
-2. 新增 5 个字段的 UI：角色身份、国籍、居住地、母语、信用评级（前 4 项 free text，信用评级 0–99 数字输入）。
-3. 派生区追加"神秘接触"折叠区。创建期内容为空（4 类条目均为空数组），UI 仅展示结构占位、给 KP 在游戏中下发的预览口径。
-4. 同步：
-   - PNG 角色卡导入 / 导出的 metadata schema（embed / 还原都要扩字段）
-   - `CLASSIC_PRESETS` 三张预设卡补字段
-   - 智能根据概述生成数值的 LLM prompt 和返回解析
-5. `CharacterSheetPanel.tsx` / `CharacterDossierPanel.tsx` 等已有展示面板要不要展示新字段，视 UI 设计取舍
+**未动**
+- `CLASSIC_PRESETS`：3 张预设卡的职业名是自由风格，新字段全 optional 不补不出错；与"创建期空、KP 下发"的设计一致，也避免给预设卡硬塞与现有美学不一致的字段值
+- `CharacterSheetPanel.tsx` / `CharacterDossierPanel.tsx`：游戏中已展示面板，留到后续 UI 美化时统一收口
 
-**注意事项**
-- 字段全部 optional，旧存档要保证不报错（用 `?? ""` 兜底渲染）
-- 信用评级范围 0–99，UI 不强制按职业表卡上下限（按 `.docs/character-card-current.md` 一节备注，"由玩家自行根据角色职业合理填写"）
-- 美术规范铁律：黑/绿/白 + 少量金（LUC 槽），新字段不要自创配色，按 `.docs/UI-STYLE-GUIDE.md` 第 3 节
+**验证**
+- `npx tsc --noEmit` ✅
+- `npm run build` ✅
+- 浏览器实测：**未做**（dev server 需要交互登录 + 我无法点击 UI）。后续如需验收：标准职业下拉是否好用、5 个新字段是否进 sheet、PNG 卡导入回填是否正确
+
+---
+
+## 待办阶段（推进时优先级与依赖）
 
 ### 阶段 7：UI 改造 · 技能区重做
 
