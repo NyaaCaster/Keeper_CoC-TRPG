@@ -28,7 +28,7 @@
 | 4 | 1920s 职业模板 | ✅ 已完成 | `OCCUPATIONS_1920S` 43 条 |
 | 5 | 现代职业模板 | ✅ 已完成 | `OCCUPATIONS_MODERN` 39 条 |
 | 6 | UI 改造：基本信息 + 派生层 | ✅ 已完成 | `CharacterCreator.tsx` Custom PC 非技能部分 + `server.ts` generate-stats schema |
-| 7 | UI 改造：技能区重做 | ⏳ 待开始 | 三栏（候选 / 8 职业 / 4 兴趣）、双点池校验 |
+| 7 | UI 改造：技能区重做 | ✅ 已完成 | 三栏（候选 / 8 职业 / 4 兴趣）、双点池校验 |
 | 8 | 随机宿命技能分配 | ⏳ 待开始 | 一键合法分配器，复用同一份分配规则给 LLM 智能生成路径 |
 
 ---
@@ -102,8 +102,6 @@
 
 ---
 
-## 待办阶段（推进时优先级与依赖）
-
 ### 阶段 6：✅ 已完成（commit `021dd74`）
 
 **文件改动**
@@ -130,29 +128,44 @@
 
 ---
 
+### 阶段 7：✅ 已完成（commit `9cc2d7d`）
+
+**新建 `src/lib/cocSkillSlots.ts`（490 行）**
+纯函数槽位中间层，把数据层与 UI 解耦。核心 API：
+- `expandOccupationSlots(template)`：模板 `coreSkills: OccupationSkillRef[]` 展开成 `SlotConstraint[]`（freeSlot×N 拆成 N 个 free 槽，oneOf 递归）
+- `getSlotCandidates(c, era)`：返回某槽位约束在指定 era 下的候选项；free 槽走 `getAllStandardCandidates`（排除克苏鲁神话）
+- `computePointPools(attrs)` → `{ occupation: edu*4, interest: int*2 }`；`spentInSlots`、`finalValueOfSlot`、`findDuplicateSelections`
+- `draftToSkills(draft)`：12 槽折叠成 `CharacterSheet.skills`；同名取最大值；自动写入 `克苏鲁神话: 0`
+- `distributeSkillsToDraft(skills, constraints, era)`：反向 distributor，给 PNG 导入与 LLM 回填用。三轮匹配（精确约束 → 模糊 → free → 兴趣槽），多余条目丢弃
+- `parseSkillName`：解析 sheet 里的中文名，支持单技能、`父(分支)` 形式
+- 默认导出常量：`OCCUPATION_SLOT_COUNT = 8`、`INTEREST_SLOT_COUNT = 4`、`customOccupationConstraints()` = 8 个 free 槽
+- 槽位约束的中文渲染：`describeConstraint(c)` → "急救" / "艺术/手艺(摄影)" / "艺术/手艺(任一)" / "锁匠 或 妙手" / "自定"
+
+**`src/components/CharacterCreator.tsx`**
+- 废弃 9 项硬编码 `customSkills`，换成 `skillDraft: SkillSheetDraft`（8 职业槽 + 4 兴趣槽）
+- `useMemo` 派生当前职业的 `occupationConstraints`；`useEffect` 在约束签名变化时重置职业槽（保留兴趣槽），固定槽（fixedSkill / fixedBranch）自动锁定 picked
+- 技能 UI 整段替换：双池显示（职业 EDU×4 / 兴趣 INT×2，超额红字）+ 公式说明 + 槽位列表
+- 新增内部子组件 `SlotRow`：约束提示 + `<select>` picker（候选项标"中文（base）"）+ 数字 input（额外加点 0–99）+ 实时 `base+加点=最终值` 显示；重复选择红框警告
+- `handleCreateCustom` 用 `draftToSkills(skillDraft)` 折叠
+- PNG 导入与 LLM 回填都改为 `distributeSkillsToDraft(...)`，按导入卡 / charData 的 occupation 字段尝试匹配模板，匹配不到走 8 free 槽
+
+**未触碰的部分**
+- `CharacterSheetPanel` / `CharacterDossierPanel`：仍走旧的 sheet.skills 字典展示，不受影响（折叠后字段格式完全兼容）
+- `CLASSIC_PRESETS`：3 张预设卡走 `handleSelectPreset` 路径，不经技能槽，仍直接用预设卡的 skills 字典
+
+**验证**
+- `npx tsc --noEmit` ✅
+- `npm run build` ✅
+- 浏览器实测：**未做**（dev server 需交互登录 + 我无法点击 UI）。需手测：
+  1. 切换职业 → 8 槽约束是否正确切换；固定槽是否锁定
+  2. anyBranchOf / oneOf 槽的 dropdown 选项是否正确
+  3. 双池显示与超额红字
+  4. PNG 卡导入回填是否落到对的槽
+  5. LLM 智能生成回填
+
+---
+
 ## 待办阶段（推进时优先级与依赖）
-
-### 阶段 7：UI 改造 · 技能区重做
-
-依赖：阶段 2 / 4 / 5（全就绪）
-
-**核心**：删除当前固定 9 项技能 UI，重做为：
-- 三栏视图：**职业技能候选集**（高亮在职业模板内的）/ **8 职业槽** / **4 兴趣槽**
-- 多分支技能展开：点"艺术/手艺" → 弹分支选择子菜单（`branches: SkillBranchDefinition[]`）
-- 双点池实时显示与校验：
-  - 职业点池 = `EDU × 4`（默认；阶段 4 注释里有差异化预留位置）
-  - 兴趣点池 = `INT × 2`
-  - 互不通用、不可越下限（基础值即下限）、不可越 99 上限
-- 提交时自动写入 `skills["克苏鲁神话"] = 0`
-- 对外暴露：`derivePresentedSkills(sheet)` 返回"已掌握 12 项 + 隐式基础值"两层视图，供面板与 prompt 注入复用
-
-**UI 状态机**：
-- 选择"自定 N"槽位 → 玩家从全标准技能集（去掉已选 8 项后）挑一项填入
-- 选择"X 或 Y" oneOf → 二选一收敛
-- 选择"父类(任一)" anyBranchOf → 弹分支选择菜单
-- 玩家可声明 `userDefined: true` 的自由分支（Art/Craft / Science / Survival / Language(Other) 允许）
-
-**最大坑点**：状态结构要早设计好，避免改 8 次。建议用 `{ occupationSlots: SlotState[8], interestSlots: SlotState[4] }`，每槽 `{ ref: OccupationSkillRef, picked?: { skillId, branchId? }, points: number }`。
 
 ### 阶段 8：随机宿命技能分配
 
