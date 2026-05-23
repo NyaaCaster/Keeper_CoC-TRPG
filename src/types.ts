@@ -45,7 +45,12 @@ export interface ClueItem {
   type: "note" | "photo" | "marking" | "book" | "artifact";
   description: string;
   imageUrl?: string;
-  prompt: string;
+  /**
+   * 画图提示词。仅在线索含有 description 无法替代的视觉细节(符号/照片/异常器物/
+   * 文书上的图示等)时由守密人下发;纯文字 note/book 不带此字段,前端会完全隐藏
+   * 插图入口。
+   */
+  prompt?: string;
   discoveredAt: string; // timestamp or scene name
   read?: boolean;
 }
@@ -122,6 +127,17 @@ export interface KeeperResponse {
     title: string;
     type: "note" | "photo" | "marking" | "book" | "artifact";
     description: string;
+    /** 可选 — 仅当线索值得配图时由守密人提供,否则前端不展示插图入口。 */
+    prompt?: string;
+  } | null;
+  /**
+   * 对话中即兴的视觉占位卡 — 场景里出现值得让玩家"看到"但尚未构成线索的
+   * 视觉元素时由守密人下发。前端在 keeper 气泡里单独起行渲染一张"显示图像"
+   * 卡;玩家点击后才请求画图模型,展开预览后可一键"收录线索"。
+   */
+  sceneImage?: {
+    caption: string;
+    type: "note" | "photo" | "marking" | "book" | "artifact";
     prompt: string;
   } | null;
   characterUpdates?: {
@@ -184,6 +200,18 @@ export interface ChatMessage {
     rollResult: RollResult;
     loss: number;
     outcomeMessage: string;
+  };
+  /**
+   * KP 在该回合下发的对话内即兴图像占位 — 用户首次点击"显示图像"前 imageUrl 为空;
+   * 生成后写入 imageUrl 并落入存档。savedAsClueId 在用户从预览页点击"收录线索"后写入,
+   * 用于在按钮上显示"已收录"且禁用重复登记。
+   */
+  sceneImage?: {
+    caption: string;
+    type: "note" | "photo" | "marking" | "book" | "artifact";
+    prompt: string;
+    imageUrl?: string;
+    savedAsClueId?: string;
   };
 }
 

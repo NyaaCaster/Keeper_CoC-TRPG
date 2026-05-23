@@ -18,7 +18,7 @@ import CharacterCreator from "./components/CharacterCreator";
 import RollDiceModal from "./components/RollDiceModal";
 import EffectRollModal from "./components/EffectRollModal";
 import CharacterSheetPanel from "./components/CharacterSheetPanel";
-import CluesNotebook from "./components/CluesNotebook";
+import CluesNotebook, { ImageViewer } from "./components/CluesNotebook";
 import {
   Shield,
   MessageSquare,
@@ -34,6 +34,9 @@ import {
   Eye,
   User,
   Settings,
+  Image as ImageIcon,
+  Loader2,
+  ZoomIn,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -170,6 +173,14 @@ export default function App() {
   );
   const [pendingKeeperResponse, setPendingKeeperResponse] =
     useState<KeeperResponse | null>(null);
+
+  // 对话中即兴 sceneImage 的状态:正在生成的 message id 集合 + 全屏预览中的 sceneImage
+  const [generatingSceneImageMsgIds, setGeneratingSceneImageMsgIds] = useState<
+    Set<string>
+  >(new Set());
+  const [scenePreview, setScenePreview] = useState<{
+    messageId: string;
+  } | null>(null);
 
   // Variable values changes animations trackers
   const [hpDiff, setHpDiff] = useState<number>(0);
@@ -422,6 +433,74 @@ export default function App() {
           },
         });
         return;
+      case "clue_image":
+        // 带 prompt 的线索 → 笔记本应展示图框 + 占位 + 放大镜入口。
+        setClues((prev) => [
+          ...prev,
+          {
+            id: `clue_test_${Date.now()}`,
+            title: "[测试] 沾血的祭坛拓印",
+            type: "marking",
+            description:
+              "一张被反复折叠过的描图纸,拓下了石质祭坛侧面的环形铭文。" +
+              "纸面还残留着深褐色的指印,环中心是一个倒五角,符号之间嵌着" +
+              "看不懂的螺旋楔形。",
+            prompt:
+              "A folded sheet of tracing paper showing a circular ritual " +
+              "inscription rubbed off a stone altar, dried blood-brown " +
+              "fingerprints around the edges, an inverted pentagram at the " +
+              "center surrounded by spiral cuneiform sigils, candlelit warm " +
+              "shadows, weathered paper texture, gothic occult atmosphere, " +
+              "cinematic close-up photo, ultra-detailed, grim Lovecraftian " +
+              "rendering",
+            discoveredAt: currentLocation,
+            read: false,
+          },
+        ]);
+        return;
+      case "clue_text":
+        // 不带 prompt 的纯文字线索 → 笔记本详情视图应**完全不渲染图框**,
+        // 只显示标题 + 描述。
+        setClues((prev) => [
+          ...prev,
+          {
+            id: `clue_test_${Date.now()}`,
+            title: "[测试] 殡仪馆账册第 七 页摘录",
+            type: "note",
+            description:
+              "1923 年 11 月 4 日 · 入殓四具,均为夜间送达,未登记委托人姓名。" +
+              "经手人: H. 莫里斯。备注栏: 无表征 / 无表征 / 颅骨缺失 / 无表征。" +
+              "本页底部有铅笔注语: 「H 不肯交付钥匙,我去后院查过,土是新的。」",
+            discoveredAt: currentLocation,
+            read: false,
+          },
+        ]);
+        return;
+      case "scene_image": {
+        // 对话内即兴 sceneImage 占位 — 在聊天里追加一条仅含 sceneImage 字段的 keeper 消息,
+        // 走完整链路: 显示图像按钮 → 画图 → 缩略图 → 全屏预览 → 收录线索 → 笔记本档案。
+        const id = `keeper_test_${Date.now()}`;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id,
+            sender: "keeper",
+            timestamp: new Date().toLocaleTimeString(),
+            text: "[测试] 你的目光不由自主地停在祭坛侧面那道深刻的螺旋纹路上,符号边缘还残留着深褐色的渍迹。",
+            sceneImage: {
+              caption: "祭坛石板上深刻的螺旋符号,边缘残留着深褐色的渍迹",
+              type: "marking",
+              prompt:
+                "A close-up of an ancient stone altar's side face, deeply " +
+                "carved spiral cuneiform glyph dominant in the frame, " +
+                "edges crusted with dried blood-brown residue, candlelit " +
+                "warm shadows, weathered stone texture, gothic Lovecraftian " +
+                "atmosphere, cinematic shallow depth of field, ultra-detailed",
+            },
+          },
+        ]);
+        return;
+      }
       default:
         // 未知命令静默忽略，保持"测试通道不入消息"的承诺
         return;
@@ -709,6 +788,13 @@ export default function App() {
       model: apiSettings.llm.model || apiSettings.llm.provider,
       moduleName: snapshotModuleName,
       location: snapshotLocation,
+      sceneImage: keeperData.sceneImage
+        ? {
+            caption: keeperData.sceneImage.caption,
+            type: keeperData.sceneImage.type,
+            prompt: keeperData.sceneImage.prompt,
+          }
+        : undefined,
     });
 
     setMessages((prev) => [...prev, ...newMsgs]);
@@ -730,11 +816,11 @@ export default function App() {
       setActiveSanity(null);
     }
 
-    // Handle custom discovered CLUES items visually and add to local Notebook
+    // Handle custom discovered CLUES items visually and add to local Notebook.
+    // 注意:这里只把线索登记进档案,**不主动**请求画图;真正的画图调用延迟到玩家
+    // 在调查笔记本中首次点击放大镜时按需触发(见 requestClueImage)。
     if (keeperData.clue) {
       const cluePayload = keeperData.clue;
-
-      // Request Imagen image for the clue in background
       const nextClueItem: ClueItem = {
         id: `clue_${Date.now()}`,
         title: cluePayload.title,
@@ -744,16 +830,16 @@ export default function App() {
         discoveredAt: keeperData.gameState?.currentLocation || currentLocation,
         read: false,
       };
-
-      // Try to generate clue photo with imagen asynchronously to avoid blocking chat narrative flow!
-      triggerClueImageGeneration(nextClueItem);
+      setClues((p) => [...p, nextClueItem]);
     }
   };
 
-  // Asynchronous wrapper for generating clue photography visual cards
-  const triggerClueImageGeneration = async (clue: ClueItem) => {
-    // Temporarily add with no image to list
-    setClues((p) => [...p, clue]);
+  // 按需触发:玩家在调查笔记本中首次点击放大镜时,由 CluesNotebook 调用此函数
+  // 发起画图请求。成功后通过 setClues 把 imageUrl 落到对应条目上。
+  // 防御:无 prompt 的线索属于纯文字条目,守密人没下发画图请求,直接拒绝。
+  const requestClueImage = async (clue: ClueItem): Promise<boolean> => {
+    if (clue.imageUrl) return true;
+    if (!clue.prompt) return false;
 
     const startedAt = Date.now();
     addLog({
@@ -799,6 +885,7 @@ export default function App() {
               c.id === clue.id ? { ...c, imageUrl: body.imageUrl } : c,
             ),
           );
+          return true;
         } else if (body.success) {
           addLog({
             direction: "error",
@@ -837,11 +924,155 @@ export default function App() {
         content: `POST /api/image/generate-clue exception`,
         meta: { durationMs: Date.now() - startedAt, message: e?.message },
       });
-      console.warn(
-        "Occult sketch generation failed asynchronously, clue stays as procedural card:",
-        e,
-      );
+      console.warn("Occult sketch generation failed:", e);
     }
+    return false;
+  };
+
+  // 对话中即兴 sceneImage 的画图请求 — 玩家点"显示图像"时触发,
+  // 与 requestClueImage 共享后端 /api/image/generate-clue,但回写到 messages[].sceneImage.imageUrl
+  // 而非 clues。这样占位卡片"显示图像 → 缩略图"的状态切换由 messages 状态驱动。
+  const requestSceneImage = async (messageId: string): Promise<boolean> => {
+    const target = messages.find((m) => m.id === messageId);
+    const scene = target?.sceneImage;
+    if (!scene) return false;
+    if (scene.imageUrl) return true;
+    if (!scene.prompt) return false;
+    if (generatingSceneImageMsgIds.has(messageId)) return false;
+
+    setGeneratingSceneImageMsgIds((s) => {
+      const next = new Set(s);
+      next.add(messageId);
+      return next;
+    });
+
+    const startedAt = Date.now();
+    addLog({
+      direction: "request",
+      content: `POST /api/image/generate-clue (sceneImage) → "${scene.caption}"`,
+      meta: {
+        url: "/api/image/generate-clue",
+        messageId,
+        type: scene.type,
+        promptPreview: (scene.prompt || "").slice(0, 200),
+      },
+    });
+
+    try {
+      const resp = await fetch("/api/image/generate-clue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: scene.prompt,
+          title: scene.caption,
+          type: scene.type,
+          apiSettings,
+        }),
+      });
+
+      if (resp.ok) {
+        const body = await resp.json();
+        ingestServerLogs(body?._serverLogs);
+        const prefix = getImagePublicPrefix();
+        if (
+          body.success &&
+          typeof body.imageUrl === "string" &&
+          prefix &&
+          body.imageUrl.startsWith(prefix)
+        ) {
+          addLog({
+            direction: "response",
+            content: `POST /api/image/generate-clue (sceneImage) ← imageUrl ok`,
+            meta: { durationMs: Date.now() - startedAt, imageUrl: body.imageUrl },
+          });
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === messageId && m.sceneImage
+                ? { ...m, sceneImage: { ...m.sceneImage, imageUrl: body.imageUrl } }
+                : m,
+            ),
+          );
+          return true;
+        } else if (body.success) {
+          addLog({
+            direction: "error",
+            content: `POST /api/image/generate-clue (sceneImage) ← rejected non-whitelisted imageUrl`,
+            meta: { durationMs: Date.now() - startedAt, imageUrl: String(body.imageUrl).slice(0, 200) },
+          });
+        } else {
+          addLog({
+            direction: "error",
+            content: `POST /api/image/generate-clue (sceneImage) ← success=false`,
+            meta: { durationMs: Date.now() - startedAt, error: body?.error },
+          });
+        }
+      } else {
+        let bodyText = "";
+        try {
+          const json = await resp.clone().json();
+          ingestServerLogs(json?._serverLogs);
+          bodyText = JSON.stringify(json).slice(0, 400);
+        } catch {
+          try { bodyText = (await resp.text()).slice(0, 400); } catch {}
+        }
+        addLog({
+          direction: "error",
+          content: `POST /api/image/generate-clue (sceneImage) ← HTTP ${resp.status}`,
+          meta: { status: resp.status, durationMs: Date.now() - startedAt, body: bodyText },
+        });
+      }
+    } catch (e: any) {
+      addLog({
+        direction: "error",
+        content: `POST /api/image/generate-clue (sceneImage) exception`,
+        meta: { durationMs: Date.now() - startedAt, message: e?.message },
+      });
+    } finally {
+      setGeneratingSceneImageMsgIds((s) => {
+        if (!s.has(messageId)) return s;
+        const next = new Set(s);
+        next.delete(messageId);
+        return next;
+      });
+    }
+    return false;
+  };
+
+  // 玩家在 sceneImage 全屏预览里点"收录线索"时:把 sceneImage 提升为正式的 ClueItem,
+  // 复用 caption/type/imageUrl,并在 message.sceneImage 上记录 savedAsClueId 以禁用重复登记。
+  const saveSceneImageAsClue = (messageId: string): string | null => {
+    const target = messages.find((m) => m.id === messageId);
+    const scene = target?.sceneImage;
+    if (!scene) return null;
+    if (scene.savedAsClueId) return scene.savedAsClueId;
+
+    const clueId = `clue_${Date.now()}`;
+    const discoveredAt =
+      target?.location || currentLocation || "未知地点";
+    const nextClue: ClueItem = {
+      id: clueId,
+      title: scene.caption.slice(0, 40) || "未命名图像",
+      type: scene.type,
+      description: scene.caption,
+      prompt: scene.prompt,
+      imageUrl: scene.imageUrl,
+      discoveredAt,
+      read: false,
+    };
+    setClues((p) => [...p, nextClue]);
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId && m.sceneImage
+          ? { ...m, sceneImage: { ...m.sceneImage, savedAsClueId: clueId } }
+          : m,
+      ),
+    );
+    addLog({
+      direction: "info",
+      content: `sceneImage saved as clue → "${nextClue.title}"`,
+      meta: { messageId, clueId, type: scene.type },
+    });
+    return clueId;
   };
 
   // Dice roll complete callback from specialized Roll Modal
@@ -1369,6 +1600,77 @@ export default function App() {
                         </div>
                       )}
 
+                      {/* In-chat sceneImage placeholder card — 显示图像 → 缩略图 → 全屏预览 → 收录线索 */}
+                      {m.sceneImage && (
+                        <div
+                          id="scene-image-card"
+                          className="border border-dashed border-[#10b981]/35 p-3 bg-black/45 rounded mt-2 flex flex-col gap-2"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <ImageIcon className="w-4 h-4 text-[#10b981] shrink-0" />
+                              <span className="text-[10px] uppercase font-mono tracking-widest text-[#10b981]">
+                                视觉勾子 / VISUAL ANCHOR
+                              </span>
+                            </div>
+                            {m.sceneImage.savedAsClueId && (
+                              <span className="text-[10px] font-mono text-[#10b981]/70 px-2 py-0.5 border border-[#10b981]/30 rounded">
+                                已收录
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-300 italic font-sans">
+                            " {m.sceneImage.caption} "
+                          </p>
+
+                          {m.sceneImage.imageUrl ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setScenePreview({ messageId: m.id })
+                              }
+                              className="relative group rounded overflow-hidden border border-[#10b981]/25 bg-black w-full max-h-[180px] flex items-center justify-center hover:border-[#10b981]/60 transition"
+                            >
+                              <img
+                                src={m.sceneImage.imageUrl}
+                                alt={m.sceneImage.caption}
+                                referrerPolicy="no-referrer"
+                                className="object-cover w-full max-h-[180px]"
+                              />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                                <ZoomIn className="w-7 h-7 text-white" />
+                              </div>
+                            </button>
+                          ) : (
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-[10px] font-mono text-gray-500">
+                                图像尚未生成
+                              </span>
+                              <button
+                                type="button"
+                                disabled={generatingSceneImageMsgIds.has(m.id)}
+                                onClick={() => {
+                                  void requestSceneImage(m.id);
+                                }}
+                                className="px-3 py-1.5 bg-black border border-[#10b981]/35 hover:border-[#10b981]/90 text-xs text-[#10b981] rounded font-semibold transition flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-wait"
+                              >
+                                {generatingSceneImageMsgIds.has(m.id) ? (
+                                  <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    生成中…
+                                  </>
+                                ) : (
+                                  <>
+                                    <ZoomIn className="w-3.5 h-3.5" />
+                                    显示图像
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Action trigger: Required Skill Roll Button */}
                       {m.parsedResponse?.rollRequest && (
                         <div
@@ -1501,7 +1803,11 @@ export default function App() {
                   exit={{ opacity: 0 }}
                   className="w-full h-full"
                 >
-                  <CluesNotebook clues={clues} onMarkClueRead={markClueRead} />
+                  <CluesNotebook
+                    clues={clues}
+                    onMarkClueRead={markClueRead}
+                    onRequestClueImage={requestClueImage}
+                  />
                 </motion.div>
               ) : (
                 /* Defaults to active Character sheet dashboard */
@@ -1640,6 +1946,26 @@ export default function App() {
                 onResolve={pendingEffectRoll.onResolve}
               />
             )}
+
+            {scenePreview && (() => {
+              const previewMsg = messages.find(
+                (m) => m.id === scenePreview.messageId,
+              );
+              const scene = previewMsg?.sceneImage;
+              if (!scene?.imageUrl) {
+                return null;
+              }
+              return (
+                <ImageViewer
+                  key="scene_image_viewer"
+                  imageUrl={scene.imageUrl}
+                  title={scene.caption}
+                  onClose={() => setScenePreview(null)}
+                  onSaveAsClue={() => saveSceneImageAsClue(scenePreview.messageId)}
+                  alreadySavedAsClue={!!scene.savedAsClueId}
+                />
+              );
+            })()}
 
             {showExitConfirm && (
               <motion.div

@@ -16,7 +16,17 @@ function sanitizeForStorage(save: WebGameSave): WebGameSave {
     }
     return c;
   });
-  return { ...save, clues: cleanedClues };
+  const cleanedMessages = save.messages.map((m) => {
+    if (
+      m.sceneImage?.imageUrl &&
+      (!prefix || !m.sceneImage.imageUrl.startsWith(prefix))
+    ) {
+      const { imageUrl, ...restScene } = m.sceneImage;
+      return { ...m, sceneImage: restScene };
+    }
+    return m;
+  });
+  return { ...save, clues: cleanedClues, messages: cleanedMessages };
 }
 
 export function getAllSaves(): WebGameSave[] {

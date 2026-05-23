@@ -29,6 +29,9 @@
 | `[sys_test]mp_cost` | 魔力消耗浮窗 · 1d4 真实随机 | 二阶段·default 主题，蓝色 mpDiff 浮字 | — |
 | `[sys_test]damage_static` | 伤害静态 5 点 · **不弹浮窗** | 验证 `isStatic` 分流：纯数字直接走 hpDiff，跳过 EffectRollModal | — |
 | `[sys_test]damage_full` | **全链路** · 闪避失败判定 modal → 自动接 1d6+1 伤害效果骰浮窗 | 验证"判定 → 效果"两段动画端到端串联，红色 hpDiff 浮字 | **不出现**（战斗骰白名单挡住） |
+| `[sys_test]clue_image` | 直接插入一条**带 prompt 的**线索（拓印 / `marking`），无 imageUrl | 验证按需画图链路 — 笔记本详情应**展示图框 + 占位 + 放大镜**，点放大镜触发 `/api/image/generate-clue` 显示转圈，成功后写入 `imageUrl` | — |
+| `[sys_test]clue_text` | 直接插入一条**不带 prompt 的**线索（账册摘录 / `note`） | 验证规范裁剪 — 笔记本详情应**完全不渲染图框**，只显示标题 + 描述 | — |
+| `[sys_test]scene_image` | 在聊天追加一条仅含 `sceneImage` 的 keeper 消息（祭坛螺旋符号 / `marking`） | 验证**对话内视觉勾子**链路 — 应在 keeper 气泡里渲染绿色虚线占位卡，点「显示图像」生成图，缩略图点击展开全屏预览，预览顶栏多出「收录线索」按钮，点击后写入笔记本并按钮变「已收录」 | — |
 
 ---
 
@@ -48,7 +51,8 @@
   对效果骰用 push/燃运）。静态公式（`"0"`、纯数字）跳过浮窗直接结算。
 - **测试模式 SAN**：会演示效果骰浮窗但**不真扣 SAN**，可反复测试动画。
 - **不能模拟的事**：测试通道只构造 `activeRoll`/`activeSanity`/`pendingEffectRoll` 三个 React state，
-  **不会**触发线索弹卡、HP/MP 变化、地点切换、剧情同步——这些都属于 KP 回包的处理逻辑，与本测试通道无关。
+  **不会**触发聊天里的"找到线索"卡片、HP/MP 变化、地点切换、剧情同步——这些都属于 KP 回包的处理逻辑，与本测试通道无关。
+  - 例外：`[sys_test]clue_image` / `[sys_test]clue_text` 直接 `setClues`，会把测试线索写入存档（受 useEffect 自动落 localStorage），如不需要可在笔记本中手动清空或换存档。`[sys_test]scene_image` 直接 `setMessages` 追加一条带 sceneImage 的 keeper 消息，同样会进入存档；其完整链路涉及真实的 `/api/image/generate-clue` 调用，需要在「虚空连接的设置」里配好画图模型。「收录线索」按钮触发后会把 sceneImage 升格为正式 ClueItem。
 
 ---
 

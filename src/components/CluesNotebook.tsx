@@ -18,6 +18,9 @@ import {
   ZoomOut,
   Download,
   X,
+  Loader2,
+  BookmarkPlus,
+  Check,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -25,26 +28,61 @@ interface CluesNotebookProps {
   clues: ClueItem[];
   onClose?: () => void;
   onMarkClueRead?: (id: string) => void;
+  /**
+   * 由 App 注入的按需画图回调。返回 true 表示画图成功(此时上层会把 imageUrl 写入对应
+   * clue,父级 prop 刷新),返回 false 表示失败,组件本地展示错误提示。
+   */
+  onRequestClueImage?: (clue: ClueItem) => Promise<boolean>;
 }
 
 export default function CluesNotebook({
   clues,
   onClose,
   onMarkClueRead,
+  onRequestClueImage,
 }: CluesNotebookProps) {
   const [selectedClueId, setSelectedClueId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<{
     url: string;
     title: string;
   } | null>(null);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [genError, setGenError] = useState<string | null>(null);
 
   const selectedClue = clues.find((c) => c.id === selectedClueId) || null;
 
   const openClue = (id: string) => {
     setSelectedClueId(id);
+    setGenError(null);
     const target = clues.find((c) => c.id === id);
     if (target && !target.read) {
       onMarkClueRead?.(id);
+    }
+  };
+
+  // 放大镜按钮(或空白容器)的统一点击入口:
+  //   - 已有 imageUrl  → 打开全屏预览
+  //   - 无 imageUrl    → 调用上层画图,期间在容器内显示转圈动画
+  //   - 无 prompt      → 该线索不允许配图,本函数不应被调用,这里兜底直接返回
+  const handleZoomOrGenerate = async () => {
+    if (!selectedClue) return;
+    if (selectedClue.imageUrl) {
+      setPreviewImage({ url: selectedClue.imageUrl, title: selectedClue.title });
+      return;
+    }
+    if (!selectedClue.prompt) return;
+    if (!onRequestClueImage) return;
+    if (generatingId === selectedClue.id) return;
+
+    setGeneratingId(selectedClue.id);
+    setGenError(null);
+    try {
+      const ok = await onRequestClueImage(selectedClue);
+      if (!ok) setGenError("画图失败,请检查画图模型配置后重试。");
+    } catch (e: any) {
+      setGenError(`画图异常:${e?.message || "未知错误"}`);
+    } finally {
+      setGeneratingId(null);
     }
   };
 
@@ -116,70 +154,88 @@ export default function CluesNotebook({
               <ChevronLeft className="w-3.5 h-3.5" /> 返回图鉴
             </button>
 
-            {/* Visual Image Render */}
-            <div
-              className={`relative group rounded-lg overflow-hidden border border-[#c1a067]/15 bg-black w-full aspect-[4/3] flex items-center justify-center cursor-pointer hover:border-[#c1a067]/50 transition-colors`}
-              onClick={() => {
-                const canvasNode = document.getElementById(
-                  "clue-procedural-canvas",
-                ) as HTMLCanvasElement;
-                const previewUrl =
-                  selectedClue.imageUrl || canvasNode?.toDataURL() || "";
-                if (previewUrl) {
-                  setPreviewImage({
-                    url: previewUrl,
-                    title: selectedClue.title,
-                  });
-                }
-              }}
-            >
-              {selectedClue.imageUrl ? (
-                <>
-                  <img
-                    id="clue-detail-photo"
-                    src={selectedClue.imageUrl}
-                    alt={selectedClue.title}
-                    referrerPolicy="no-referrer"
-                    className="object-cover w-full h-full max-h-[220px]"
-                  />
-                </>
-              ) : (
-                <ProceduralCluePaper
-                  title={selectedClue.title}
-                  type={selectedClue.type}
-                  description={selectedClue.description}
-                />
-              )}
+            {/* Visual Image Render — 仅当线索带 prompt 时展示插图入口,
+                纯文字 note/book 直接跳过整块图框,让标题+描述占满详情视图 */}
+            {selectedClue.prompt && (
+              <>
+                <div
+                  className={`relative group rounded-lg overflow-hidden border border-[#c1a067]/15 bg-black w-full aspect-[4/3] flex items-center justify-center transition-colors ${
+                    selectedClue.imageUrl || generatingId === selectedClue.id
+                      ? ""
+                      : "cursor-pointer hover:border-[#c1a067]/50"
+                  } ${selectedClue.imageUrl ? "cursor-pointer hover:border-[#c1a067]/50" : ""}`}
+                  onClick={() => {
+                    if (generatingId === selectedClue.id) return;
+                    handleZoomOrGenerate();
+                  }}
+                >
+                  {selectedClue.imageUrl ? (
+                    <img
+                      id="clue-detail-photo"
+                      src={selectedClue.imageUrl}
+                      alt={selectedClue.title}
+                      referrerPolicy="no-referrer"
+                      className="object-cover w-full h-full max-h-[220px]"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-2 text-gray-600 pointer-events-none select-none">
+                      <ImageIcon className="w-12 h-12 stroke-1" />
+                      <span className="text-[10px] uppercase font-mono tracking-widest">
+                        {generatingId === selectedClue.id
+                          ? "Rendering..."
+                          : "点击放大镜生成插图"}
+                      </span>
+                    </div>
+                  )}
 
-              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
-                <ZoomIn className="w-8 h-8 text-white shadow-xl" />
-              </div>
-              <button
-                className="absolute bottom-2 right-2 bg-black/80 hover:bg-[#c1a067] text-white p-2 rounded-full border border-gray-700 transition z-10"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const canvasNode = document.getElementById(
-                    "clue-procedural-canvas",
-                  ) as HTMLCanvasElement;
-                  const previewUrl =
-                    selectedClue.imageUrl || canvasNode?.toDataURL() || "";
-                  if (previewUrl) {
-                    setPreviewImage({
-                      url: previewUrl,
-                      title: selectedClue.title,
-                    });
-                  }
-                }}
-                title="全屏预览"
-              >
-                <ZoomIn className="w-4 h-4" />
-              </button>
+                  {/* Generating overlay */}
+                  {generatingId === selectedClue.id && (
+                    <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-2 z-20 pointer-events-none">
+                      <Loader2 className="w-8 h-8 text-[#10b981] animate-spin" />
+                      <span className="text-xs text-gray-300 font-mono">
+                        正在生成插图...
+                      </span>
+                    </div>
+                  )}
 
-              {/* Aspect label overlay */}
-              <span className="absolute bottom-2 left-2 text-[8px] bg-black/80 px-2 py-0.5 rounded font-mono border border-gray-800 text-gray-400">
-                SECURED DATA - TYPE: {selectedClue.type.toUpperCase()}
-              </span>
-            </div>
+                  {/* Hover preview overlay - only meaningful when image already loaded */}
+                  {selectedClue.imageUrl && (
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                      <ZoomIn className="w-8 h-8 text-white shadow-xl" />
+                    </div>
+                  )}
+
+                  <button
+                    className="absolute bottom-2 right-2 bg-black/80 hover:bg-[#c1a067] text-white p-2 rounded-full border border-gray-700 transition z-10 disabled:opacity-40 disabled:hover:bg-black/80 disabled:cursor-wait"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleZoomOrGenerate();
+                    }}
+                    disabled={generatingId === selectedClue.id}
+                    title={
+                      selectedClue.imageUrl
+                        ? "全屏预览"
+                        : generatingId === selectedClue.id
+                          ? "正在生成..."
+                          : "生成线索插图"
+                    }
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </button>
+
+                  {/* Aspect label overlay */}
+                  <span className="absolute bottom-2 left-2 text-[8px] bg-black/80 px-2 py-0.5 rounded font-mono border border-gray-800 text-gray-400">
+                    SECURED DATA - TYPE: {selectedClue.type.toUpperCase()}
+                  </span>
+                </div>
+
+                {genError && !selectedClue.imageUrl && (
+                  <div className="text-[11px] text-red-400 font-mono bg-red-950/30 border border-red-900/40 px-3 py-1.5 rounded">
+                    {genError}
+                  </div>
+                )}
+              </>
+            )}
 
             <div>
               <h3
@@ -223,150 +279,23 @@ export default function CluesNotebook({
   );
 }
 
-// Procedural visual clue canvas drawer component
-function ProceduralCluePaper({
-  title,
-  type,
-  description,
-}: {
-  title: string;
-  type: string;
-  description: string;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    // Reset dimensions
-    canvas.width = 400;
-    canvas.height = 300;
-
-    // 1. Draw Paper Background (parchment texture)
-    const grade = ctx.createRadialGradient(200, 150, 40, 200, 150, 220);
-    grade.addColorStop(0, "#f9f2e3"); // warm cream
-    grade.addColorStop(0.7, "#eddcb4"); // aged golden tea
-    grade.addColorStop(1, "#c5aa70"); // dark burnt edges
-
-    ctx.fillStyle = grade;
-    ctx.fillRect(0, 0, 400, 300);
-
-    // 2. Distressed paper details
-    ctx.strokeStyle = "rgba(100,60,30,0.15)";
-    ctx.lineWidth = 1;
-
-    // Draw lines to simulate vintage ledger or notebook
-    if (type === "note" || type === "book") {
-      for (let y = 60; y < 280; y += 22) {
-        ctx.beginPath();
-        ctx.moveTo(30, y);
-        ctx.lineTo(370, y);
-        ctx.stroke();
-      }
-    } else if (type === "marking") {
-      // Draw standard occult summoning star pattern or magic circuits
-      ctx.strokeStyle = "rgba(180, 20, 10, 0.4)"; // dried blood red
-      ctx.lineWidth = 2.5;
-
-      // Pentagram
-      ctx.beginPath();
-      ctx.arc(200, 150, 70, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.beginPath();
-      // Draw a 5-star geometry
-      const points = [];
-      for (let i = 0; i < 5; i++) {
-        const angle = -Math.PI / 2 + (i * Math.PI * 4) / 5;
-        points.push({
-          x: 200 + Math.cos(angle) * 70,
-          y: 150 + Math.sin(angle) * 70,
-        });
-      }
-      ctx.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i <= 5; i++) {
-        const pt = points[i % 5];
-        ctx.lineTo(pt.x, pt.y);
-      }
-      ctx.stroke();
-
-      // Sigils circles
-      ctx.beginPath();
-      ctx.arc(200, 150, 62, 0, Math.PI * 2);
-      ctx.stroke();
-    } else if (type === "photo") {
-      // Photo polaroid border overlay
-      ctx.fillStyle = "rgba(0,0,0,0.8)";
-      ctx.fillRect(40, 30, 320, 200);
-
-      // Distorted glowing orb or blurry shadow inside Polaroid
-      const radGrad = ctx.createRadialGradient(180, 110, 5, 180, 110, 80);
-      radGrad.addColorStop(0, "rgba(220,180,255,0.7)");
-      radGrad.addColorStop(0.5, "rgba(100,50,250,0.3)");
-      radGrad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = radGrad;
-      ctx.fillRect(40, 30, 320, 200);
-
-      // Polaroid photo border
-      ctx.lineWidth = 14;
-      ctx.strokeStyle = "#e8e5dc";
-      ctx.strokeRect(33, 23, 334, 254);
-    }
-
-    // 3. Render Handdrawn texts (Title and contents)
-    ctx.fillStyle = "#1e130a"; // dark carbon ink
-
-    if (type !== "photo" && type !== "marking") {
-      ctx.font = "bold 14px Georgia, serif";
-      ctx.fillText(title, 40, 45);
-
-      ctx.font = "italic 10px Courier New, monospace";
-      ctx.fillStyle = "#4a3520";
-
-      // Word wrap for description in procedural paper
-      const words = description.split("");
-      let line = "";
-      let y = 80;
-      for (let n = 0; n < words.length; n++) {
-        const testLine = line + words[n];
-        if (testLine.length > 28 && n > 0) {
-          ctx.fillText(line, 40, y);
-          line = words[n];
-          y += 22;
-        } else {
-          line = testLine;
-        }
-        if (y > 270) break;
-      }
-      ctx.fillText(line, 40, y);
-    } else {
-      // overlay title under polaroid
-      ctx.fillStyle = "#3a2412";
-      ctx.font = "bold 11px Georgia, serif";
-      ctx.fillText(`线索: ${title}`, 45, 256);
-    }
-  }, [title, type, description]);
-
-  return (
-    <canvas
-      id="clue-procedural-canvas"
-      ref={canvasRef}
-      className="max-h-[220px] max-w-full rounded shadow-xl"
-    />
-  );
-}
-
-function ImageViewer({
+export function ImageViewer({
   imageUrl,
   onClose,
   title,
+  onSaveAsClue,
+  alreadySavedAsClue,
 }: {
   imageUrl: string;
   onClose: () => void;
   title: string;
+  /**
+   * 可选 — 仅当 viewer 用于浏览"对话内即兴 sceneImage"(尚未登记成线索)时由外层注入。
+   * 点击触发将 sceneImage 升格为正式的 ClueItem,并在按钮上把状态切到"已收录"。
+   * 调查笔记本里的常规线索预览不传此回调,该行按钮不渲染。
+   */
+  onSaveAsClue?: () => void;
+  alreadySavedAsClue?: boolean;
 }) {
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -470,42 +399,70 @@ function ImageViewer({
       className="fixed inset-[0px] z-[9999] bg-black/95 flex flex-col font-sans backdrop-blur-md m-0 p-0 overflow-hidden animate-in fade-in duration-200"
       style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0 }}
     >
-      <div className="flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent absolute top-0 left-0 w-full z-10 shrink-0">
-        <h3 className="text-white font-bold max-w-[60%] truncate">{title}</h3>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={zoomOut}
-            className="p-2 bg-gray-900 rounded-full text-white hover:bg-gray-800 transition"
-            title="缩小"
-          >
-            <ZoomOut className="w-5 h-5" />
-          </button>
-          <span className="text-white text-xs font-mono w-10 text-center">
-            {Math.round(scale * 100)}%
-          </span>
-          <button
-            onClick={zoomIn}
-            className="p-2 bg-gray-900 rounded-full text-white hover:bg-gray-800 transition"
-            title="放大"
-          >
-            <ZoomIn className="w-5 h-5" />
-          </button>
-          <div className="w-px h-6 bg-gray-700 mx-1 border-none" />
-          <button
-            onClick={handleDownload}
-            className="p-2 bg-gray-900 rounded-full text-white hover:bg-[#c1a067] transition"
-            title="下载图片"
-          >
-            <Download className="w-5 h-5" />
-          </button>
-          <button
-            onClick={onClose}
-            className="p-2 bg-red-900/50 rounded-full text-white hover:bg-red-600 transition ml-2"
-            title="关闭预览"
-          >
-            <X className="w-5 h-5" />
-          </button>
+      <div className="absolute top-0 left-0 w-full p-4 bg-gradient-to-b from-black/80 to-transparent z-10 shrink-0 flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-white font-bold max-w-[60%] truncate">{title}</h3>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={zoomOut}
+              className="p-2 bg-gray-900 rounded-full text-white hover:bg-gray-800 transition"
+              title="缩小"
+            >
+              <ZoomOut className="w-5 h-5" />
+            </button>
+            <span className="text-white text-xs font-mono w-10 text-center">
+              {Math.round(scale * 100)}%
+            </span>
+            <button
+              onClick={zoomIn}
+              className="p-2 bg-gray-900 rounded-full text-white hover:bg-gray-800 transition"
+              title="放大"
+            >
+              <ZoomIn className="w-5 h-5" />
+            </button>
+            <div className="w-px h-6 bg-gray-700 mx-1 border-none" />
+            <button
+              onClick={handleDownload}
+              className="p-2 bg-gray-900 rounded-full text-white hover:bg-[#c1a067] transition"
+              title="下载图片"
+            >
+              <Download className="w-5 h-5" />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 bg-red-900/50 rounded-full text-white hover:bg-red-600 transition ml-2"
+              title="关闭预览"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
+        {onSaveAsClue && (
+          <div className="flex items-center justify-end">
+            <button
+              onClick={alreadySavedAsClue ? undefined : onSaveAsClue}
+              disabled={alreadySavedAsClue}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 border transition ${
+                alreadySavedAsClue
+                  ? "bg-[#10b981]/15 border-[#10b981]/40 text-[#10b981] cursor-default"
+                  : "bg-black/70 border-[#10b981]/40 text-[#10b981] hover:bg-[#10b981] hover:text-black"
+              }`}
+              title={alreadySavedAsClue ? "已加入调查笔记本" : "把当前图片登记到调查笔记本"}
+            >
+              {alreadySavedAsClue ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  已收录
+                </>
+              ) : (
+                <>
+                  <BookmarkPlus className="w-4 h-4" />
+                  收录线索
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </div>
 
       <div
