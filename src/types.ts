@@ -19,11 +19,82 @@ export interface CharacterSkills {
   [key: string]: number; // Skill Name -> Percentage Value
 }
 
+/**
+ * 神秘接触档案。CoC 7e 规则中"调查员持有/接触过的神话相关条目"。
+ * 不可手动调，仅由 KP 在游戏过程中按规则下发。
+ * 创建期为空对象（不是 undefined），方便 UI 直接 map。
+ */
+export interface MythicEncounters {
+  tomes: MythicTomeEntry[];        // 神话著作（含完整阅读 / 部分阅读状态）
+  spells: MythicSpellEntry[];      // 已学法术
+  artifacts: MythicArtifactEntry[];// 神器（持有 / 接触过）
+  entities: MythicEntityEntry[];   // 接触过的存在
+}
+
+export interface MythicTomeEntry {
+  id: string;
+  name: string;
+  state: "skimmed" | "read" | "studied"; // 略读 / 通读 / 精研
+  acquiredAt?: string;
+  notes?: string;
+}
+
+export interface MythicSpellEntry {
+  id: string;
+  name: string;
+  cost?: string;        // POW / MP / SAN 消耗的描述串
+  acquiredAt?: string;
+  notes?: string;
+}
+
+export interface MythicArtifactEntry {
+  id: string;
+  name: string;
+  state: "held" | "encountered"; // 持有 / 仅接触过
+  acquiredAt?: string;
+  notes?: string;
+}
+
+export interface MythicEntityEntry {
+  id: string;
+  name: string;
+  encounteredAt?: string;
+  notes?: string;
+}
+
 export interface CharacterSheet {
   name: string;
-  occupation: string; // 职业 (魔术研究员, 基金会特工, 考古学者等)
-  gender: string;     // 性别
-  age: number;        // 年龄
+  occupation: string;        // 职业（CoC 7e 标准模板 id 对应的中文名；阶段 6 起从下拉绑定）
+  /**
+   * 角色身份：自由文本，承担"角色扮演中的身份描述"。
+   * 与 occupation 协同（例：occupation="会计师", identity="时钟塔学院政法科专员"）。
+   * 仅供 LLM 叙事 / 世界观融合使用，不参与规则数值计算。
+   */
+  identity?: string;
+  /**
+   * 国籍：自由文本，CoC 7e 标准角色卡 Nationality。
+   * 仅供叙事 / NPC 反应 / 语言选择参考，不参与规则数值计算。
+   */
+  nationality?: string;
+  /**
+   * 居住地：自由文本，CoC 7e 标准角色卡 Residence（城市 / 街区粒度）。
+   * 供 LLM 在开场叙事 / 模组地点联动 / 旅途逻辑时使用，不参与规则数值计算。
+   */
+  residence?: string;
+  /**
+   * 母语：自由文本（如"汉语"、"英语"、"日语"）。
+   * 7e 规则上是技能，但技能值 = EDU 由派生函数 motherTongueValue 现算，不写入 skills 表；
+   * 此字段只承载"语言名称"作为叙事属性。
+   */
+  motherTongue?: string;
+  /**
+   * 信用评级 0–99：CoC 7e 标准角色卡 Credit Rating。
+   * 7e 规则上是技能，但语义偏"资产 / 现金 / 消费等级"派生、不通过经验阶段成长，
+   * 因此本项目移到基本信息层，不写入 skills 表。
+   */
+  creditRating?: number;
+  gender: string;
+  age: number;
   background: "1920s" | "modern";
   attributes: CharacterAttributes;
   skills: CharacterSkills;
@@ -35,6 +106,11 @@ export interface CharacterSheet {
   maxSan: number;
   maxSanLimit: number; // 99 - 克苏鲁神话
   mythos: number; // 克苏鲁神话技能
+  /**
+   * 神秘接触档案。创建期为 undefined / 空对象都合法；
+   * KP 通过 sanitySkillGain 等字段按 CoC 7e 规则在游戏过程中追加。
+   */
+  mythicEncounters?: MythicEncounters;
   avatar?: string; // 角色头像 (Base64 data URI)
   backgroundStory?: string; // 调查员背景介绍/生平概述
   /**

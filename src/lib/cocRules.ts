@@ -130,6 +130,27 @@ export function deriveCombatStats(sheet: CharacterSheet): CombatDerived {
 }
 
 /**
+ * 闪避基础值 = floor(DEX / 2)。
+ *
+ * 在 CoC 7e 规则里闪避是技能（可通过经验成长），但本项目把它当作派生战斗值现算，
+ * 不写入 skills 表。如果未来要支持经验阶段加点，再改成"基础值 + 加点"的存量字段。
+ */
+export function dodgeOf(dex: number): number {
+  return Math.max(0, Math.floor((dex || 0) / 2));
+}
+
+/**
+ * 母语技能值 = EDU。
+ *
+ * 在 CoC 7e 规则里 Own Language 也是技能（基础值 = EDU，可通过经验成长），但本项目
+ * 把"语言名称"作为叙事字段（CharacterSheet.motherTongue）、把"技能值"派生现算，
+ * 不写入 skills 表。
+ */
+export function motherTongueValue(edu: number): number {
+  return Math.max(0, Math.floor(edu || 0));
+}
+
+/**
  * 把 DB 拼到一个伤害公式后面。空伤害（"" / "0" / 等价 0）时返回原串，
  * 让上游照常按"无伤害"处理。
  *
