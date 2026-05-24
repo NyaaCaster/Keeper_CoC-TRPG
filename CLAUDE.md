@@ -2,6 +2,8 @@
 
 基于 LLM 的克苏鲁的呼唤 (CoC 7th) TRPG 跑团应用，由 AI 扮演守密人 (Keeper)，集成型月与 SCP 世界观，采用 Vite + React 19 前端 + Express 后端的全栈一体化部署。
 
+> 架构总览：开会话先读 `.docs/.work/PROJECT-OVERVIEW.md`，里面有 LLM 介入方式、KeeperResponse 输出契约、前端硬规则与 LLM 的协同机制等架构级理解，节省重启工作的摸盘开销。
+
 ## 交流语言
 
 默认始终以**简体中文**与用户交流，除非用户在某次对话中明确要求改用其他语言。
@@ -65,4 +67,5 @@
 - 始终用 `git add <file>` 明确指定文件，**禁止** `git add -A` / `git add .`。
 - 严禁：force push、`--amend` 已推送的 commit、`--no-verify`、修改 `git config`、`reset --hard` 等高破坏性操作（除非用户显式同意）。
 - 仓库当前可能尚未初始化 git；遇到 `not a git repository` 时先停下询问，不要擅自 `git init`。
+- **每次提交/推送前必须同步项目快照**：检查本次改动是否影响架构、调用链路、`KeeperResponse` 输出契约、关键文件地图、必读规范文档清单或常见坑等内容；若有影响，必须同步更新 `.docs/.work/PROJECT-OVERVIEW.md` 后将其与代码改动一并 commit。纯文档微调、注释、UI 文案 / 配色之外的视觉微调可豁免，但需在提交对话中显式说明"无需同步快照"。
 - 详细规则见 `.claude/skills/commit-push/SKILL.md`。
