@@ -24,7 +24,7 @@
 
 ```yaml
 schema_version: 1                # 整数,破坏性变更才 +1
-meta: { ... }                    # 模组身份与展示信息
+meta: { ... }                    # 模组身份与展示信息(含 recommended_occupations)
 hook: { ... }                    # 楔子与起点
 scenes: [ ... ]                  # 场景图(节点)
 npcs: [ ... ]                    # NPC 表
@@ -34,6 +34,8 @@ flags: [ ... ]                   # 进度旗帜
 endings: [ ... ]                 # 结局表
 global_freedom: { ... }          # 整本模组通用的 freedom 语料
 global_forbidden: [ ... ]        # 整本模组通用的红线
+narrative_style: { ... }         # 选填:模组叙事文风指导(§14)
+preset_investigators: [ ... ]    # 选填:模组自带预设调查员(§15)
 ```
 
 ---
@@ -59,6 +61,10 @@ meta:
     给玩家看的一句话简介,显示在模组选择卡片上。不剧透关键诡计。
   author_credits_md: |
     原作者 / 中文化译者 / 本项目转写者;尊重原作版权。
+  recommended_occupations:               # ★ 必填,≥ 1 项
+    - 私家侦探
+    - 警探
+    - 记者
 ```
 
 **校验**:
@@ -66,6 +72,7 @@ meta:
 - `cover` 文件必须存在(若声明)
 - `era` ∈ 枚举或 `other`+`era_note`
 - `start_time.game_day >= 1`,`hour` 必须 `^\d{2}:\d{2}$` 格式且 24h 合法
+- `recommended_occupations` 必填且 ≥ 1 项;每项必须是中文职业名或 occupation id,且能在 `src/data/cocOccupations.ts` 对应 `meta.era` 的表里命中(`era="other"` 时跳过命中校验)
 
 ---
 
@@ -685,7 +692,82 @@ narrative_style:
 
 ---
 
-## 15 · 后续工作锚点
+## 15 · `preset_investigators`:模组自带预设调查员(选填)
+
+> 顶层可选数组。Phase 3 剧本模式 step 2 优先展示这一组,玩家可选其一直接进游戏;无则回退到"按 era + recommended_occupations 随机生成预设"的兜底路径。
+>
+> 设计意图:克系经典本(尤其官方 pre-gens)往往会附完整 PC,玩家在剧本模式下应直接选这些**已锁定数值**的角色,而非走"模板 + 兴趣点"的随机流程。
+
+### 15.1 字段结构
+
+```yaml
+preset_investigators:
+  - id: pc.julia-meridian              # 全模组唯一,kebab-case,以 "pc." 起头
+    name: 朱莉娅·梅里迪安
+    age: 32
+    gender: 女                          # 选填
+    occupation: 私家侦探                # 中文名或 id 任一,必须在 era 表里命中
+    attributes:                         # 8 大属性,值 ∈ [15, 90](edu 允许到 99)
+      str: 60
+      con: 60
+      siz: 55
+      dex: 65
+      app: 55
+      int: 75
+      pow: 60
+      edu: 70
+    sanity: 60                          # 当前 SAN,创角默认 = pow * 5,RAW 上限 = pow * 5
+    luck: 55                            # 0~99
+    credit_rating: 40                   # 0~99,职业模板的 CR 范围内
+    skills:                             # 作者刻意定值的技能;键为中文技能名,值 ∈ [0, 90]
+      侦查: 70
+      心理学: 60
+      聆听: 50
+    overview_md: |                      # 简介,显示在选择卡上
+      久经街头的女侦探,见过的案子比警局里好多老警探都多。
+    background_story_md: |              # 完整背景,选填
+      在波士顿做了十年案子,最近搬到本市。
+    portrait: assets/preset/julia.jpg   # 选填,头像/立绘,相对模组目录
+    birthplace: 波士顿                  # 选填
+    residence: 本市                     # 选填
+    weapons:                            # 选填,武器 id 列表
+      - revolver-38
+    cash_balance: 120                   # 选填,起始现金;不填则按 CR 派生
+```
+
+### 15.2 校验规则(对齐 CoC 7e 创角硬规则)
+
+- `id` 全模组唯一(与其它 preset 不重)
+- `attributes.{str,con,siz,dex,app,int,pow}` ∈ `[15, 90]`,`attributes.edu` ∈ `[15, 99]`
+- `skills.<key>` 的值 ∈ `[0, 90]`(RAW 创角期 90 上限)
+- `skills.<key>` 的键如果是 kebab-id 形式,必须能在 `src/data/cocSkills.ts SKILL_REGISTRY_ALL` 命中(中文技能名跳过命中校验,因为允许"潜行(滑行)"等支线写法)
+- `occupation` 必须能在 `src/data/cocOccupations.ts` 对应 `meta.era` 的表里命中(`era="other"` 时跳过命中校验)
+- `sanity` ≤ `pow * 5`(7e RAW 上限)
+- `luck` ∈ `[0, 99]`
+- `credit_rating` ∈ `[0, 99]`
+- `weapons[i]` 必须能在 `src/data/cocWeapons.ts WEAPON_REGISTRY_ALL` 命中,且 `era === "any"` 或匹配 `meta.era`
+- `portrait` 文件必须存在(若声明)
+
+### 15.3 转写硬规则:外部模组导入时必须落卡
+
+> ⚠️ **从外部 PDF / docx / 翻译稿导入模组建立模组数据时,以下两项必须一并完成,不允许只填半边。**
+
+| 字段 | 是否必填 | 兜底逻辑 |
+|---|---|---|
+| `meta.recommended_occupations` | **必填**(≥ 1 项) | 无 — schema 强制校验 |
+| `preset_investigators` | **原作有 pre-gens 时必须落卡;无 pre-gens 时可省略** | 省略 → Phase 3 创角期按 era + recommended_occupations 走随机预设流 |
+
+判定原则:
+
+- 原作 PDF 末尾若有"调查员卡(Investigator Sheets)"、"预生成角色(Pre-generated Characters)"或同等附录 → **逐张落 `preset_investigators`**,数值原样不打折
+- 原作只有"建议职业列表"或一两段"推荐扮演什么样的人"提示 → 只落 `recommended_occupations`,`preset_investigators` 留空
+- 原作什么都没说 → 转写者按模组开局钩子(委托人 / 案件性质 / 时代背景)推断 3~8 个合理职业,写进 `recommended_occupations`;`preset_investigators` 留空
+
+`recommended_occupations` 的兜底取舍:宁少勿杂。委托型开局优先调查/执法/媒体线;校园背景允许辅以教授/医师/神秘学家。
+
+---
+
+## 16 · 后续工作锚点
 
 定稿即结束 Phase 1.1。下一步 Phase 1.2:
 

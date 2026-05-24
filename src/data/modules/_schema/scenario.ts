@@ -82,6 +82,12 @@ export interface ScenarioMeta {
   /** 显示在模组选择卡片上的简介,不剧透关键诡计 */
   synopsisMd: Markdown;
   authorCreditsMd?: Markdown;
+  /**
+   * 推荐 PC 职业(模组转写期由作者填好,Phase 3 创角阶段在剧本模式下显示给玩家)。
+   * 必填,≥1 项。每项必须能在 src/data/cocOccupations.ts 对应 era 表里命中
+   * (中文名或 id 任一即可,validator 会验证)。
+   */
+  recommendedOccupations: string[];
 }
 
 // ============================================================================
@@ -543,6 +549,80 @@ export interface NarrativeStyle {
 }
 
 // ============================================================================
+// §12 · preset_investigators:模组自带预设 PC(选填)
+// ============================================================================
+
+/**
+ * CoC 7e 八大基础属性(数值 0~100,创角期通常 ∈ [15, 90],edu 上限 99)。
+ * 与 src/types.ts 的 CharacterSheet.attributes 同口径,但只在剧本模式下作为
+ * 模组作者锁定数值的渠道。
+ */
+export interface PresetInvestigatorAttributes {
+  str: number;
+  con: number;
+  siz: number;
+  dex: number;
+  app: number;
+  int: number;
+  pow: number;
+  edu: number;
+}
+
+/**
+ * 模组自带的预设调查员卡。
+ *
+ * 设计意图:克系经典本(尤其官方 pre-gens)往往会附完整 PC,玩家在剧本模式下
+ * 应直接选这些已锁定数值的角色,而非走"模板 + 兴趣点"的随机流程。
+ *
+ * 字段镜像 CharacterSheet 的核心数值(详见 .docs/scenario-schema.md §12 与
+ * src/types.ts CharacterSheet),validator 会按 CoC 7e 创角硬规则校验:
+ *   - attributes.* ∈ [15, 90](edu 允许到 99)
+ *   - skills 每条值 ∈ [0, 90](RAW 创角期 90 上限)
+ *   - occupation 必须能在 src/data/cocOccupations.ts 对应 meta.era 命中
+ *
+ * 模组若不附预设 PC,直接省略 Scenario.presetInvestigators 字段。
+ */
+export interface PresetInvestigator {
+  /** 全模组唯一,kebab-case,如 "pc.julia-meridian" */
+  id: string;
+  name: string;
+  age: number;
+  gender?: string;
+  /** 中文职业名或 id,必须能在 cocOccupations.ts 对应 era 命中 */
+  occupation: string;
+  attributes: PresetInvestigatorAttributes;
+  /** 当前理智值(创角默认 = pow * 5) */
+  sanity: number;
+  /** 幸运值,0~99 */
+  luck: number;
+  /** 信用 0~99 */
+  creditRating: number;
+  /**
+   * 作者刻意定值的技能;键为中文技能名,值为 0~90。
+   * 留空 / 缺漏的技能在创角时按职业模板兜底,**不会**自动加兴趣点。
+   */
+  skills: Record<string, number>;
+  /** 简介,显示在选择卡上 */
+  overviewMd: Markdown;
+  /** 完整背景故事,选填 */
+  backgroundStoryMd?: Markdown;
+  /** 头像/立绘,相对模组目录(如 "assets/preset/julia.jpg") */
+  portrait?: AssetPath;
+  /** 出生地 / 居住地,选填 */
+  birthplace?: string;
+  residence?: string;
+  /**
+   * 预置武器 id 列表(必须在 src/data/cocWeapons.ts WEAPON_REGISTRY_ALL 命中,
+   * 且 era === "any" 或匹配 meta.era)。选填。
+   */
+  weapons?: string[];
+  /**
+   * 起始现金,选填。不填则由 startingCashOf(creditRating, era) 在创角期派生。
+   */
+  cashBalance?: number;
+}
+
+// ============================================================================
 // 顶层 Scenario(单一事实源)
 // ============================================================================
 
@@ -563,5 +643,11 @@ export interface Scenario {
    * 校验器只对 sampleParagraphMd 长度做软警告,其余字段全是软约束。
    */
   narrativeStyle?: NarrativeStyle;
+  /**
+   * 模组自带预设 PC(选填)。
+   * 有则在 Phase 3 剧本模式 step 2 优先展示这一组,玩家可选其一直接进游戏;
+   * 无则回退到"按 era + recommendedOccupations 随机生成预设"的兜底路径。
+   */
+  presetInvestigators?: PresetInvestigator[];
 }
 

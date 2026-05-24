@@ -71,6 +71,7 @@ meta:
   tags: [演示]
   start_time: { game_day: 1, hour: "12:00" }
   synopsis_md: 用于校验器测试的最小模组。
+  recommended_occupations: [私家侦探]
 
 hook:
   start_scene: scene.room
@@ -469,6 +470,176 @@ test("narrative_style.freedom.sample_paragraph_md 不是字符串时报错", () 
     freedom: { sample_paragraph_md: 12345 },
   };
   expectFail(validateScenario(raw), "sample_paragraph_md");
+});
+
+// ---------------------------------------------------------------------------
+// §12 recommended_occupations + preset_investigators
+// ---------------------------------------------------------------------------
+
+test("meta.recommended_occupations 缺失必报错", () => {
+  const raw = cloneMinimal();
+  delete (raw["meta"] as Record<string, unknown>)["recommended_occupations"];
+  expectFail(validateScenario(raw), "recommended_occupations");
+});
+
+test("meta.recommended_occupations 名字不在 era 表里必报错", () => {
+  const raw = cloneMinimal();
+  (raw["meta"] as Record<string, unknown>)["recommended_occupations"] = ["不存在的职业"];
+  expectFail(validateScenario(raw), "recommended_occupations");
+});
+
+test("meta.recommended_occupations 用 occupation id 也能命中", () => {
+  const raw = cloneMinimal();
+  (raw["meta"] as Record<string, unknown>)["recommended_occupations"] = [
+    "private-investigator-modern",
+  ];
+  const result = validateScenario(raw);
+  expectOk(result);
+});
+
+test("preset_investigators 缺省时通过", () => {
+  const raw = cloneMinimal();
+  const result = validateScenario(raw);
+  expectOk(result);
+  assert(
+    result.scenario.presetInvestigators === undefined,
+    "presetInvestigators 缺省应为 undefined",
+  );
+});
+
+test("preset_investigators 完整结构通过且字段被解析为 camelCase", () => {
+  const raw = cloneMinimal();
+  raw["preset_investigators"] = [
+    {
+      id: "pc.demo",
+      name: "演示调查员",
+      age: 32,
+      gender: "女",
+      occupation: "私家侦探",
+      attributes: {
+        str: 60, con: 60, siz: 55, dex: 65, app: 55,
+        int: 75, pow: 60, edu: 70,
+      },
+      sanity: 60,
+      luck: 55,
+      credit_rating: 40,
+      skills: { "侦查": 70, "心理学": 60 },
+      overview_md: "久经街头的女侦探。",
+      background_story_md: "在波士顿做了十年案子。",
+      cash_balance: 120,
+    },
+  ];
+  const result = validateScenario(raw);
+  expectOk(result);
+  assert(
+    Array.isArray(result.scenario.presetInvestigators) &&
+      result.scenario.presetInvestigators.length === 1,
+    "presetInvestigators 长度应为 1",
+  );
+  const pc = result.scenario.presetInvestigators![0];
+  assert(pc.id === "pc.demo", "id 应原样保留");
+  assert(pc.creditRating === 40, "credit_rating 应转为 creditRating");
+  assert(pc.backgroundStoryMd?.includes("十年"), "background_story_md 应转为 backgroundStoryMd");
+  assert(pc.cashBalance === 120, "cash_balance 应转为 cashBalance");
+});
+
+test("preset_investigators.attributes 越界报错", () => {
+  const raw = cloneMinimal();
+  raw["preset_investigators"] = [
+    {
+      id: "pc.bad-attr",
+      name: "数值越界",
+      age: 30,
+      occupation: "私家侦探",
+      attributes: {
+        str: 5, con: 60, siz: 55, dex: 65, app: 55,
+        int: 75, pow: 60, edu: 70,
+      },
+      sanity: 60, luck: 55, credit_rating: 40,
+      skills: {},
+      overview_md: "测试越界",
+    },
+  ];
+  expectFail(validateScenario(raw), "attributes.str");
+});
+
+test("preset_investigators.skills 数值越界报错", () => {
+  const raw = cloneMinimal();
+  raw["preset_investigators"] = [
+    {
+      id: "pc.bad-skill",
+      name: "技能越界",
+      age: 30,
+      occupation: "私家侦探",
+      attributes: {
+        str: 50, con: 60, siz: 55, dex: 65, app: 55,
+        int: 75, pow: 60, edu: 70,
+      },
+      sanity: 60, luck: 55, credit_rating: 40,
+      skills: { "侦查": 95 },
+      overview_md: "测试技能越界",
+    },
+  ];
+  expectFail(validateScenario(raw), "skills.侦查");
+});
+
+test("preset_investigators.occupation 不在 era 表里报错", () => {
+  const raw = cloneMinimal();
+  raw["preset_investigators"] = [
+    {
+      id: "pc.bad-occ",
+      name: "职业越界",
+      age: 30,
+      occupation: "完全不存在的职业",
+      attributes: {
+        str: 50, con: 60, siz: 55, dex: 65, app: 55,
+        int: 75, pow: 60, edu: 70,
+      },
+      sanity: 60, luck: 55, credit_rating: 40,
+      skills: {},
+      overview_md: "测试职业不存在",
+    },
+  ];
+  expectFail(validateScenario(raw), "occupation");
+});
+
+test("preset_investigators.sanity 超过 pow*5 报错", () => {
+  const raw = cloneMinimal();
+  raw["preset_investigators"] = [
+    {
+      id: "pc.bad-san",
+      name: "SAN 越界",
+      age: 30,
+      occupation: "私家侦探",
+      attributes: {
+        str: 50, con: 60, siz: 55, dex: 65, app: 55,
+        int: 75, pow: 15, edu: 70,
+      },
+      sanity: 99, luck: 55, credit_rating: 40,
+      skills: {},
+      overview_md: "测试 SAN 越界",
+    },
+  ];
+  expectFail(validateScenario(raw), "sanity");
+});
+
+test("preset_investigators id 重复报错", () => {
+  const raw = cloneMinimal();
+  const sample = {
+    id: "pc.same",
+    name: "甲",
+    age: 30,
+    occupation: "私家侦探",
+    attributes: {
+      str: 50, con: 60, siz: 55, dex: 65, app: 55,
+      int: 75, pow: 60, edu: 70,
+    },
+    sanity: 60, luck: 55, credit_rating: 40,
+    skills: {},
+    overview_md: "重复 id 测试",
+  };
+  raw["preset_investigators"] = [sample, { ...sample, name: "乙" }];
+  expectFail(validateScenario(raw), "preset_investigators");
 });
 
 // ---------------------------------------------------------------------------

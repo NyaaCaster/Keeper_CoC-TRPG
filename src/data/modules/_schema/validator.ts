@@ -24,6 +24,8 @@
  */
 
 import { findSkill } from "../../cocSkills";
+import { findOccupation, getOccupations } from "../../cocOccupations";
+import { findWeapon } from "../../cocWeapons";
 import { rollDiceFormula } from "../../../lib/diceFormula";
 import type {
   Clue,
@@ -44,6 +46,8 @@ import type {
   NpcCombat,
   NpcRole,
   NpcStats,
+  PresetInvestigator,
+  PresetInvestigatorAttributes,
   Scenario,
   ScenarioDifficultyTier,
   ScenarioEndKind,
@@ -121,6 +125,11 @@ export function validateScenario(raw: unknown): ValidationResult {
     push,
     warn,
   );
+  const presetInvestigators = parsePresetInvestigators(
+    raw["preset_investigators"],
+    "preset_investigators",
+    push,
+  );
 
   // 早退:任一顶层节点彻底解析失败就不再做引用完整性
   if (!meta || !hook || !scenes || !npcs || !clues || !timeline || !flags || !endings) {
@@ -129,7 +138,7 @@ export function validateScenario(raw: unknown): ValidationResult {
 
   // 跨节点完整性
   validateReferences(
-    { meta, hook, scenes, npcs, clues, timeline, flags, endings },
+    { meta, hook, scenes, npcs, clues, timeline, flags, endings, presetInvestigators },
     push,
     warn,
   );
@@ -151,6 +160,7 @@ export function validateScenario(raw: unknown): ValidationResult {
     globalFreedom,
     globalForbidden,
     narrativeStyle,
+    presetInvestigators,
   };
   return { ok: true, scenario, warnings };
 }
@@ -304,6 +314,20 @@ function parseMeta(value: unknown, path: string, push: Issue): ScenarioMeta | nu
   const authorCreditsMd =
     typeof value["author_credits_md"] === "string" ? value["author_credits_md"] : undefined;
 
+  const recommendedOccupationsRaw = parseStringArray(
+    value["recommended_occupations"],
+    `${path}.recommended_occupations`,
+    push,
+    /*optional*/ false,
+  );
+  const recommendedOccupations = recommendedOccupationsRaw ?? [];
+  if (recommendedOccupations.length === 0) {
+    push(
+      `${path}.recommended_occupations`,
+      `必填,至少 1 项;每项必须能在 cocOccupations.ts 对应 era 表里命中(中文名或 id)。`,
+    );
+  }
+
   return {
     id,
     title,
@@ -318,6 +342,7 @@ function parseMeta(value: unknown, path: string, push: Issue): ScenarioMeta | nu
     startTime,
     synopsisMd,
     authorCreditsMd,
+    recommendedOccupations,
   };
 }
 
@@ -1501,6 +1526,146 @@ function parseNarrativeStyle(
   return out;
 }
 
+// ----------------------------------------------------------------------------
+// §12 preset_investigators:模组自带预设 PC
+// ----------------------------------------------------------------------------
+
+const PRESET_ATTR_KEYS: (keyof PresetInvestigatorAttributes)[] = [
+  "str",
+  "con",
+  "siz",
+  "dex",
+  "app",
+  "int",
+  "pow",
+  "edu",
+];
+
+function parsePresetInvestigators(
+  value: unknown,
+  path: string,
+  push: Issue,
+): PresetInvestigator[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  const arr = asArray(value);
+  if (!arr) {
+    push(path, `必须是数组(可省略)。`);
+    return undefined;
+  }
+  const out: PresetInvestigator[] = [];
+  arr.forEach((item, idx) => {
+    const pc = parsePresetInvestigator(item, `${path}[${idx}]`, push);
+    if (pc) out.push(pc);
+  });
+  return out;
+}
+
+function parsePresetInvestigator(
+  value: unknown,
+  path: string,
+  push: Issue,
+): PresetInvestigator | null {
+  if (!isPlainObject(value)) {
+    push(path, `预设 PC 必须是对象。`);
+    return null;
+  }
+  const id = isNonEmptyString(value["id"]) ? value["id"] : (push(`${path}.id`, `必填,kebab-case 全模组唯一。`), "");
+  const name = isNonEmptyString(value["name"])
+    ? value["name"]
+    : (push(`${path}.name`, `必填且非空。`), "");
+  const age = parseInteger(value["age"], `${path}.age`, push, { min: 1, max: 120 });
+  const gender = typeof value["gender"] === "string" ? value["gender"] : undefined;
+  const occupation = isNonEmptyString(value["occupation"])
+    ? value["occupation"]
+    : (push(`${path}.occupation`, `必填,中文职业名或 occupation id。`), "");
+
+  // attributes:全部必填,创角期 [15, 90](edu 上限 99)
+  const attrsRaw = value["attributes"];
+  let attributes: PresetInvestigatorAttributes = {
+    str: 0, con: 0, siz: 0, dex: 0, app: 0, int: 0, pow: 0, edu: 0,
+  };
+  if (!isPlainObject(attrsRaw)) {
+    push(`${path}.attributes`, `必须是对象,八项基础属性全部必填。`);
+  } else {
+    PRESET_ATTR_KEYS.forEach((key) => {
+      const max = key === "edu" ? 99 : 90;
+      const v = parseInteger(attrsRaw[key], `${path}.attributes.${key}`, push, {
+        min: 15,
+        max,
+      });
+      attributes[key] = v;
+    });
+  }
+
+  // sanity / luck / creditRating
+  const sanity = parseInteger(value["sanity"], `${path}.sanity`, push, { min: 0, max: 99 });
+  const luck = parseInteger(value["luck"], `${path}.luck`, push, { min: 0, max: 99 });
+  const creditRating = parseInteger(
+    value["credit_rating"],
+    `${path}.credit_rating`,
+    push,
+    { min: 0, max: 99 },
+  );
+
+  // skills:Record<string, number>,值 ∈ [0, 90]
+  const skillsRaw = value["skills"];
+  const skills: Record<string, number> = {};
+  if (skillsRaw === undefined || skillsRaw === null) {
+    push(`${path}.skills`, `必填(可空对象 {}),作者刻意定值的技能;留空走职业模板兜底。`);
+  } else if (!isPlainObject(skillsRaw)) {
+    push(`${path}.skills`, `必须是 { 技能名: 数值 } 对象。`);
+  } else {
+    for (const [skillName, sv] of Object.entries(skillsRaw)) {
+      if (typeof sv !== "number" || !Number.isInteger(sv)) {
+        push(`${path}.skills.${skillName}`, `必须是整数,收到 ${JSON.stringify(sv)}。`);
+        continue;
+      }
+      if (sv < 0 || sv > 90) {
+        push(`${path}.skills.${skillName}`, `RAW 创角期技能值必须 ∈ [0, 90],收到 ${sv}。`);
+      }
+      skills[skillName] = sv;
+    }
+  }
+
+  const overviewMd = isNonEmptyString(value["overview_md"])
+    ? value["overview_md"]
+    : (push(`${path}.overview_md`, `必填,显示在选择卡上的简介。`), "");
+  const backgroundStoryMd =
+    typeof value["background_story_md"] === "string" ? value["background_story_md"] : undefined;
+  const portrait = typeof value["portrait"] === "string" ? value["portrait"] : undefined;
+  const birthplace = typeof value["birthplace"] === "string" ? value["birthplace"] : undefined;
+  const residence = typeof value["residence"] === "string" ? value["residence"] : undefined;
+
+  const weapons = value["weapons"] === undefined
+    ? undefined
+    : parseStringArray(value["weapons"], `${path}.weapons`, push, /*optional*/ true);
+
+  let cashBalance: number | undefined;
+  if (value["cash_balance"] !== undefined && value["cash_balance"] !== null) {
+    cashBalance = parseInteger(value["cash_balance"], `${path}.cash_balance`, push, { min: 0 });
+  }
+
+  return {
+    id,
+    name,
+    age,
+    gender,
+    occupation,
+    attributes,
+    sanity,
+    luck,
+    creditRating,
+    skills,
+    overviewMd,
+    backgroundStoryMd,
+    portrait,
+    birthplace,
+    residence,
+    weapons,
+    cashBalance,
+  };
+}
+
 // ============================================================================
 // 跨节点引用与可达性
 // ============================================================================
@@ -1514,6 +1679,7 @@ interface CollectedScenario {
   timeline: TimelineEvent[];
   flags: Flag[];
   endings: Ending[];
+  presetInvestigators?: PresetInvestigator[];
 }
 
 function validateReferences(s: CollectedScenario, push: Issue, warn: Issue) {
@@ -1719,6 +1885,84 @@ function validateReferences(s: CollectedScenario, push: Issue, warn: Issue) {
       }
     });
   });
+
+  // ---- meta.recommended_occupations:必须能在对应 era 表里命中 ----
+  // (era === "other" 时不做命中检查,作者自由声明)
+  if (s.meta.era === "1920s" || s.meta.era === "modern") {
+    const eraOccs = getOccupations(s.meta.era);
+    s.meta.recommendedOccupations.forEach((occ, i) => {
+      const hit =
+        findOccupation(s.meta.era as "1920s" | "modern", occ) ??
+        eraOccs.find((o) => o.nameZh === occ);
+      if (!hit) {
+        push(
+          `meta.recommended_occupations[${i}]`,
+          `"${occ}" 不在 cocOccupations.ts 的 ${s.meta.era} 表里(中文名或 id 任一即可)。`,
+        );
+      }
+    });
+  }
+
+  // ---- preset_investigators ----
+  if (s.presetInvestigators && s.presetInvestigators.length > 0) {
+    // id 全模组唯一
+    checkUniqueIds(
+      s.presetInvestigators.map((p) => p.id),
+      "preset_investigators",
+      push,
+    );
+    // 每张卡:occupation 必须能命中 era;weapons 必须命中且 era 兼容
+    s.presetInvestigators.forEach((pc, i) => {
+      const pp = `preset_investigators[${i}]`;
+      // occupation
+      if (s.meta.era === "1920s" || s.meta.era === "modern") {
+        const eraOccs = getOccupations(s.meta.era);
+        const hit =
+          findOccupation(s.meta.era as "1920s" | "modern", pc.occupation) ??
+          eraOccs.find((o) => o.nameZh === pc.occupation);
+        if (!hit) {
+          push(
+            `${pp}.occupation`,
+            `"${pc.occupation}" 不在 cocOccupations.ts 的 ${s.meta.era} 表里。`,
+          );
+        }
+      }
+      // skills:键必须是合法技能(顶级 id 或顶级中文名;分支可写 "父类(分支名)" 形式,
+      // 这里只校验顶级,分支命名约定较灵活,避免误报)
+      Object.keys(pc.skills).forEach((skillName) => {
+        const byId = findSkill(skillName);
+        // 兼容中文写法:在 SKILL_REGISTRY_ALL 里查 nameZh / 子分支父类的 nameZh
+        // 简化:直接放过中文键(分支命名"父类(分支)"格式无统一,留给运行时落卡时再校验)
+        if (!byId && /^[a-z0-9-]+$/.test(skillName)) {
+          push(
+            `${pp}.skills.${skillName}`,
+            `id 形式 "${skillName}" 不在 SKILL_REGISTRY_ALL 中(允许中文名,但 kebab id 必须命中)。`,
+          );
+        }
+      });
+      // weapons
+      pc.weapons?.forEach((wid, wi) => {
+        const w = findWeapon(wid);
+        if (!w) {
+          push(`${pp}.weapons[${wi}]`, `"${wid}" 不在 cocWeapons.ts 中。`);
+          return;
+        }
+        if (w.era !== "any" && w.era !== s.meta.era) {
+          push(
+            `${pp}.weapons[${wi}]`,
+            `武器 "${wid}" era=${w.era},与模组 era=${s.meta.era} 不兼容。`,
+          );
+        }
+      });
+      // 派生数值合理性软检查:sanity ≤ pow * 5(7e RAW,允许已损耗后低于上限)
+      if (pc.sanity > pc.attributes.pow * 5) {
+        push(
+          `${pp}.sanity`,
+          `sanity (${pc.sanity}) 超过 pow*5 (${pc.attributes.pow * 5});7e 创角期 SAN 上限 = pow*5。`,
+        );
+      }
+    });
+  }
 }
 
 function checkUniqueIds(ids: string[], path: string, push: Issue) {

@@ -144,14 +144,14 @@ src/data/
   ├─ cocOccupations.ts         ← 职业模板 + coreSkills 五种 kind 表达
   ├─ cocWeapons.ts             ← 武器结构化条目
   ├─ presets.ts                ← 18 张预设调查员
-  └─ modules/                  ← 「基于剧本游戏模式」模组数据基座（Phase 1 已落）
+  └─ modules/                  ← 「基于剧本游戏模式」模组数据基座（Phase 1 已落,Phase 3 schema 已扩）
       ├─ _schema/
-      │   ├─ scenario.ts       ← Scenario TS SSOT(camelCase；详见 .docs/scenario-schema.md）
-      │   └─ validator.ts      ← yaml(snake_case)→TS(camelCase) + 引用完整性 + BFS + 结局可达性
+      │   ├─ scenario.ts       ← Scenario TS SSOT(camelCase；含 §12 PresetInvestigator + §14 narrative_style；详见 .docs/scenario-schema.md）
+      │   └─ validator.ts      ← yaml(snake_case)→TS(camelCase) + 引用完整性 + BFS + 结局可达性 + recommendedOccupations/presetInvestigators 跨表校验
       └─ <module-id>/          ← 各模组目录（meta.id 必须等于目录名；Phase 1.4 起填入）
 scripts/
   ├─ validate-modules.ts       ← 扫描模组、调 validator、检查资产存在性；prebuild 钩子
-  └─ test-validator.ts         ← validator 14 用例自测（最小样例 + 12 个故意失败）
+  └─ test-validator.ts         ← validator 33 用例自测（最小样例 + 故意失败 + narrative_style + recommended_occupations + preset_investigators）
 .docs/                         ← 项目内规范与决策文档(下面单列重要的几篇)
 .docs/.work/                   ← 给 Claude Code 看的工作简报(本文所在地)
 ```
@@ -172,8 +172,9 @@ scripts/
 | 技能表 | `.docs/skill-1920s.md` / `.docs/skill-modern.md` —— 两套时代的标准技能 |
 | 职业表 | `.docs/occupation-list.md` —— 职业模板 + 核心技能 |
 | 测试命令 | `.docs/testing-commands.md` —— `[sys_test]` sentinel 注入投骰/效果骰演练 |
-| 模组 schema | `.docs/scenario-schema.md` —— 「基于剧本游戏模式」frame/freedom/forbidden 三槽 + 全字段语义；schema_version=1 |
+| 模组 schema | `.docs/scenario-schema.md` —— 「基于剧本游戏模式」frame/freedom/forbidden 三槽 + 全字段语义；schema_version=1；§15 是预设调查员 |
 | 模组图像资产 | `.docs/scenario-schema.md` 第 11.1 节 —— 封面 ≤ 120 KB / 800 px,场景 ≤ 200 KB / 1024 px,JPEG q82,单模组累计 ≤ 3 MB |
+| 模组转写硬规则 | `.docs/scenario-schema.md` §15.3 —— 外部导入模组时,`meta.recommended_occupations` 必填、`preset_investigators` 在原作有 pre-gens 时必须落卡 |
 
 ## 常见坑（容易踩、踩了贵）
 
@@ -188,6 +189,7 @@ scripts/
 9. **滚动条统一用 `custom-scrollbar` class**，禁止自写 `::-webkit-scrollbar` 覆写。
 10. **`.docs/keeper-*.json` 是玩家私有模组配置**，被 `.dockerignore` 排除，**不会进镜像**。改完不要 commit 它。
 11. **不要把未压缩的模组图像直接进仓库**。`src/data/modules/<id>/assets/` 里所有图必须按 `.docs/scenario-schema.md` 11.1 节压到上限以内(封面 1.25 MB → 71 KB 是已验证基线)，否则镜像与仓库会被一张图拖肥。
+12. **从外部 PDF/docx 转写模组时,`meta.recommended_occupations` 必填、`preset_investigators` 在原作有 pre-gens 时必须落卡**。判定原则与字段语义见 `.docs/scenario-schema.md` §15.3——不允许"先填一半,后面补"，prebuild 时 schema 校验会拒绝构建。
 
 ## 工作流（与本项目协作的"启动键"）
 
