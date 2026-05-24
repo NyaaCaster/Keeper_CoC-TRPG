@@ -534,6 +534,14 @@ export interface ChatMessage {
     imageUrl?: string;
     savedAsClueId?: string;
   };
+  /**
+   * LLM 调用失败的系统卡专用:为 true 时渲染"重新生成"按钮,
+   * 点击后用 retryHistorySnapshot 中保存的 history 快照 + retryFeatures 重发请求。
+   * 仅 sender === "system" 的错误卡会带这些字段。
+   */
+  retryable?: boolean;
+  retryHistorySnapshot?: ChatMessage[];
+  retryFeatures?: { typemoon: boolean; scp: boolean };
 }
 
 export type LlmProviderKind =

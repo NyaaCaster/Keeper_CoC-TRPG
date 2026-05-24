@@ -70,8 +70,6 @@ export interface ScenarioMeta {
   eraNote?: string;
   /** 主叙事语言,默认 zh-CN */
   language: string;
-  recommendedInvestigators: { min: number; max: number };
-  expectedHours: { min: number; max: number };
   difficulty: ScenarioDifficultyTier;
   /** UI 筛选用 */
   tags: string[];
@@ -83,7 +81,7 @@ export interface ScenarioMeta {
   synopsisMd: Markdown;
   authorCreditsMd?: Markdown;
   /**
-   * 推荐 PC 职业(模组转写期由作者填好,Phase 3 创角阶段在剧本模式下显示给玩家)。
+   * 推荐职业(模组转写期由作者填好,Phase 3 创角阶段在剧本模式下显示给玩家)。
    * 必填,≥1 项。每项必须能在 src/data/cocOccupations.ts 对应 era 表里命中
    * (中文名或 id 任一即可,validator 会验证)。
    */
@@ -587,7 +585,19 @@ export interface PresetInvestigator {
   id: string;
   name: string;
   age: number;
-  gender?: string;
+  /** 必填(剧本预设需完整身份信息,LLM 不允许覆盖) */
+  gender: string;
+  /**
+   * 国籍,必填。CoC 7e 角色卡 Nationality 字段;在剧本模式下由作者锁定,
+   * LLM 不允许覆盖。仅供叙事 / NPC 反应 / 语言选择参考,不参与规则数值。
+   */
+  nationality: string;
+  /**
+   * 角色身份,必填。承担"角色扮演中的身份描述",与 occupation 协同
+   * (例:occupation="医师", identity="温莎学院附属医院驻院神经科医生")。
+   * 仅供 LLM 叙事/世界观融合使用,不参与规则数值。剧本模式下作者锁定,LLM 不覆盖。
+   */
+  identity: string;
   /** 中文职业名或 id,必须能在 cocOccupations.ts 对应 era 命中 */
   occupation: string;
   attributes: PresetInvestigatorAttributes;

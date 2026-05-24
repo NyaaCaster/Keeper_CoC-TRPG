@@ -14,4 +14,6 @@ coverage/
 
 # 模组转写期源材料(页面截图 / 私人 OCR 笔记 / 提取草稿)
 # 仅本地开发期使用,不进仓库;最终产物只有 src/data/modules/<id>/scenario.yaml
-.docs/.work/*-extract/
+# 所有模组的源材料统一放进 .docs/.work/module-source/<scenario-id>-extract/,
+# 整目录排除,新增模组时无需再回来改 .gitignore。
+.docs/.work/module-source/

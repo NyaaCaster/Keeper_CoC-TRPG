@@ -13,6 +13,8 @@ import {
   RollResult,
   KeeperResponse,
   LogEntry,
+  GameMode,
+  ScenarioState,
 } from "./types";
 import CharacterCreator from "./components/CharacterCreator";
 import RollDiceModal from "./components/RollDiceModal";
@@ -79,6 +81,7 @@ import {
   buildScenarioContextBlock,
   buildNarrativeStyleBlock,
   applyScenarioActions,
+  initialScenarioState,
 } from "./lib/scenarioRuntime";
 import type { RollContext as RollContextForScenario } from "./lib/scenarioRuntime";
 import type { Scenario } from "./data/modules/_schema/scenario";
@@ -366,6 +369,7 @@ export default function App() {
   const handleGameStart = (
     chosenChar: CharacterSheet,
     features: { typemoon: boolean; scp: boolean },
+    context: { gameMode: GameMode; scenario?: Scenario },
   ) => {
     // 入口处一次性深拷贝一份「创建期不可变快照」。运行期 setCharacter 不再触碰
     // creationSnapshot 字段；调查员档案 → 下载调查员角色卡 渲染的就是这份原貌。
@@ -377,7 +381,25 @@ export default function App() {
     setCharacter(charWithSnapshot);
     setEnabledFeatures(features);
     setAppMode("game");
-    setCurrentLocation("游戏准备舱 (调查室)");
+
+    // 剧本模式 vs LLM 自由模式的初始化分流
+    const isScenario = context.gameMode === "scenario-based" && context.scenario;
+    let initialScenarioStateForKeeper: ScenarioState | null = null;
+    if (isScenario) {
+      const scenario = context.scenario!;
+      setGameMode("scenario-based");
+      const initState = initialScenarioState(scenario);
+      initialScenarioStateForKeeper = initState;
+      setScenarioState(initState);
+      const startScene = scenario.scenes.find((s) => s.id === scenario.hook.startScene);
+      setCurrentLocation(startScene?.title || scenario.meta.title);
+      setGameModuleName(scenario.meta.title);
+    } else {
+      setGameMode("llm-generated");
+      setScenarioState(null);
+      setCurrentLocation("游戏准备舱 (调查室)");
+      setGameModuleName("克苏鲁的呼唤神秘冒险");
+    }
 
     const newSaveId = `save_${Date.now()}`;
     const newTimestamp = generateTimestamp();
@@ -396,32 +418,20 @@ export default function App() {
     };
 
     setMessages([initialSystemMsg]);
-    triggerKeeperNarration([initialSystemMsg], chosenChar, features);
-  };
-
-  // Perform auto save
-  const doSaveGame = (st: {
-    messages: ChatMessage[];
-    clues: ClueItem[];
-    char: CharacterSheet;
-    loc: string;
-    tS: string;
-    sId: string;
-    mName: string;
-  }) => {
-    if (!st.sId) return;
-    const saveObj: WebGameSave = {
-      id: st.sId,
-      moduleName: st.mName,
-      timestamp: st.tS,
-      lastUpdated: Date.now(),
-      messages: st.messages,
-      character: st.char,
-      clues: st.clues,
-      enabledFeatures,
-      currentLocation: st.loc,
-    };
-    saveGame(saveObj);
+    // 把这次发车应当使用的 scenario 上下文显式传给 triggerKeeperNarration,
+    // 避免读到 setGameMode/setScenarioState 还没提交的旧 state。
+    triggerKeeperNarration(
+      [initialSystemMsg],
+      chosenChar,
+      features,
+      isScenario
+        ? {
+            gameMode: "scenario-based",
+            scenario: context.scenario!,
+            scenarioState: initialScenarioStateForKeeper!,
+          }
+        : { gameMode: "llm-generated", scenario: null, scenarioState: null },
+    );
   };
 
   // Send player speech or automated roll outcome back to keeper
@@ -822,30 +832,32 @@ export default function App() {
     currentHistory: ChatMessage[],
     activeChar: CharacterSheet,
     featuresToUse: { typemoon: boolean; scp: boolean } = enabledFeatures,
+    scenarioOverride?: {
+      gameMode: GameMode;
+      scenario: Scenario | null;
+      scenarioState: ScenarioState | null;
+    },
   ) => {
     setIsKeeperLoading(true);
 
     const startedAt = Date.now();
     const tmEnabled = featuresToUse?.typemoon !== false;
     const scpEnabled = featuresToUse?.scp !== false;
-    addLog({
-      direction: "request",
-      content: `LLM dispatch → ${apiSettings.llm.provider} ${apiSettings.llm.model || "(default)"}`,
-      meta: {
-        provider: apiSettings.llm.provider,
-        model: apiSettings.llm.model,
-        msgCount: currentHistory.length,
-        features: { typemoon: tmEnabled, scp: scpEnabled },
-      },
-    });
+    // 闭包陷阱:刚 setGameMode/setScenarioState 还没提交时,直接读组件 state 仍是旧值。
+    // scenarioOverride 让调用方显式传入此次发车应当使用的 scenario 上下文(创角入场首调时必传)。
+    const effectiveGameMode = scenarioOverride?.gameMode ?? gameMode;
+    const effectiveScenario = scenarioOverride?.scenario ?? activeScenario;
+    const effectiveScenarioState = scenarioOverride?.scenarioState ?? scenarioState;
+    let lastUserText: string | undefined;
+    let lastSystemInstructionLength: number | undefined;
 
     try {
       const dynamicInstructions = await loadDynamicInstructions();
       const scenarioBlock =
-        gameMode === "scenario-based" && activeScenario && scenarioState
+        effectiveGameMode === "scenario-based" && effectiveScenario && effectiveScenarioState
           ? buildScenarioModeBlock() +
-            buildScenarioContextBlock(activeScenario, scenarioState) +
-            buildNarrativeStyleBlock(activeScenario.narrativeStyle)
+            buildScenarioContextBlock(effectiveScenario, effectiveScenarioState) +
+            buildNarrativeStyleBlock(effectiveScenario.narrativeStyle)
           : "";
       const systemInstruction =
         SYSTEM_INSTRUCTION +
@@ -855,6 +867,28 @@ export default function App() {
         buildInventoryBlock(activeChar) +
         scenarioBlock;
       const userText = buildKeeperContext(currentHistory);
+      lastUserText = userText;
+      lastSystemInstructionLength = systemInstruction.length;
+
+      addLog({
+        direction: "request",
+        content: `LLM dispatch → ${apiSettings.llm.provider} ${apiSettings.llm.model || "(default)"}`,
+        meta: {
+          provider: apiSettings.llm.provider,
+          model: apiSettings.llm.model,
+          msgCount: currentHistory.length,
+          features: { typemoon: tmEnabled, scp: scpEnabled },
+          gameMode: effectiveGameMode,
+          scenarioId: effectiveScenario?.meta.id,
+          systemInstructionLength: systemInstruction.length,
+          userTextLength: userText.length,
+          temperature: 0.85,
+          topP: 0.95,
+          schemaPresent: true,
+          systemInstruction,
+          userText,
+        },
+      });
 
       const textOutput = await dispatchLlm({
         apiSettings,
@@ -873,10 +907,23 @@ export default function App() {
         content: `LLM dispatch ← narrative ${(keeperData.narrative || "").length} chars`,
         meta: {
           durationMs: Date.now() - startedAt,
+          provider: apiSettings.llm.provider,
+          model: apiSettings.llm.model,
+          responseLength: textOutput.length,
+          narrativeLength: (keeperData.narrative || "").length,
+          narrativePreview: (keeperData.narrative || "").slice(0, 400),
           hasRollRequest: !!keeperData.rollRequest,
           hasKeeperRoll: !!keeperData.keeperRoll,
           hasSanityCheck: !!keeperData.sanityCheck,
           hasClue: !!keeperData.clue,
+          hasSceneImage: !!keeperData.sceneImage,
+          hasNpcDialogue: !!keeperData.npcDialogue,
+          hasGameState: !!keeperData.gameState,
+          hasScenarioEnd: !!keeperData.scenarioEnd,
+          hasCharacterUpdates: !!keeperData.characterUpdates,
+          hasScenarioActions: !!(keeperData as any).scenarioActions,
+          rawResponse: textOutput,
+          keeperData,
         },
       });
 
@@ -898,21 +945,63 @@ export default function App() {
     } catch (error: any) {
       console.error(error);
       const friendly = humanizeLlmError(error);
+      const stackPreview = typeof error?.stack === "string" ? error.stack.slice(0, 1500) : undefined;
+      const httpStatus = error?.status ?? error?.response?.status;
+      const httpBody = typeof error?.body === "string" ? error.body.slice(0, 4000) : undefined;
       addLog({
         direction: "error",
-        content: `LLM dispatch exception`,
-        meta: { durationMs: Date.now() - startedAt, message: friendly, raw: error?.message },
+        content: `LLM dispatch exception · ${error?.name || "Error"}${httpStatus ? ` HTTP ${httpStatus}` : ""}`,
+        meta: {
+          durationMs: Date.now() - startedAt,
+          provider: apiSettings.llm.provider,
+          model: apiSettings.llm.model,
+          gameMode: effectiveGameMode,
+          scenarioId: effectiveScenario?.meta.id,
+          friendlyMessage: friendly,
+          errorName: error?.name,
+          errorMessage: error?.message,
+          errorStatus: httpStatus,
+          errorBody: httpBody,
+          errorStack: stackPreview,
+          systemInstructionLength: lastSystemInstructionLength,
+          userTextLength: lastUserText?.length,
+          userTextPreview: lastUserText?.slice(0, 1200),
+          msgCount: currentHistory.length,
+          features: { typemoon: tmEnabled, scp: scpEnabled },
+        },
       });
       const errCard: ChatMessage = {
         id: `err_${Date.now()}`,
         sender: "system",
         timestamp: new Date().toLocaleTimeString(),
         text: `【异常低语阻断】⚠️ ${friendly || "连接终点异常失效，请检查您的 API 配置。"}`,
+        retryable: true,
+        retryHistorySnapshot: currentHistory,
+        retryFeatures: { typemoon: tmEnabled, scp: scpEnabled },
       };
       setMessages((prev) => [...prev, errCard]);
     } finally {
       setIsKeeperLoading(false);
     }
+  };
+
+  /**
+   * 重发上次失败的 LLM 调用。
+   * 触发源:用户点击错误卡上的"重新生成"按钮。
+   * - errMsgId: 失败的 system 卡 id,用于把它从 messages 里抹掉
+   * - snapshot: catch 时保存的 history 快照(失败那一刻 LLM 应当看到的对话)
+   * - features: catch 时保存的 typemoon/scp 开关
+   * 防重入:isKeeperLoading 为真时直接 return。
+   */
+  const handleKeeperRetry = (
+    errMsgId: string,
+    snapshot: ChatMessage[],
+    features: { typemoon: boolean; scp: boolean },
+  ) => {
+    if (isKeeperLoading) return;
+    if (!character) return;
+    setMessages((prev) => prev.filter((x) => x.id !== errMsgId));
+    triggerKeeperNarration(snapshot, character, features);
   };
 
   /**
@@ -2456,6 +2545,20 @@ export default function App() {
                       className="w-full max-w-2xl bg-black/60 border border-gray-900 rounded p-3 text-xs text-gray-400 border-l-4 border-l-[#c1a067] font-mono leading-relaxed shadow-inner"
                     >
                       <MarkdownText text={m.text} />
+                      {m.retryable && m.retryHistorySnapshot && m.retryFeatures && (
+                        <div className="mt-2 pt-2 border-t border-gray-800 flex justify-end">
+                          <button
+                            type="button"
+                            disabled={isKeeperLoading}
+                            onClick={() =>
+                              handleKeeperRetry(m.id, m.retryHistorySnapshot!, m.retryFeatures!)
+                            }
+                            className="px-3 py-1 text-[11px] font-mono text-coc-gold border border-coc-gold/40 rounded hover:bg-coc-gold/10 hover:border-coc-gold disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {isKeeperLoading ? "重连中…" : "↻ 重新生成"}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ) : m.sender === "player" ? (
                     /* PLAYER DIALOGUE */

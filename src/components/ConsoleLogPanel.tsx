@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useRef, useEffect } from "react";
-import { X, Terminal, Trash2 } from "lucide-react";
+import React, { useRef, useEffect, useState } from "react";
+import { X, Terminal, Trash2, Download, Copy, Check } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import type { LogEntry } from "../types";
 
@@ -15,8 +15,67 @@ interface ConsoleLogPanelProps {
   onClearLogs: () => void;
 }
 
+/** 把单条 log 序列化成可复制 / 可下载用的 JSON 文本(2 空格缩进,UTC 时间)。 */
+function serializeLog(log: LogEntry): string {
+  return JSON.stringify(
+    {
+      ...log,
+      timestampIso: new Date(log.timestamp).toISOString(),
+    },
+    null,
+    2,
+  );
+}
+
+function buildLogsBundle(logs: LogEntry[]): string {
+  return JSON.stringify(
+    {
+      exportedAt: new Date().toISOString(),
+      app: "keeper-coc-trpg",
+      total: logs.length,
+      entries: logs.map((log) => ({
+        ...log,
+        timestampIso: new Date(log.timestamp).toISOString(),
+      })),
+    },
+    null,
+    2,
+  );
+}
+
+function buildExportFilename(): string {
+  const d = new Date();
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `keeper-logs-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.json`;
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fallthrough to legacy path
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export function ConsoleLogPanel({ isOpen, onClose, logs, onClearLogs }: ConsoleLogPanelProps) {
   const endRef = useRef<HTMLDivElement>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -35,6 +94,27 @@ export function ConsoleLogPanel({ isOpen, onClose, logs, onClearLogs }: ConsoleL
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [isOpen, onClose]);
+
+  const handleDownloadAll = () => {
+    if (logs.length === 0) return;
+    const blob = new Blob([buildLogsBundle(logs)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = buildExportFilename();
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 400);
+  };
+
+  const handleCopySingle = async (log: LogEntry) => {
+    const ok = await copyToClipboard(serializeLog(log));
+    if (ok) {
+      setCopiedId(log.id);
+      setTimeout(() => {
+        setCopiedId((prev) => (prev === log.id ? null : prev));
+      }, 1500);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -64,6 +144,15 @@ export function ConsoleLogPanel({ isOpen, onClose, logs, onClearLogs }: ConsoleL
                 <span className="text-[10px] text-gray-500 ml-1">{logs.length} 条</span>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadAll}
+                  disabled={logs.length === 0}
+                  className="p-1.5 text-gray-500 hover:text-coc-gold hover:bg-gray-800/60 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-gray-500 disabled:hover:bg-transparent"
+                  title="下载全部日志为 JSON"
+                >
+                  <Download size={16} />
+                </button>
                 <button
                   type="button"
                   onClick={onClearLogs}
@@ -136,6 +225,18 @@ export function ConsoleLogPanel({ isOpen, onClose, logs, onClearLogs }: ConsoleL
                             HTTP {log.meta.status}
                           </span>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => handleCopySingle(log)}
+                          className="ml-auto shrink-0 p-1 text-gray-600 hover:text-coc-gold hover:bg-gray-800/60 rounded transition-colors opacity-60 group-hover:opacity-100"
+                          title={copiedId === log.id ? "已复制" : "复制此条日志(JSON)"}
+                        >
+                          {copiedId === log.id ? (
+                            <Check size={13} className="text-coc-gold" />
+                          ) : (
+                            <Copy size={13} />
+                          )}
+                        </button>
                       </div>
 
                       {log.meta && (

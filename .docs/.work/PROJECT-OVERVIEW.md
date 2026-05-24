@@ -151,7 +151,7 @@ src/data/
       └─ <module-id>/          ← 各模组目录（meta.id 必须等于目录名；Phase 1.4 起填入）
 scripts/
   ├─ validate-modules.ts       ← 扫描模组、调 validator、检查资产存在性；prebuild 钩子
-  └─ test-validator.ts         ← validator 33 用例自测（最小样例 + 故意失败 + narrative_style + recommended_occupations + preset_investigators）
+  └─ test-validator.ts         ← validator 36 用例自测（最小样例 + 故意失败 + narrative_style + recommended_occupations + preset_investigators 必填字段三连）
 .docs/                         ← 项目内规范与决策文档(下面单列重要的几篇)
 .docs/.work/                   ← 给 Claude Code 看的工作简报(本文所在地)
 ```
@@ -190,6 +190,7 @@ scripts/
 10. **`.docs/keeper-*.json` 是玩家私有模组配置**，被 `.dockerignore` 排除，**不会进镜像**。改完不要 commit 它。
 11. **不要把未压缩的模组图像直接进仓库**。`src/data/modules/<id>/assets/` 里所有图必须按 `.docs/scenario-schema.md` 11.1 节压到上限以内(封面 1.25 MB → 71 KB 是已验证基线)，否则镜像与仓库会被一张图拖肥。
 12. **从外部 PDF/docx 转写模组时,`meta.recommended_occupations` 必填、`preset_investigators` 在原作有 pre-gens 时必须落卡**。判定原则与字段语义见 `.docs/scenario-schema.md` §15.3——不允许"先填一半,后面补"，prebuild 时 schema 校验会拒绝构建。
+13. **剧本预设调查员的卡槽优先级 + 字段锁**:`preset_investigators[i]` 在 Phase 3 创角阶段按数组下标占据卡槽 0..N-1(从左到右越靠前越优先);若 N < 3,用同 era 系统模板兜底补到 3 张。`name / age / gender / nationality / identity / background_story_md / occupation` 在剧本模式下完全锁定,**LLM 不允许覆盖**——这些字段必须在模组转写期就完整定稿,否则 schema 校验会拒。
 
 ## 工作流（与本项目协作的"启动键"）
 

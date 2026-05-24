@@ -11,9 +11,10 @@
  */
 
 import type { CharacterSheet } from "../types";
+import { findWeapon } from "../data/cocWeapons";
 
 const W = 512;
-const H = 768;
+const H = 920;
 const AVATAR_CX = 256;
 const AVATAR_CY = 150;
 const AVATAR_R = 56;
@@ -136,7 +137,7 @@ export async function renderCharacterCardPng(sheet: CharacterSheet): Promise<Blo
   const SKILL_LH = 22;
   const SKILL_LEFT = 60;
   const SKILL_RIGHT = W / 2 + 8;
-  const MAX_ROWS = 9;
+  const MAX_ROWS = 6;
   for (let i = 0; i < filteredSkills.length && i < MAX_ROWS * 2; i++) {
     const [sk, val] = filteredSkills[i];
     const isLeft = i < MAX_ROWS;
@@ -153,6 +154,9 @@ export async function renderCharacterCardPng(sheet: CharacterSheet): Promise<Blo
     ctx.fillStyle = "#9ca3af";
     ctx.fillText("常规探查学者", SKILL_LEFT, SKILL_TOP);
   }
+
+  // 装备 / 道具区（8 槽，4×2 网格）
+  drawInventoryBlock(ctx, sheet);
 
   // 底部签名
   ctx.fillStyle = "rgba(193, 160, 103, 0.45)";
@@ -211,6 +215,95 @@ function drawKv(ctx: CanvasRenderingContext2D, label: string, value: string, x: 
   ctx.fillText(label, x, y);
   ctx.fillStyle = "#e5e7eb";
   ctx.fillText(value, x + 60, y);
+}
+
+/** 装备/道具 8 槽 4×2 网格。每槽显示 kind 标签 + 主要内容（武器名 / 道具文本）。 */
+function drawInventoryBlock(ctx: CanvasRenderingContext2D, sheet: CharacterSheet) {
+  const TITLE_Y = 690;
+  sepLine(ctx, TITLE_Y - 20);
+  ctx.fillStyle = "#c1a067";
+  ctx.font = "bold 11.5px monospace";
+  ctx.textAlign = "center";
+  ctx.fillText("✦  随身装备 INVENTORY  ✦", W / 2, TITLE_Y);
+
+  const inv = sheet.inventory ?? [];
+  const COLS = 2;
+  const ROWS = 4;
+  const GRID_LEFT = 40;
+  const GRID_TOP = TITLE_Y + 14;
+  const CELL_W = (W - GRID_LEFT * 2 - 12) / COLS;
+  const CELL_H = 32;
+  const CELL_GAP_X = 12;
+
+  for (let i = 0; i < ROWS * COLS; i++) {
+    const col = i % COLS;
+    const row = Math.floor(i / COLS);
+    const x = GRID_LEFT + col * (CELL_W + CELL_GAP_X);
+    const y = GRID_TOP + row * (CELL_H + 4);
+    const slot = inv[i];
+
+    // 槽框
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.fillRect(x, y, CELL_W, CELL_H);
+    ctx.strokeStyle = "rgba(193, 160, 103, 0.25)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, CELL_W - 1, CELL_H - 1);
+
+    // 槽位编号
+    ctx.fillStyle = "rgba(193, 160, 103, 0.55)";
+    ctx.font = "9px monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(`#${(i + 1).toString().padStart(2, "0")}`, x + 6, y + 12);
+
+    // 内容
+    let label = "—";
+    let detail = "";
+    let labelColor = "#6b7280";
+    if (slot && slot.kind === "weapon") {
+      const w = findWeapon(slot.weaponId);
+      label = w ? w.nameZh : `武器#${slot.weaponId}`;
+      labelColor = "#fbbf24";
+      detail = w
+        ? `${w.damage.formula}${w.damage.addDB ? "+DB" : w.damage.halfDB ? "+½DB" : ""}${w.maxAmmo > 0 ? ` · ${slot.ammo}/${w.maxAmmo}` : ""}`
+        : `弹药 ${slot.ammo}`;
+    } else if (slot && slot.kind === "item") {
+      const text = slot.text?.trim() ?? "";
+      if (text) {
+        label = text;
+        labelColor = "#e5e7eb";
+      } else {
+        label = "（空）";
+      }
+    } else {
+      label = "（空）";
+    }
+
+    ctx.fillStyle = labelColor;
+    ctx.font = "bold 11px sans-serif";
+    ctx.textAlign = "left";
+    const labelMaxW = CELL_W - 36;
+    ctx.fillText(truncateText(ctx, label, labelMaxW), x + 30, y + 14);
+
+    if (detail) {
+      ctx.fillStyle = "#9ca3af";
+      ctx.font = "9.5px monospace";
+      ctx.fillText(truncateText(ctx, detail, labelMaxW), x + 30, y + 26);
+    }
+  }
+}
+
+/** 截断文本到指定像素宽（带省略号）。 */
+function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  const ellipsis = "…";
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (ctx.measureText(text.slice(0, mid) + ellipsis).width <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  return text.slice(0, lo) + ellipsis;
 }
 
 async function drawAvatarCircle(ctx: CanvasRenderingContext2D, sheet: CharacterSheet) {

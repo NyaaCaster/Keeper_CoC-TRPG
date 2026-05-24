@@ -49,8 +49,6 @@ meta:
   era: 1920s                       # 1920s | modern | other (other 配 era_note)
   era_note: ~                      # 选填,描述非标准时代
   language: zh-CN                  # 主叙事语言
-  recommended_investigators: { min: 1, max: 3 }
-  expected_hours: { min: 3, max: 5 }
   difficulty: 标准                  # 入门 | 标准 | 高强度 | 致命
   tags: [都市, 调查, 邪教]          # UI 筛选用
   cover: assets/cover.jpg          # 选填,模组选择卡封面
@@ -531,8 +529,6 @@ meta:
   title: 最小演示
   era: modern
   language: zh-CN
-  recommended_investigators: { min: 1, max: 1 }
-  expected_hours: { min: 1, max: 1 }
   difficulty: 入门
   tags: [演示]
   start_time: { game_day: 1, hour: "12:00" }
@@ -694,18 +690,20 @@ narrative_style:
 
 ## 15 · `preset_investigators`:模组自带预设调查员(选填)
 
-> 顶层可选数组。Phase 3 剧本模式 step 2 优先展示这一组,玩家可选其一直接进游戏;无则回退到"按 era + recommended_occupations 随机生成预设"的兜底路径。
+> 顶层可选数组。Phase 3 剧本模式 step 2 **优先**展示这一组,且按数组下标占据卡槽 0..N-1(从左到右,1→2→3 越小越靠前);若 N < 3,则用同 era 的系统模板 (`TEMPLATE_PRESETS`) 兜底补到 3 张。
 >
-> 设计意图:克系经典本(尤其官方 pre-gens)往往会附完整 PC,玩家在剧本模式下应直接选这些**已锁定数值**的角色,而非走"模板 + 兴趣点"的随机流程。
+> 设计意图:克系经典本(尤其官方 pre-gens)往往会附完整 PC,玩家在剧本模式下应直接选这些**已锁定数值与身份**的角色,而非走"模板 + 兴趣点"的随机流程。`name / age / gender / nationality / identity / background_story_md` 这 6 项在剧本模式下完全锁定,**LLM 不允许覆盖**。
 
 ### 15.1 字段结构
 
 ```yaml
 preset_investigators:
   - id: pc.julia-meridian              # 全模组唯一,kebab-case,以 "pc." 起头
-    name: 朱莉娅·梅里迪安
-    age: 32
-    gender: 女                          # 选填
+    name: 朱莉娅·梅里迪安               # 必填,LLM 不覆盖
+    age: 32                             # 必填,LLM 不覆盖
+    gender: 女                          # 必填,LLM 不覆盖
+    nationality: 美国                   # 必填,CoC 7e Nationality 字段,LLM 不覆盖
+    identity: 波士顿持牌私家侦探         # 必填,角色扮演身份描述,与 occupation 协同;LLM 不覆盖
     occupation: 私家侦探                # 中文名或 id 任一,必须在 era 表里命中
     attributes:                         # 8 大属性,值 ∈ [15, 90](edu 允许到 99)
       str: 60
@@ -725,7 +723,7 @@ preset_investigators:
       聆听: 50
     overview_md: |                      # 简介,显示在选择卡上
       久经街头的女侦探,见过的案子比警局里好多老警探都多。
-    background_story_md: |              # 完整背景,选填
+    background_story_md: |              # 完整背景故事,选填但强烈建议;LLM 不覆盖
       在波士顿做了十年案子,最近搬到本市。
     portrait: assets/preset/julia.jpg   # 选填,头像/立绘,相对模组目录
     birthplace: 波士顿                  # 选填
@@ -738,6 +736,7 @@ preset_investigators:
 ### 15.2 校验规则(对齐 CoC 7e 创角硬规则)
 
 - `id` 全模组唯一(与其它 preset 不重)
+- `name / age / gender / nationality / identity / occupation` 全部必填且非空
 - `attributes.{str,con,siz,dex,app,int,pow}` ∈ `[15, 90]`,`attributes.edu` ∈ `[15, 99]`
 - `skills.<key>` 的值 ∈ `[0, 90]`(RAW 创角期 90 上限)
 - `skills.<key>` 的键如果是 kebab-id 形式,必须能在 `src/data/cocSkills.ts SKILL_REGISTRY_ALL` 命中(中文技能名跳过命中校验,因为允许"潜行(滑行)"等支线写法)

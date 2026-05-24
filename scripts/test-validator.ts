@@ -65,8 +65,6 @@ meta:
   title: 最小演示
   era: modern
   language: zh-CN
-  recommended_investigators: { min: 1, max: 1 }
-  expected_hours: { min: 1, max: 1 }
   difficulty: 入门
   tags: [演示]
   start_time: { game_day: 1, hour: "12:00" }
@@ -515,6 +513,8 @@ test("preset_investigators 完整结构通过且字段被解析为 camelCase", (
       name: "演示调查员",
       age: 32,
       gender: "女",
+      nationality: "美国",
+      identity: "波士顿持牌私家侦探",
       occupation: "私家侦探",
       attributes: {
         str: 60, con: 60, siz: 55, dex: 65, app: 55,
@@ -538,9 +538,78 @@ test("preset_investigators 完整结构通过且字段被解析为 camelCase", (
   );
   const pc = result.scenario.presetInvestigators![0];
   assert(pc.id === "pc.demo", "id 应原样保留");
+  assert(pc.gender === "女", "gender 应原样保留");
+  assert(pc.nationality === "美国", "nationality 应原样保留");
+  assert(pc.identity?.includes("私家侦探"), "identity 应原样保留");
   assert(pc.creditRating === 40, "credit_rating 应转为 creditRating");
   assert(pc.backgroundStoryMd?.includes("十年"), "background_story_md 应转为 backgroundStoryMd");
   assert(pc.cashBalance === 120, "cash_balance 应转为 cashBalance");
+});
+
+test("preset_investigators.gender 缺失报错", () => {
+  const raw = cloneMinimal();
+  raw["preset_investigators"] = [
+    {
+      id: "pc.no-gender",
+      name: "缺性别",
+      age: 30,
+      nationality: "美国",
+      identity: "测试用调查员",
+      occupation: "私家侦探",
+      attributes: {
+        str: 50, con: 60, siz: 55, dex: 65, app: 55,
+        int: 75, pow: 60, edu: 70,
+      },
+      sanity: 60, luck: 55, credit_rating: 40,
+      skills: {},
+      overview_md: "测试 gender 缺失",
+    },
+  ];
+  expectFail(validateScenario(raw), "gender");
+});
+
+test("preset_investigators.nationality 缺失报错", () => {
+  const raw = cloneMinimal();
+  raw["preset_investigators"] = [
+    {
+      id: "pc.no-nat",
+      name: "缺国籍",
+      age: 30,
+      gender: "男",
+      identity: "测试用调查员",
+      occupation: "私家侦探",
+      attributes: {
+        str: 50, con: 60, siz: 55, dex: 65, app: 55,
+        int: 75, pow: 60, edu: 70,
+      },
+      sanity: 60, luck: 55, credit_rating: 40,
+      skills: {},
+      overview_md: "测试 nationality 缺失",
+    },
+  ];
+  expectFail(validateScenario(raw), "nationality");
+});
+
+test("preset_investigators.identity 缺失报错", () => {
+  const raw = cloneMinimal();
+  raw["preset_investigators"] = [
+    {
+      id: "pc.no-id",
+      name: "缺身份",
+      age: 30,
+      gender: "男",
+      nationality: "美国",
+      occupation: "私家侦探",
+      attributes: {
+        str: 50, con: 60, siz: 55, dex: 65, app: 55,
+        int: 75, pow: 60, edu: 70,
+      },
+      sanity: 60, luck: 55, credit_rating: 40,
+      skills: {},
+      overview_md: "测试 identity 缺失",
+    },
+  ];
+  expectFail(validateScenario(raw), "identity");
 });
 
 test("preset_investigators.attributes 越界报错", () => {
@@ -550,6 +619,9 @@ test("preset_investigators.attributes 越界报错", () => {
       id: "pc.bad-attr",
       name: "数值越界",
       age: 30,
+      gender: "男",
+      nationality: "美国",
+      identity: "测试用调查员",
       occupation: "私家侦探",
       attributes: {
         str: 5, con: 60, siz: 55, dex: 65, app: 55,
@@ -570,6 +642,9 @@ test("preset_investigators.skills 数值越界报错", () => {
       id: "pc.bad-skill",
       name: "技能越界",
       age: 30,
+      gender: "男",
+      nationality: "美国",
+      identity: "测试用调查员",
       occupation: "私家侦探",
       attributes: {
         str: 50, con: 60, siz: 55, dex: 65, app: 55,
@@ -590,6 +665,9 @@ test("preset_investigators.occupation 不在 era 表里报错", () => {
       id: "pc.bad-occ",
       name: "职业越界",
       age: 30,
+      gender: "男",
+      nationality: "美国",
+      identity: "测试用调查员",
       occupation: "完全不存在的职业",
       attributes: {
         str: 50, con: 60, siz: 55, dex: 65, app: 55,
@@ -610,6 +688,9 @@ test("preset_investigators.sanity 超过 pow*5 报错", () => {
       id: "pc.bad-san",
       name: "SAN 越界",
       age: 30,
+      gender: "男",
+      nationality: "美国",
+      identity: "测试用调查员",
       occupation: "私家侦探",
       attributes: {
         str: 50, con: 60, siz: 55, dex: 65, app: 55,
@@ -629,6 +710,9 @@ test("preset_investigators id 重复报错", () => {
     id: "pc.same",
     name: "甲",
     age: 30,
+    gender: "男",
+    nationality: "美国",
+    identity: "测试用调查员",
     occupation: "私家侦探",
     attributes: {
       str: 50, con: 60, siz: 55, dex: 65, app: 55,

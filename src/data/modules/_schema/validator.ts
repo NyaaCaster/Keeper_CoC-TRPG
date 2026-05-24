@@ -293,9 +293,6 @@ function parseMeta(value: unknown, path: string, push: Issue): ScenarioMeta | nu
 
   const language = isNonEmptyString(value["language"]) ? value["language"] : "zh-CN";
 
-  const recommended = parseRange(value["recommended_investigators"], `${path}.recommended_investigators`, push);
-  const expected = parseRange(value["expected_hours"], `${path}.expected_hours`, push);
-
   const diffRaw = value["difficulty"];
   const difficulty: ScenarioDifficultyTier =
     diffRaw === "入门" || diffRaw === "标准" || diffRaw === "高强度" || diffRaw === "致命"
@@ -334,8 +331,6 @@ function parseMeta(value: unknown, path: string, push: Issue): ScenarioMeta | nu
     era,
     eraNote,
     language,
-    recommendedInvestigators: recommended,
-    expectedHours: expected,
     difficulty,
     tags,
     cover,
@@ -344,21 +339,6 @@ function parseMeta(value: unknown, path: string, push: Issue): ScenarioMeta | nu
     authorCreditsMd,
     recommendedOccupations,
   };
-}
-
-function parseRange(
-  value: unknown,
-  path: string,
-  push: Issue,
-): { min: number; max: number } {
-  if (!isPlainObject(value)) {
-    push(path, `必须是 { min, max } 对象。`);
-    return { min: 1, max: 1 };
-  }
-  const min = parseInteger(value["min"], `${path}.min`, push, { min: 1 });
-  const max = parseInteger(value["max"], `${path}.max`, push, { min: 1 });
-  if (max < min) push(path, `max(${max}) 不能小于 min(${min})。`);
-  return { min, max };
 }
 
 function parseStartTime(
@@ -1574,7 +1554,15 @@ function parsePresetInvestigator(
     ? value["name"]
     : (push(`${path}.name`, `必填且非空。`), "");
   const age = parseInteger(value["age"], `${path}.age`, push, { min: 1, max: 120 });
-  const gender = typeof value["gender"] === "string" ? value["gender"] : undefined;
+  const gender = isNonEmptyString(value["gender"])
+    ? value["gender"]
+    : (push(`${path}.gender`, `必填且非空(剧本预设需完整身份信息,LLM 不会覆盖)。`), "");
+  const nationality = isNonEmptyString(value["nationality"])
+    ? value["nationality"]
+    : (push(`${path}.nationality`, `必填且非空(剧本预设需完整国籍信息,LLM 不会覆盖)。`), "");
+  const identity = isNonEmptyString(value["identity"])
+    ? value["identity"]
+    : (push(`${path}.identity`, `必填且非空(剧本预设需完整角色身份描述,LLM 不会覆盖)。`), "");
   const occupation = isNonEmptyString(value["occupation"])
     ? value["occupation"]
     : (push(`${path}.occupation`, `必填,中文职业名或 occupation id。`), "");
@@ -1650,6 +1638,8 @@ function parsePresetInvestigator(
     name,
     age,
     gender,
+    nationality,
+    identity,
     occupation,
     attributes,
     sanity,

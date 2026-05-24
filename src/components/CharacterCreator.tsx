@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { CharacterSheet, CharacterAttributes, CharacterSkills, ApiSettings, LogEntry, MythicEncounters, InventoryEntry } from "../types";
+import { CharacterSheet, CharacterAttributes, CharacterSkills, ApiSettings, LogEntry, MythicEncounters, InventoryEntry, GameMode } from "../types";
 import { TEMPLATE_PRESETS } from "../data/presets";
 import { getOccupations, findOccupation } from "../data/cocOccupations";
 import { dodgeOf, motherTongueValue, startingCashOf, livingStandardOf, livingStandardLabel, refreshCombatDerived } from "../lib/cocRules";
@@ -35,6 +35,8 @@ import { validateCharacterSheet } from "../lib/characterValidation";
 import { downloadCharacterCard } from "../lib/characterCardRender";
 import { dispatchLlm, humanizeLlmError } from "../lib/llmClient";
 import { GENERATE_MODULE_SCHEMA, GENERATE_STATS_SCHEMA } from "../lib/llmSchemas";
+import { listModules } from "../data/modules";
+import type { Scenario, PresetInvestigator } from "../data/modules/_schema/scenario";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Sparkles,
@@ -56,11 +58,21 @@ import {
   X,
   FileUp,
   Download,
-  Home
+  Home,
+  Wand2,
+  ScrollText,
 } from "lucide-react";
 
 interface CharacterCreatorProps {
-  onComplete: (character: CharacterSheet, features: { typemoon: boolean; scp: boolean }) => void;
+  onComplete: (
+    character: CharacterSheet,
+    features: { typemoon: boolean; scp: boolean },
+    context: {
+      gameMode: GameMode;
+      /** 仅在 gameMode === "scenario-based" 时有值,指向 listModules() 中的某条 */
+      scenario?: Scenario;
+    },
+  ) => void;
   onBackToStart: () => void;
   apiSettings: ApiSettings;
   onAddLog?: (
@@ -74,9 +86,94 @@ interface CharacterCreatorProps {
 // 创建期可选的调查员预设来自 src/data/presets.ts (TEMPLATE_PRESETS)。
 // 旧版 CLASSIC_PRESETS / PRESET_OVERVIEWS 未在此组件被引用，已移除。
 
+/**
+ * 把 schema 里的 PresetInvestigator(剧本模式预设 PC)转换成 CharacterSheet,
+ * 让现有的"选择预设"UI(activePresets / handleSelectPreset)能复用同一套渲染。
+ *
+ * 关键点:
+ * - schema 锁了 8 大基础属性 + sanity + luck + creditRating + skills,这里**不再**
+ *   叠加任何随机化 / 兴趣点 / 模板兜底,1B 全锁原则。
+ * - HP / MP / maxSan 由公式现算,但若 schema 已给 sanity 我们直接用作 san。
+ * - cashBalance 优先用作者写死的值,没写则按 startingCashOf 派生。
+ * - weapons 列表展开成 inventory 头几个槽,剩余补空 item 槽到 8 槽。
+ */
+function presetInvestigatorToSheet(
+  pc: PresetInvestigator,
+  era: "1920s" | "modern",
+): CharacterSheet & { overview?: string } {
+  const attrs: CharacterAttributes = {
+    str: pc.attributes.str,
+    con: pc.attributes.con,
+    siz: pc.attributes.siz,
+    dex: pc.attributes.dex,
+    app: pc.attributes.app,
+    int: pc.attributes.int,
+    pow: pc.attributes.pow,
+    edu: pc.attributes.edu,
+    luck: pc.luck,
+  };
+  const calculatedHp = Math.floor((attrs.con + attrs.siz) / 10);
+  const calculatedMp = Math.floor(attrs.pow / 5);
+
+  // skills:作者锁定的值直接落,没写的技能不自动补(克苏鲁神话固定 0)
+  const skills: CharacterSkills = { ...pc.skills };
+  if (!("克苏鲁神话" in skills)) skills["克苏鲁神话"] = 0;
+
+  // weapons → inventory 前几个槽
+  const inventory: InventoryEntry[] = [];
+  if (Array.isArray(pc.weapons)) {
+    for (const wid of pc.weapons) {
+      const def = findWeapon(wid);
+      inventory.push({ kind: "weapon", weaponId: wid, ammo: def?.maxAmmo ?? 0 });
+    }
+  }
+  while (inventory.length < 8) inventory.push({ kind: "item", text: "" });
+
+  const cash = typeof pc.cashBalance === "number"
+    ? pc.cashBalance
+    : startingCashOf(pc.creditRating, era);
+
+  const sheet: CharacterSheet = {
+    name: pc.name,
+    occupation: pc.occupation,
+    identity: pc.identity,
+    nationality: pc.nationality,
+    gender: pc.gender,
+    age: pc.age,
+    background: era,
+    attributes: attrs,
+    skills,
+    hp: calculatedHp,
+    maxHp: calculatedHp,
+    mp: calculatedMp,
+    maxMp: calculatedMp,
+    san: pc.sanity,
+    maxSan: pc.sanity,
+    maxSanLimit: 99,
+    mythos: 0,
+    avatar: undefined,
+    backgroundStory: pc.backgroundStoryMd ?? pc.overviewMd,
+    residence: pc.residence,
+    creditRating: pc.creditRating,
+    mythicEncounters: { tomes: [], spells: [], artifacts: [], entities: [] },
+    inventory: inventory.slice(0, 8),
+    cashBalance: cash,
+    sanityState: { episodeSanLoss: 0, madness: null },
+    combatDerived: { db: { flat: 0, dice: null, display: "0" }, build: 0, mov: 9, dodge: dodgeOf(attrs.dex) },
+  };
+  return { ...refreshCombatDerived(sheet), overview: pc.overviewMd };
+}
+
 export default function CharacterCreator({ onComplete, onBackToStart, apiSettings, onAddLog }: CharacterCreatorProps) {
-  // 3-step preparation flow: 1 = Choose Era & Generate Module Outline, 2 = Select / Customize PC, 3 = Double verify Dossier & Module Intro
+  // 3-step preparation flow: 1 = Mode/Era + Module Source, 2 = Select / Customize PC, 3 = Double verify Dossier & Module Intro
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
+
+  // 「踏入虚空」(LLM 生成) vs 「深入卷宗」(剧本展开) 的入口选择;
+  // null = 还在动线最开始,需要先选模式才会进入 era + 后续 UI
+  const [gameMode, setGameMode] = useState<GameMode | null>(null);
+
+  // 仅在 gameMode === "scenario-based" 时有值,指向所选模组的 meta.id
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
 
   // Era Choice state
   const [selectedEra, setSelectedEra] = useState<"1920s" | "modern">("modern");
@@ -154,6 +251,17 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
   const [importError, setImportError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
 
+  // 「深入卷宗」: 当前 era 下可选的全部模组
+  const allModules = useMemo(() => listModules(), []);
+  const scenariosForEra = useMemo(
+    () => allModules.filter((m) => m.meta.era === selectedEra),
+    [allModules, selectedEra],
+  );
+  const selectedScenario: Scenario | null = useMemo(() => {
+    if (gameMode !== "scenario-based" || !selectedScenarioId) return null;
+    return allModules.find((m) => m.meta.id === selectedScenarioId) ?? null;
+  }, [gameMode, selectedScenarioId, allModules]);
+
   // 阶段 7：派生当前职业模板的槽位约束（自拟职业 = 8 个 free 槽）。
   const occupationConstraints: SlotConstraint[] = useMemo(() => {
     if (customOccupationId) {
@@ -192,10 +300,13 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
   const intSpent = useMemo(() => spentInSlots(skillDraft.interest), [skillDraft.interest]);
   const duplicateKeys = useMemo(() => findDuplicateSelections(skillDraft), [skillDraft]);
 
-  // Get active presets list: either the dynamically generated templates or classical fallback presets
+  // Get active presets list: scenario-mode 把模组锁定预设放在前(slot 0..N-1),不足 3 张时用同 era 系统模板兜底补到 3;LLM-mode 用动态模组提纲或时代模板兜底。
   const activePresets = React.useMemo(() => {
+    // 同 era + 型月/SCP 开关下可用的系统模板,供两种模式做兜底
     const eraPresets = TEMPLATE_PRESETS.filter(p => {
-      if (p.background !== selectedEra) return false;
+      if (gameMode === "scenario-based" && selectedScenario) {
+        if (p.background !== (selectedScenario.meta.era === "1920s" ? "1920s" : "modern")) return false;
+      } else if (p.background !== selectedEra) return false;
       const isTM = p.occupation.includes("时钟塔") || p.occupation.includes("代行者") ||
                    (p.backgroundText && (p.backgroundText.includes("时钟塔") || p.backgroundText.includes("魔术") || p.backgroundText.includes("代行者")));
       const isSCP = p.occupation.includes("基金会") || p.occupation.includes("SCP") ||
@@ -204,6 +315,21 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
       if (isSCP && !featureScp) return false;
       return true;
     });
+
+    // 剧本模式:模组锁定预设优先(数值/姓名/年龄/性别/国籍/身份/背景全锁,LLM 不覆盖),
+    // 不足 3 张时用同 era 系统模板兜底补齐。
+    if (gameMode === "scenario-based") {
+      const era: "1920s" | "modern" = selectedScenario?.meta.era === "1920s" ? "1920s" : "modern";
+      const scenarioSheets = (selectedScenario?.presetInvestigators ?? [])
+        .map((pc) => presetInvestigatorToSheet(pc, era));
+      if (scenarioSheets.length >= 3) return scenarioSheets;
+      const fillCount = Math.max(0, 3 - scenarioSheets.length);
+      const fillers = eraPresets.slice(0, fillCount).map((p) => ({
+        ...p,
+        overview: p.backgroundText || "资深的前线秘仪探求者，屡次协助收容或发掘星神崇拜设施迹象。",
+      }));
+      return [...scenarioSheets, ...fillers];
+    }
 
     // moduleOutline.presets 已经是"模板基底 + LLM 人皮 patch"合并完成的 sheet,
     // 这里只补一个 overview 字段供卡面预览使用。
@@ -219,7 +345,7 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
       ...p,
       overview: p.backgroundText || "资深的前线秘仪探求者，屡次协助收容或发掘星神崇拜设施迹象。"
     }));
-  }, [moduleOutline?.presets, selectedEra, featureTypeMoon, featureScp]);
+  }, [gameMode, selectedScenario, moduleOutline?.presets, selectedEra, featureTypeMoon, featureScp]);
 
   // 创建期 「深渊复核 → 下载调查员角色卡」 入口。运行期入口在 CharacterDossierPanel 里直接
   // 调 downloadCharacterCard(sheet.creationSnapshot ?? sheet)；两者共享同一渲染模块。
@@ -314,7 +440,7 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
 
         if (!cleanAvatar) {
           // 按图片实际尺寸推断头像区域：
-          //  - 新卡 (512×768)：中心 (256,150)，半径 56  → 源矩形 (200,94,112,112)
+          //  - 新卡 (512×920 / 512×768)：中心 (256,150)，半径 56  → 源矩形 (200,94,112,112)
           //  - 旧卡 (400×400)：中心 (200,108)，半径 42 → 源矩形 (158,66,84,84)
           // 若两者都不匹配，按图像最小边的中心方形回退。
           cleanAvatar = await new Promise<string>((resolveCrop) => {
@@ -328,7 +454,7 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                 const tempCtx = tempCanvas.getContext("2d");
                 if (tempCtx) {
                   let sx: number, sy: number, sw: number, sh: number;
-                  if (img.naturalWidth === 512 && img.naturalHeight === 768) {
+                  if (img.naturalWidth === 512 && (img.naturalHeight === 920 || img.naturalHeight === 768)) {
                     sx = 200; sy = 94; sw = 112; sh = 112;
                   } else if (img.naturalWidth === 400 && img.naturalHeight === 400) {
                     sx = 158; sy = 66; sw = 84; sh = 84;
@@ -813,7 +939,10 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
 
   const handleLaunchScenario = () => {
     if (reviewCharacter) {
-      onComplete(reviewCharacter, { typemoon: featureTypeMoon, scp: featureScp });
+      onComplete(reviewCharacter, { typemoon: featureTypeMoon, scp: featureScp }, {
+        gameMode: gameMode ?? "llm-generated",
+        scenario: gameMode === "scenario-based" ? selectedScenario ?? undefined : undefined,
+      });
     }
   };
 
@@ -854,7 +983,7 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
 
       <AnimatePresence mode="wait">
         
-        {/* ======================================= STEP 1: ERA AND MODULE GENERATION ======================================= */}
+        {/* ======================================= STEP 1: MODE -> ERA -> MODULE SOURCE ======================================= */}
         {currentStep === 1 && (
           <motion.div
             key="step-1-era"
@@ -864,222 +993,492 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
             transition={{ duration: 0.2 }}
             className="space-y-6"
           >
-            <div className="text-center mb-6">
-              <h2 className="font-sans text-3xl font-semibold tracking-wider text-[#c1a067] uppercase">
-                - 历史帷幕：选择模组背景年代 -
-              </h2>
-              <p className="text-gray-400 text-xs tracking-widest font-mono mt-2">
-                CHOOSE ERA / KEEPER DRAFTING MYSTERIOUS MODULE CONFIG
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <button 
-                id="era-1920s-btn"
-                type="button"
-                onClick={() => { setSelectedEra("1920s"); setModuleOutline(null); }}
-                className={`p-4 rounded border text-left transition relative overflow-hidden ${
-                  selectedEra === "1920s" 
-                    ? "bg-[#c1a067]/15 border-[#c1a067] text-[#c1a067]" 
-                    : "bg-black/40 border-[#c1a067]/20 hover:border-[#c1a067]/60"
-                }`}
-              >
-                <div className="text-base font-semibold mb-1 flex items-center gap-1.5 font-sans">
-                  <span>1920年代：爵士乐与黄金狂热</span>
-                </div>
-                <div className="text-xs text-gray-400 leading-relaxed font-sans">
-                  古老、迷雾笼罩的维多利亚式庄园、飞驰的蒸汽列车和布满铁锈的密斯卡托尼克古老馆藏。魔术名门在暗地中密谋唤醒根源，而危险的克苏鲁教徒在沼泽中血腥祭祀，氛围腐朽、深邃。
-                </div>
-                {selectedEra === "1920s" && (
-                  <span className="absolute bottom-2 right-2 text-[10px] uppercase font-mono tracking-widest border border-[#c1a067] px-1 text-[#c1a067] bg-black">SELECTED</span>
-                )}
-              </button>
-
-              <button 
-                id="era-modern-btn"
-                type="button"
-                onClick={() => { setSelectedEra("modern"); setModuleOutline(null); }}
-                className={`p-4 rounded border text-left transition relative overflow-hidden ${
-                  selectedEra === "modern" 
-                    ? "bg-[#c1a067]/15 border-[#c1a067] text-[#c1a067]" 
-                    : "bg-black/40 border-[#c1a067]/20 hover:border-[#c1a067]/60"
-                }`}
-              >
-                <div className="text-base font-semibold mb-1 flex items-center gap-1.5 font-sans">
-                  <span>21世纪现代：信息高墙与深渊</span>
-                </div>
-                <div className="text-xs text-gray-400 leading-relaxed font-sans">
-                  SCP基金会在世界暗角用钢筋与磁场进行钢铁收容；时钟塔的现代魔术科（El-Melloi）借数字网络解析太古教典。在遍布监控、霓虹闪烁的城市角落，神秘开始失控漫溢。
-                </div>
-                {selectedEra === "modern" && (
-                  <span className="absolute bottom-2 right-2 text-[10px] uppercase font-mono tracking-widest border border-[#c1a067] px-1 text-[#c1a067] bg-black">SELECTED</span>
-                )}
-              </button>
-            </div>
-
-            {/* Content Module Settings */}
-            <div className="bg-black/35 border border-[#c1a067]/15 p-5 rounded-lg space-y-4">
-              <div className="border-b border-[#c1a067]/10 pb-2">
-                <h4 className="text-sm font-semibold text-[#c1a067] font-sans flex items-center gap-1.5">
-                  <Shield className="w-4 h-4" /> TRPG 内容模块库载入配置 (Content Module Options)
-                </h4>
-                <p className="text-[10px] text-gray-500 font-mono tracking-wider mt-0.5 uppercase">
-                  Select which expansion lore elements to load into background sandbox
-                </p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {/* Classic CoC */}
-                <div className="flex items-center gap-3 p-3 bg-black/40 border border-[#c1a067]/10 rounded select-none opacity-85">
-                  <input
-                    type="checkbox"
-                    checked
-                    disabled
-                    id="checkbox-classic-coc"
-                    className="w-4 h-4 rounded border-gray-600 bg-black text-[#c1a067] focus:ring-[#c1a067] cursor-not-allowed"
-                  />
-                  <label htmlFor="checkbox-classic-coc" className="cursor-not-allowed text-left">
-                    <span className="text-xs font-bold text-gray-200 block">【固件】经典CoC</span>
-                    <span className="text-[10px] text-gray-400 block whitespace-nowrap">经典克苏鲁属性、检定及疯狂法则(不可关闭)</span>
-                  </label>
-                </div>
-
-                {/* Type-MOON */}
-                <button
-                  type="button"
-                  id="toggle-typemoon-module"
-                  onClick={() => {
-                    setFeatureTypeMoon(!featureTypeMoon);
-                    setModuleOutline(null);
-                  }}
-                  className={`flex items-center gap-3 p-3 border rounded text-left transition select-none ${
-                    featureTypeMoon 
-                      ? "bg-[#c1a067]/5 border-[#c1a067]/40 text-[#c1a067]" 
-                      : "bg-black/20 border-neutral-800 opacity-60 text-gray-400"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={featureTypeMoon}
-                    readOnly
-                    className="w-4 h-4 rounded border-gray-600 text-[#c1a067] focus:ring-[#c1a067] pointer-events-none"
-                  />
-                  <div>
-                    <span className="text-xs font-bold block">【附加】Type-MOON要素</span>
-                    <span className="text-[10px] text-gray-400 block">融合时钟塔魔术、圣堂代行者和秘仪理论</span>
-                  </div>
-                </button>
-
-                {/* SCP Foundation */}
-                <button
-                  type="button"
-                  id="toggle-scp-module"
-                  onClick={() => {
-                    setFeatureScp(!featureScp);
-                    setModuleOutline(null);
-                  }}
-                  className={`flex items-center gap-3 p-3 border rounded text-left transition select-none ${
-                    featureScp 
-                      ? "bg-[#c1a067]/5 border-[#c1a067]/40 text-[#c1a067]" 
-                      : "bg-black/20 border-neutral-800 opacity-60 text-gray-400"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={featureScp}
-                    readOnly
-                    className="w-4 h-4 rounded border-gray-600 text-[#c1a067] focus:ring-[#c1a067] pointer-events-none"
-                  />
-                  <div>
-                    <span className="text-xs font-bold block">【附加】SCP要素</span>
-                    <span className="text-[10px] text-gray-400 block">融合SCP基金会特别外勤、Site站点与异常收容</span>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* If no module outline generated yet, show the generate button */}
-            {!moduleOutline ? (
-              <div className="text-center pt-6 decoration-transparent">
-                <button
-                  id="generate-module-btn"
-                  type="button"
-                  onClick={generateModuleOutline}
-                  disabled={isGeneratingModule}
-                  className="px-10 py-3.5 bg-[#c1a067] text-black font-semibold tracking-wider rounded transition-all hover:bg-[#d5b57d] active:scale-95 text-sm uppercase shadow-lg shadow-[#c1a067]/20 disabled:opacity-40 flex items-center gap-2 mx-auto"
-                >
-                  <Sparkles className={`w-4 h-4 ${isGeneratingModule ? "animate-spin" : ""}`} />
-                  {isGeneratingModule ? "守密人(KP)正沙盘推演模组大纲..." : "确认年代并架构模组大纲"}
-                </button>
-                {moduleGenerationError && (
-                  <p className="text-red-400 text-xs mt-3 flex items-center justify-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5" /> {moduleGenerationError}
-                  </p>
-                )}
-              </div>
-            ) : (
-              /* Generated Module Outline (Non-spoiler review) */
-              <motion.div 
-                id="generated-module-review-card"
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="bg-[#181a1c] border border-[#c1a067]/30 p-5 rounded-lg space-y-4 font-sans relative"
-              >
-                <div className="absolute top-3 right-3 text-[10px] font-mono text-[#c1a067]/70 uppercase tracking-widest border border-[#c1a067]/20 px-2 py-0.5 bg-black/40 rounded">
-                  Keeper Module Drafted
-                </div>
-
-                <div className="border-b border-[#c1a067]/15 pb-2.5">
-                  <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase">模组标题 (Module Title)</span>
-                  <h3 className="text-xl font-bold text-[#c1a067] mt-0.5 font-sans">
-                    {moduleOutline.title || "(标题缺失)"}
-                  </h3>
-                </div>
-
-                <div className="text-sm leading-relaxed text-gray-300 font-sans space-y-2">
-                  <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase">前言/背景低语 (No-Spoiler Intro)</span>
-                  <p className="bg-black/30 p-4 border-l-2 border-[#c1a067] rounded-r italic text-gray-350 select-text">
-                    {moduleOutline.intro || "(前言缺失,可重新生成)"}
+            {/* ---------- 阶段 A: 没选模式 → 仅显示双入口 ---------- */}
+            {gameMode === null && (
+              <>
+                <div className="text-center mb-6">
+                  <h2 className="font-sans text-3xl font-semibold tracking-wider text-[#c1a067] uppercase">
+                    - 选择跑团模式 -
+                  </h2>
+                  <p className="text-gray-400 text-xs tracking-widest font-mono mt-2">
+                    CHOOSE GAME MODE
                   </p>
                 </div>
 
-                {/* Suggested occupations label */}
-                <div className="pt-2">
-                  <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase mb-1.5">契合本模组推荐PC职业方向 (Suggested PC Occupations)</span>
-                  <div className="flex flex-wrap gap-2">
-                    {Array.isArray(moduleOutline.recommendedOccupations) && moduleOutline.recommendedOccupations.length > 0 ? (
-                      moduleOutline.recommendedOccupations.map((job) => (
-                        <span key={job} className="text-xs bg-[#c1a067]/10 text-[#c1a067] border border-[#c1a067]/30 px-2.5 py-1 rounded font-normal font-sans shadow-sm">
-                          {job}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-xs text-gray-500 italic font-sans">(模型未给出推荐职业，可重新生成或自由选择)</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <button
+                    id="game-mode-llm-btn"
+                    type="button"
+                    onClick={() => setGameMode("llm-generated")}
+                    className="p-6 rounded border border-[#c1a067]/25 bg-black/40 text-left transition relative overflow-hidden hover:border-[#c1a067] hover:bg-[#c1a067]/10 active:scale-[0.99]"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <Wand2 className="w-5 h-5 text-[#c1a067]" />
+                      <span className="text-base font-semibold text-[#c1a067] font-sans">踏入虚空</span>
+                      <span className="ml-auto text-[10px] uppercase font-mono tracking-widest text-gray-500">
+                        LLM-Generated
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 leading-relaxed font-sans">
+                      由 KP 即兴架构原创模组——你提供时代与内容模块,LLM 现场推演大纲、人物与诡计。
+                      每一次都是新故事,代价是叙事一致性依赖模型即兴。
+                    </p>
+                  </button>
+
+                  <button
+                    id="game-mode-scenario-btn"
+                    type="button"
+                    onClick={() => {
+                      setGameMode("scenario-based");
+                      setSelectedScenarioId(null);
+                      setModuleOutline(null);
+                    }}
+                    className="p-6 rounded border border-[#c1a067]/25 bg-black/40 text-left transition relative overflow-hidden hover:border-[#c1a067] hover:bg-[#c1a067]/10 active:scale-[0.99]"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <ScrollText className="w-5 h-5 text-[#c1a067]" />
+                      <span className="text-base font-semibold text-[#c1a067] font-sans">深入卷宗</span>
+                      <span className="ml-auto text-[10px] uppercase font-mono tracking-widest text-gray-500">
+                        Scenario-Based
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 leading-relaxed font-sans">
+                      从已转写的克系经典模组中选一本——场景、线索、NPC、结局都已固定,
+                      LLM 仅负责扮演 KP 把它演给你。叙事更稳,适合追求"原作味道"的玩家。
+                    </p>
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* ---------- 阶段 B: 已选模式 → 显示时代选择 + 内容模块 + 分流后续 UI ---------- */}
+            {gameMode !== null && (
+              <>
+                <div className="flex items-center gap-3 mb-2">
+                  <button
+                    id="step1-back-to-mode-btn"
+                    type="button"
+                    onClick={() => {
+                      setGameMode(null);
+                      setSelectedScenarioId(null);
+                      setModuleOutline(null);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-black border border-[#c1a067]/30 text-[#c1a067]/80 font-sans text-xs rounded hover:bg-[#c1a067]/10 hover:text-[#c1a067] transition active:scale-95"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    返回模式选择
+                  </button>
+                  <div className="text-[10px] font-mono text-[#c1a067]/70 uppercase tracking-widest border border-[#c1a067]/20 px-2 py-0.5 bg-black/40 rounded">
+                    {gameMode === "llm-generated" ? "MODE · 踏入虚空" : "MODE · 深入卷宗"}
+                  </div>
+                </div>
+
+                <div className="text-center mb-6">
+                  <h2 className="font-sans text-3xl font-semibold tracking-wider text-[#c1a067] uppercase">
+                    - 历史帷幕：选择模组背景年代 -
+                  </h2>
+                  <p className="text-gray-400 text-xs tracking-widest font-mono mt-2">
+                    {gameMode === "llm-generated"
+                      ? "CHOOSE ERA / KEEPER DRAFTING MYSTERIOUS MODULE CONFIG"
+                      : "CHOOSE ERA / FILTER SCENARIO ARCHIVES"}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <button
+                    id="era-1920s-btn"
+                    type="button"
+                    onClick={() => {
+                      setSelectedEra("1920s");
+                      setModuleOutline(null);
+                      setSelectedScenarioId(null);
+                    }}
+                    className={`p-4 rounded border text-left transition relative overflow-hidden ${
+                      selectedEra === "1920s"
+                        ? "bg-[#c1a067]/15 border-[#c1a067] text-[#c1a067]"
+                        : "bg-black/40 border-[#c1a067]/20 hover:border-[#c1a067]/60"
+                    }`}
+                  >
+                    <div className="text-base font-semibold mb-1 flex items-center gap-1.5 font-sans">
+                      <span>1920年代：爵士乐与黄金狂热</span>
+                    </div>
+                    <div className="text-xs text-gray-400 leading-relaxed font-sans">
+                      古老、迷雾笼罩的维多利亚式庄园、飞驰的蒸汽列车和布满铁锈的密斯卡托尼克古老馆藏。魔术名门在暗地中密谋唤醒根源，而危险的克苏鲁教徒在沼泽中血腥祭祀，氛围腐朽、深邃。
+                    </div>
+                    {selectedEra === "1920s" && (
+                      <span className="absolute bottom-2 right-2 text-[10px] uppercase font-mono tracking-widest border border-[#c1a067] px-1 text-[#c1a067] bg-black">SELECTED</span>
                     )}
+                  </button>
+
+                  <button
+                    id="era-modern-btn"
+                    type="button"
+                    onClick={() => {
+                      setSelectedEra("modern");
+                      setModuleOutline(null);
+                      setSelectedScenarioId(null);
+                    }}
+                    className={`p-4 rounded border text-left transition relative overflow-hidden ${
+                      selectedEra === "modern"
+                        ? "bg-[#c1a067]/15 border-[#c1a067] text-[#c1a067]"
+                        : "bg-black/40 border-[#c1a067]/20 hover:border-[#c1a067]/60"
+                    }`}
+                  >
+                    <div className="text-base font-semibold mb-1 flex items-center gap-1.5 font-sans">
+                      <span>21世纪现代：信息高墙与深渊</span>
+                    </div>
+                    <div className="text-xs text-gray-400 leading-relaxed font-sans">
+                      SCP基金会在世界暗角用钢筋与磁场进行钢铁收容；时钟塔的现代魔术科（El-Melloi）借数字网络解析太古教典。在遍布监控、霓虹闪烁的城市角落，神秘开始失控漫溢。
+                    </div>
+                    {selectedEra === "modern" && (
+                      <span className="absolute bottom-2 right-2 text-[10px] uppercase font-mono tracking-widest border border-[#c1a067] px-1 text-[#c1a067] bg-black">SELECTED</span>
+                    )}
+                  </button>
+                </div>
+
+                {/* Content Module Settings — 两种 gameMode 下都展示,共享 type-moon / scp 开关 */}
+                <div className="bg-black/35 border border-[#c1a067]/15 p-5 rounded-lg space-y-4">
+                    <div className="border-b border-[#c1a067]/10 pb-2">
+                      <h4 className="text-sm font-semibold text-[#c1a067] font-sans flex items-center gap-1.5">
+                        <Shield className="w-4 h-4" /> TRPG 内容模块库载入配置 (Content Module Options)
+                      </h4>
+                      <p className="text-[10px] text-gray-500 font-mono tracking-wider mt-0.5 uppercase">
+                        Select which expansion lore elements to load into background sandbox
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {/* Classic CoC */}
+                      <div className="flex items-center gap-3 p-3 bg-black/40 border border-[#c1a067]/10 rounded select-none opacity-85">
+                        <input
+                          type="checkbox"
+                          checked
+                          disabled
+                          id="checkbox-classic-coc"
+                          className="w-4 h-4 rounded border-gray-600 bg-black text-[#c1a067] focus:ring-[#c1a067] cursor-not-allowed"
+                        />
+                        <label htmlFor="checkbox-classic-coc" className="cursor-not-allowed text-left">
+                          <span className="text-xs font-bold text-gray-200 block">【固件】经典CoC</span>
+                          <span className="text-[10px] text-gray-400 block whitespace-nowrap">经典克苏鲁属性、检定及疯狂法则(不可关闭)</span>
+                        </label>
+                      </div>
+
+                      {/* Type-MOON */}
+                      <button
+                        type="button"
+                        id="toggle-typemoon-module"
+                        onClick={() => {
+                          setFeatureTypeMoon(!featureTypeMoon);
+                          setModuleOutline(null);
+                        }}
+                        className={`flex items-center gap-3 p-3 border rounded text-left transition select-none ${
+                          featureTypeMoon
+                            ? "bg-[#c1a067]/5 border-[#c1a067]/40 text-[#c1a067]"
+                            : "bg-black/20 border-neutral-800 opacity-60 text-gray-400"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={featureTypeMoon}
+                          readOnly
+                          className="w-4 h-4 rounded border-gray-600 text-[#c1a067] focus:ring-[#c1a067] pointer-events-none"
+                        />
+                        <div>
+                          <span className="text-xs font-bold block">【附加】Type-MOON要素</span>
+                          <span className="text-[10px] text-gray-400 block">融合时钟塔魔术、圣堂代行者和秘仪理论</span>
+                        </div>
+                      </button>
+
+                      {/* SCP Foundation */}
+                      <button
+                        type="button"
+                        id="toggle-scp-module"
+                        onClick={() => {
+                          setFeatureScp(!featureScp);
+                          setModuleOutline(null);
+                        }}
+                        className={`flex items-center gap-3 p-3 border rounded text-left transition select-none ${
+                          featureScp
+                            ? "bg-[#c1a067]/5 border-[#c1a067]/40 text-[#c1a067]"
+                            : "bg-black/20 border-neutral-800 opacity-60 text-gray-400"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={featureScp}
+                          readOnly
+                          className="w-4 h-4 rounded border-gray-600 text-[#c1a067] focus:ring-[#c1a067] pointer-events-none"
+                        />
+                        <div>
+                          <span className="text-xs font-bold block">【附加】SCP要素</span>
+                          <span className="text-[10px] text-gray-400 block">融合SCP基金会特别外勤、Site站点与异常收容</span>
+                        </div>
+                      </button>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex flex-col sm:flex-row justify-end items-center gap-3 pt-4 border-t border-[#c1a067]/10">
-                  <button
-                    id="regenerate-module-outline-btn"
-                    type="button"
-                    onClick={generateModuleOutline}
-                    disabled={isGeneratingModule}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-black border border-[#c1a067]/40 text-[#c1a067] font-sans text-xs rounded hover:bg-[#c1a067]/15 transition active:scale-95 disabled:opacity-40"
-                  >
-                    <RotateCcw className={`w-3.5 h-3.5 ${isGeneratingModule ? "animate-spin" : ""}`} /> 重新生成模组
-                  </button>
+                {/* ---------- 分流 1:LLM 生成路径 — 沿用旧的"生成模组大纲"流程 ---------- */}
+                {gameMode === "llm-generated" && (
+                  !moduleOutline ? (
+                    <div className="text-center pt-6 decoration-transparent">
+                      <button
+                        id="generate-module-btn"
+                        type="button"
+                        onClick={generateModuleOutline}
+                        disabled={isGeneratingModule}
+                        className="px-10 py-3.5 bg-[#c1a067] text-black font-semibold tracking-wider rounded transition-all hover:bg-[#d5b57d] active:scale-95 text-sm uppercase shadow-lg shadow-[#c1a067]/20 disabled:opacity-40 flex items-center gap-2 mx-auto"
+                      >
+                        <Sparkles className={`w-4 h-4 ${isGeneratingModule ? "animate-spin" : ""}`} />
+                        {isGeneratingModule ? "守密人(KP)正沙盘推演模组大纲..." : "确认年代并架构模组大纲"}
+                      </button>
+                      {moduleGenerationError && (
+                        <p className="text-red-400 text-xs mt-3 flex items-center justify-center gap-1">
+                          <AlertCircle className="w-3.5 h-3.5" /> {moduleGenerationError}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <motion.div
+                      id="generated-module-review-card"
+                      initial={{ opacity: 0, scale: 0.98 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="bg-[#181a1c] border border-[#c1a067]/30 p-5 rounded-lg space-y-4 font-sans relative"
+                    >
+                      <div className="absolute top-3 right-3 text-[10px] font-mono text-[#c1a067]/70 uppercase tracking-widest border border-[#c1a067]/20 px-2 py-0.5 bg-black/40 rounded">
+                        Keeper Module Drafted
+                      </div>
 
-                  <button
-                    id="approve-step-1-btn"
-                    type="button"
-                    onClick={() => setCurrentStep(2)}
-                    className="flex items-center gap-1.5 px-6 py-2 bg-[#c1a067] text-black font-bold font-sans text-xs rounded hover:bg-[#d5b57d] transition active:scale-95"
-                  >
-                    <span>满意大纲，建立调查员卡片</span>
-                    <Check className="w-4 h-4" />
-                  </button>
-                </div>
-              </motion.div>
+                      <div className="border-b border-[#c1a067]/15 pb-2.5">
+                        <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase">模组标题 (Module Title)</span>
+                        <h3 className="text-xl font-bold text-[#c1a067] mt-0.5 font-sans">
+                          {moduleOutline.title || "(标题缺失)"}
+                        </h3>
+                      </div>
+
+                      <div className="text-sm leading-relaxed text-gray-300 font-sans space-y-2">
+                        <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase">前言/背景低语 (No-Spoiler Intro)</span>
+                        <p className="bg-black/30 p-4 border-l-2 border-[#c1a067] rounded-r italic text-gray-350 select-text">
+                          {moduleOutline.intro || "(前言缺失,可重新生成)"}
+                        </p>
+                      </div>
+
+                      <div className="pt-2">
+                        <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase mb-1.5">契合本模组推荐职业 (Suggested Occupations)</span>
+                        <div className="flex flex-wrap gap-2">
+                          {Array.isArray(moduleOutline.recommendedOccupations) && moduleOutline.recommendedOccupations.length > 0 ? (
+                            moduleOutline.recommendedOccupations.map((job) => (
+                              <span key={job} className="text-xs bg-[#c1a067]/10 text-[#c1a067] border border-[#c1a067]/30 px-2.5 py-1 rounded font-normal font-sans shadow-sm">
+                                {job}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-xs text-gray-500 italic font-sans">(模型未给出推荐职业，可重新生成或自由选择)</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-[#c1a067]/10">
+                        <button
+                          id="step1-back-from-outline-btn"
+                          type="button"
+                          onClick={() => {
+                            setGameMode(null);
+                            setModuleOutline(null);
+                          }}
+                          className="flex items-center gap-1.5 px-4 py-2 bg-black border border-[#c1a067]/30 text-[#c1a067]/80 font-sans text-xs rounded hover:bg-[#c1a067]/10 hover:text-[#c1a067] transition active:scale-95"
+                        >
+                          <ArrowLeft className="w-3.5 h-3.5" /> 返回时代与模式选择
+                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            id="regenerate-module-outline-btn"
+                            type="button"
+                            onClick={generateModuleOutline}
+                            disabled={isGeneratingModule}
+                            className="flex items-center gap-1.5 px-4 py-2 bg-black border border-[#c1a067]/40 text-[#c1a067] font-sans text-xs rounded hover:bg-[#c1a067]/15 transition active:scale-95 disabled:opacity-40"
+                          >
+                            <RotateCcw className={`w-3.5 h-3.5 ${isGeneratingModule ? "animate-spin" : ""}`} /> 重新构建大纲
+                          </button>
+                          <button
+                            id="approve-step-1-btn"
+                            type="button"
+                            onClick={() => setCurrentStep(2)}
+                            className="flex items-center gap-1.5 px-6 py-2 bg-[#c1a067] text-black font-bold font-sans text-xs rounded hover:bg-[#d5b57d] transition active:scale-95"
+                          >
+                            <span>满意大纲，建立调查员卡片</span>
+                            <Check className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )
+                )}
+                {/* ---------- 分流 2:深入卷宗(Scenario-based)路径 ---------- */}
+                {gameMode === "scenario-based" && (
+                  !selectedScenario ? (
+                    <div className="space-y-4 pt-2">
+                      <div className="flex items-baseline justify-between border-b border-[#c1a067]/15 pb-2">
+                        <h3 className="text-sm font-semibold text-[#c1a067] font-sans flex items-center gap-1.5">
+                          <ScrollText className="w-4 h-4" /> 卷宗目录(Scenario Archives)
+                        </h3>
+                        <span className="text-[10px] font-mono text-gray-500 uppercase tracking-widest">
+                          {scenariosForEra.length} 本符合「{selectedEra === "1920s" ? "1920s" : "Modern"}」时代
+                        </span>
+                      </div>
+
+                      {scenariosForEra.length === 0 ? (
+                        <div className="text-center py-10 text-xs text-gray-500 italic font-sans border border-dashed border-[#c1a067]/20 rounded">
+                          当前时代下还没有已转写的卷宗。可切回「踏入虚空」由 KP 即兴架构原创模组,
+                          或换一个时代继续浏览卷宗。
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {scenariosForEra.map((sc) => (
+                            <button
+                              key={sc.meta.id}
+                              type="button"
+                              id={`scenario-card-${sc.meta.id}`}
+                              onClick={() => setSelectedScenarioId(sc.meta.id)}
+                              className="text-left p-4 rounded border border-[#c1a067]/25 bg-black/40 hover:border-[#c1a067] hover:bg-[#c1a067]/10 transition active:scale-[0.99] relative overflow-hidden"
+                            >
+                              <div className="flex items-baseline justify-between gap-2 mb-1">
+                                <h4 className="text-base font-bold text-[#c1a067] font-sans line-clamp-1">
+                                  《{sc.meta.title}》
+                                </h4>
+                                <span className="text-[10px] font-mono text-gray-500 uppercase tracking-widest shrink-0">
+                                  {sc.meta.difficulty}
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap gap-1 mb-2 text-[10px] text-gray-400 font-mono">
+                                {sc.meta.tags.slice(0, 3).map((tag) => (
+                                  <span key={tag} className="bg-[#c1a067]/10 text-[#c1a067] px-1.5 py-0.5 rounded border border-[#c1a067]/30">
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                              <p className="text-xs text-gray-300 leading-relaxed font-sans line-clamp-3 italic">
+                                {sc.meta.synopsisMd}
+                              </p>
+                              <div className="mt-2.5 pt-2 border-t border-gray-800/60">
+                                <span className="text-[10px] text-gray-500 font-mono uppercase tracking-widest block mb-1">
+                                  推荐职业
+                                </span>
+                                <div className="flex flex-wrap gap-1">
+                                  {sc.meta.recommendedOccupations.slice(0, 4).map((occ) => (
+                                    <span key={occ} className="text-[10px] bg-black/30 text-gray-300 border border-gray-800 px-1.5 py-0.5 rounded font-sans">
+                                      {occ}
+                                    </span>
+                                  ))}
+                                  {sc.meta.recommendedOccupations.length > 4 && (
+                                    <span className="text-[10px] text-gray-500 italic">
+                                      +{sc.meta.recommendedOccupations.length - 4}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <motion.div
+                      id="selected-scenario-review-card"
+                      initial={{ opacity: 0, scale: 0.98 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="bg-[#181a1c] border border-[#c1a067]/30 p-5 rounded-lg space-y-4 font-sans relative"
+                    >
+                      <div className="absolute top-3 right-3 text-[10px] font-mono text-[#c1a067]/70 uppercase tracking-widest border border-[#c1a067]/20 px-2 py-0.5 bg-black/40 rounded">
+                        Scenario Selected
+                      </div>
+
+                      <div className="border-b border-[#c1a067]/15 pb-2.5">
+                        <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase">卷宗标题 (Scenario Title)</span>
+                        <h3 className="text-xl font-bold text-[#c1a067] mt-0.5 font-sans">
+                          《{selectedScenario.meta.title}》
+                        </h3>
+                        <div className="flex flex-wrap gap-1.5 mt-2 text-[10px] font-mono text-gray-400">
+                          <span className="bg-black/40 px-2 py-0.5 rounded border border-gray-800">
+                            难度 · {selectedScenario.meta.difficulty}
+                          </span>
+                          {selectedScenario.meta.tags.map((tag) => (
+                            <span key={tag} className="bg-[#c1a067]/10 text-[#c1a067] px-2 py-0.5 rounded border border-[#c1a067]/30">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="text-sm leading-relaxed text-gray-300 font-sans space-y-2">
+                        <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase">前言/背景低语 (Synopsis)</span>
+                        <div className="bg-black/30 p-4 border-l-2 border-[#c1a067] rounded-r italic text-gray-350 select-text whitespace-pre-line">
+                          {selectedScenario.meta.synopsisMd}
+                        </div>
+                      </div>
+
+                      <div className="pt-2">
+                        <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase mb-1.5">
+                          契合本卷宗推荐职业 (Suggested Occupations)
+                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedScenario.meta.recommendedOccupations.map((job) => (
+                            <span key={job} className="text-xs bg-[#c1a067]/10 text-[#c1a067] border border-[#c1a067]/30 px-2.5 py-1 rounded font-normal font-sans shadow-sm">
+                              {job}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {selectedScenario.presetInvestigators && selectedScenario.presetInvestigators.length > 0 && (
+                        <div className="pt-2">
+                          <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase mb-1.5">
+                            原作预设调查员 (Pre-Generated Investigators · {selectedScenario.presetInvestigators.length})
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {selectedScenario.presetInvestigators.map((pc) => (
+                              <span key={pc.id} className="text-[11px] bg-black/40 text-gray-300 border border-gray-800 px-2 py-0.5 rounded font-sans">
+                                {pc.name} · {pc.occupation}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4 border-t border-[#c1a067]/10">
+                        <button
+                          id="step1-back-from-scenario-btn"
+                          type="button"
+                          onClick={() => {
+                            setGameMode(null);
+                            setSelectedScenarioId(null);
+                          }}
+                          className="flex items-center gap-1.5 px-4 py-2 bg-black border border-[#c1a067]/30 text-[#c1a067]/80 font-sans text-xs rounded hover:bg-[#c1a067]/10 hover:text-[#c1a067] transition active:scale-95"
+                        >
+                          <ArrowLeft className="w-3.5 h-3.5" /> 返回时代与模式选择
+                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            id="reselect-scenario-btn"
+                            type="button"
+                            onClick={() => setSelectedScenarioId(null)}
+                            className="flex items-center gap-1.5 px-4 py-2 bg-black border border-[#c1a067]/40 text-[#c1a067] font-sans text-xs rounded hover:bg-[#c1a067]/15 transition active:scale-95"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" /> 换一本卷宗
+                          </button>
+                          <button
+                            id="approve-step-1-scenario-btn"
+                            type="button"
+                            onClick={() => setCurrentStep(2)}
+                            className="flex items-center gap-1.5 px-6 py-2 bg-[#c1a067] text-black font-bold font-sans text-xs rounded hover:bg-[#d5b57d] transition active:scale-95"
+                          >
+                            <span>确认卷宗,建立调查员卡片</span>
+                            <Check className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )
+                )}
+              </>
             )}
           </motion.div>
         )}
@@ -1105,7 +1504,43 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
             </div>
 
             {/* Current Module Context Reference Bar (Provides Background Whispers for PC Creation) */}
-            {moduleOutline && (
+            {gameMode === "scenario-based" && selectedScenario && (
+              <div id="scenario-context-reference" className="bg-[#181a1c] border border-[#c1a067]/30 p-4 rounded-lg font-sans space-y-3.5 shadow-lg">
+                <div className="flex items-center gap-2 justify-between border-b border-gray-800/80 pb-2">
+                  <div className="flex items-center gap-2">
+                    <ScrollText className="w-4 h-4 text-[#c1a067]" />
+                    <span className="text-xs font-bold text-[#c1a067] uppercase tracking-wider font-sans">正在参阅当前卷宗背景情报 (Scenario Dossier)</span>
+                  </div>
+                  <span className="text-[10px] font-mono bg-[#c1a067]/10 text-[#c1a067] px-2.5 py-0.5 rounded border border-[#c1a067]/35 uppercase tracking-wide">
+                    《{selectedScenario.meta.title}》
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[10px] text-gray-400 font-mono tracking-widest block uppercase">卷宗简介 / 背景低语 :</span>
+                  <div className="text-xs leading-relaxed text-gray-300 italic pl-3 border-l-2 border-[#c1a067]/60 py-1 bg-black/25 pr-2 select-text font-serif leading-normal whitespace-pre-line">
+                    {selectedScenario.meta.synopsisMd}
+                  </div>
+                </div>
+                <div className="flex items-center flex-wrap gap-1.5 pt-1.5 text-[11px] text-gray-400 border-t border-gray-900/40">
+                  <span className="font-semibold text-gray-300 font-sans flex items-center gap-1">
+                    <Shield className="w-3.5 h-3.5 text-[#c1a067]" />
+                    <span>契合本卷宗推荐职业:</span>
+                  </span>
+                  {selectedScenario.meta.recommendedOccupations.map((job) => (
+                    <span key={job} className="bg-black/50 text-[#c1a067] px-2 py-0.5 rounded font-medium border border-gray-800/80 font-sans text-[11px]">
+                      {job}
+                    </span>
+                  ))}
+                </div>
+                {selectedScenario.presetInvestigators && selectedScenario.presetInvestigators.length > 0 && (
+                  <div className="text-[10px] text-gray-500 font-mono italic pt-1 border-t border-gray-900/40">
+                    本卷宗附 {selectedScenario.presetInvestigators.length} 位锁定数值的预设调查员,推荐直接选用,以保留作者设计平衡。
+                  </div>
+                )}
+              </div>
+            )}
+
+            {gameMode !== "scenario-based" && moduleOutline && (
               <div id="module-context-reference" className="bg-[#181a1c] border border-[#c1a067]/30 p-4 rounded-lg font-sans space-y-3.5 shadow-lg">
                 <div className="flex items-center gap-2 justify-between border-b border-gray-800/80 pb-2">
                   <div className="flex items-center gap-2">
@@ -1125,7 +1560,7 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                 <div className="flex items-center flex-wrap gap-1.5 pt-1.5 text-[11px] text-gray-400 border-t border-gray-900/40">
                   <span className="font-semibold text-gray-300 font-sans flex items-center gap-1">
                     <Shield className="w-3.5 h-3.5 text-[#c1a067]" />
-                    <span>契合本案 PC 职业推荐:</span>
+                    <span>契合本案推荐职业:</span>
                   </span>
                   {Array.isArray(moduleOutline.recommendedOccupations) && moduleOutline.recommendedOccupations.length > 0 ? (
                     moduleOutline.recommendedOccupations.map((job) => (
@@ -1816,16 +2251,20 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                   <div>
                     <span className="text-[10px] text-gray-400 font-mono block">架构模组标题</span>
                     <div className="text-md font-bold text-[#c1a067] mt-1 font-sans">
-                      {moduleOutline?.title || "《未解明之超自然重合事件》"}
+                      {gameMode === "scenario-based" && selectedScenario
+                        ? `《${selectedScenario.meta.title}》`
+                        : (moduleOutline?.title || "《未解明之超自然重合事件》")}
                     </div>
                   </div>
 
                   <div className="space-y-1 bg-black/30 p-3 rounded.lg border border-gray-850 text-xs text-gray-300 leading-relaxed font-sans flex flex-col flex-1 min-h-0">
                     <span className="text-[9px] font-mono font-bold text-[#c1a067] block uppercase border-b border-gray-800 pb-1 mb-1.5">
-                      模组不剧透序幕 (Background Hint)
+                      事件序幕 (Background Hint)
                     </span>
                     <div className="italic text-gray-350 select-text overflow-y-auto custom-scrollbar pr-1 flex-1 min-h-0">
-                      {moduleOutline?.intro || "在世界阴暗潮湿的边缘，不可名状之神秘开始剧烈渗透，时钟塔与SCP基金会的目光都已被这诡谲的核心场景吸引。"}
+                      {gameMode === "scenario-based" && selectedScenario
+                        ? selectedScenario.meta.synopsisMd
+                        : (moduleOutline?.intro || "在世界阴暗潮湿的边缘，不可名状之神秘开始剧烈渗透，时钟塔与SCP基金会的目光都已被这诡谲的核心场景吸引。")}
                     </div>
                   </div>
                 </div>
@@ -1935,9 +2374,9 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                   {/* Attributes Grid */}
                   <div>
                     <h4 className="text-[10px] font-semibold text-[#c1a067] mb-2 font-sans tracking-wider uppercase border-b border-[#c1a067]/10 pb-1">
-                      ◎ 八维属性基础(D100)
+                      ◎ 基础属性(D100)
                     </h4>
-                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                    <div className="grid grid-cols-5 max-sm:grid-cols-3 gap-2">
                       {[
                         { l: "力量 STR", v: reviewCharacter.attributes.str },
                         { l: "体质 CON", v: reviewCharacter.attributes.con },
@@ -1947,7 +2386,8 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                         { l: "智力 INT", v: reviewCharacter.attributes.int },
                         { l: "意志 POW", v: reviewCharacter.attributes.pow },
                         { l: "教育 EDU", v: reviewCharacter.attributes.edu },
-                        { l: "幸运 LUCK", v: reviewCharacter.attributes.luck }
+                        { l: "幸运 LUCK", v: reviewCharacter.attributes.luck },
+                        { l: "理智 SAN", v: reviewCharacter.san }
                       ].map((item) => (
                         <div key={item.l} className="bg-black/45 p-1.5 rounded text-center border border-gray-850">
                           <span className="text-[9px] text-gray-500 block leading-tight">{item.l}</span>

@@ -68,6 +68,29 @@ export function buildScenarioContextBlock(
   );
   lines.push(`已访问场景:${state.visitedSceneIds.length} 个`);
 
+  // -------- 开局勾子:hook.prologueMd + callToActionMd + startScene --------
+  // 这是模组开局"为什么调查员此刻在这里、被托去查什么、手里捏着什么"的唯一来源。
+  // 第一回合 narrative 必须以本块为起点(配合 SYSTEM_INSTRUCTION 节 12.11);
+  // 中后期回合也保留可见,作为 NPC 动机/玩家委托关系的不变参照。
+  const hook = scenario.hook;
+  const isFirstTurn =
+    state.visitedSceneIds.length <= 1 &&
+    state.elapsedMinutes === 0 &&
+    state.discoveredClueIds.length <= (scenario.hook.defaultInitialClues?.length ?? 0);
+  lines.push(
+    `\n--- [剧本模式·开局勾子] ${isFirstTurn ? "**第一回合必须以此为起点**" : "(供后续场景引用,不得改写)"} ---`,
+  );
+  lines.push(`起始场景:${hook.startScene}`);
+  if (hook.prologueMd?.trim()) {
+    lines.push(`【hook.prologue 调查员是怎么被卷进来的】\n${hook.prologueMd.trim()}`);
+  }
+  if (hook.callToActionMd?.trim()) {
+    lines.push(`【hook.call_to_action 第一回合开场时玩家此刻的物理位置 / 手中物件】\n${hook.callToActionMd.trim()}`);
+  }
+  if (hook.defaultInitialClues?.length) {
+    lines.push(`【hook.default_initial_clues 开局即拥有的线索】 ${hook.defaultInitialClues.join(", ")}`);
+  }
+
   // -------- 当前场景:frame 全暴露 + freedom 全暴露 + forbidden 全暴露 --------
   lines.push(`\n--- 当前场景:${currentScene.title}(id=${currentScene.id})---`);
   lines.push(`【frame.summary 必须遵守】\n${currentScene.frame.summaryMd.trim()}`);
