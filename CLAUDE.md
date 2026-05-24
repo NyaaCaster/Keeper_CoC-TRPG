@@ -41,6 +41,14 @@
 - 客户端 localStorage **只允许**保存以 `/api/public-config` 返回的 `imagePublicBaseUrl` 为前缀的 URL；任何不符前缀的 `imageUrl` 必须丢弃并打 warn，不得直接写入存档。
 - 新增画图供应商时：扩展 `src/types.ts` 的 `ImageProviderKind` → 在 `dispatchImage` 加分支返回 `{ b64?, url? }` → 同步更新 `src/lib/apiSettings.ts` 校验枚举与 `providerIcons.tsx` 标签；**不要**新增独立的画图路由。
 
+## 模组静态资产规范(`src/data/modules/<id>/assets/`)
+
+模组目录里的 `cover.jpg` / `scenes/*.jpg` / `maps/*.png` / `handouts/*.png` 等图像会随仓库与 Docker 镜像分发,必须按规格压缩后入仓,**禁止**把原始扫描件、1080p+ 截图或未压缩 PNG 直接提交。
+
+- 完整尺寸 / 编码 / 体积上限见 `.docs/scenario-schema.md` 第 11.1 节;关键点:封面 ≤ 120 KB(800 px,JPEG q82),场景图 ≤ 200 KB(1024 px),单模组 `assets/` 累计建议 ≤ 3 MB。
+- 透明通道才用 PNG,否则一律 JPEG;新增模组前先压缩再 `git add`,提交时核对体积。
+- 这条规范与"画图统一规范"互不冲突:**模组静态资产**走仓库 + 镜像内静态路由 `/modules/<id>/<path>`;**LLM 运行时画图**走 `generateImageAndPublish` + `/cache/images/*`。
+
 ## Docker 部署约定
 
 - 镜像采用**多阶段构建**保证体积最小：`node:20-alpine` 作为 builder 跑 `npm ci` + `npm run build`，再 copy 到一个干净的 `node:20-alpine` runtime，运行时只装生产依赖。

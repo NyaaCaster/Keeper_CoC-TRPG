@@ -493,6 +493,25 @@ src/data/modules/<id>/
 - 引用方式:运行时通过 `/modules/<id>/<path>` 静态路由访问(Phase 2 在 `server.ts` 加),前端 `<img>` 直接用——**不**走 `/cache/images/*`(那是 LLM 画图的内容寻址缓存)
 - 没有 `portraits/` 目录(本项目不做 NPC 立绘集)
 
+### 11.1 · 图像资产规格(铁律)
+
+为控制仓库与镜像体积,所有进仓库的模组图像必须遵守以下尺寸/质量上限。新增模组前先按此规格压缩,**不要**把原始扫描件或 1080p+ 的图直接进仓库。
+
+| 资产 | 长边上限 | 编码 | 质量 | 单文件目标 |
+|---|---|---|---|---|
+| `cover.jpg` 模组卡封面 | 800 px | JPEG | 80~85 | ≤ 120 KB |
+| `scenes/<id>.jpg` 场景氛围图 | 1024 px | JPEG | 80~85 | ≤ 200 KB |
+| `maps/<id>.png` 场景地图 | 1280 px | PNG(8-bit/调色板优先)或 JPEG | — | ≤ 300 KB |
+| `handouts/<id>.png` 线索道具图 | 1024 px | PNG 或 JPEG | 85 | ≤ 200 KB |
+
+- 高于上限会显著吃流量与镜像体积,提交前必须压缩;低于上限不要硬撑长边、保持原宽高比即可。
+- 透明通道才用 PNG;否则一律 JPEG(质量 80~85 几乎无肉眼差距,体积是 PNG 的 1/3 ~ 1/10)。
+- 单模组所有 `assets/` 累计建议 ≤ 3 MB,超量需在 PR 描述里说明原因。
+- 推荐工具(任选其一):
+  - Windows 内建 .NET(无需安装):`System.Drawing.Bitmap` + `EncoderParameters`(本项目首版封面用此法压缩,1.25 MB → 71 KB)
+  - ImageMagick:`magick input.jpg -resize "800x>" -quality 82 cover.jpg`
+  - cwebp/squoosh-cli 也可,只要符合上述规格
+
 ---
 
 ## 12 · 完整最小样例(用于自测校验器)

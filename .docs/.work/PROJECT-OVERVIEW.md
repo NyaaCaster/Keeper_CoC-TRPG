@@ -173,6 +173,7 @@ scripts/
 | 职业表 | `.docs/occupation-list.md` —— 职业模板 + 核心技能 |
 | 测试命令 | `.docs/testing-commands.md` —— `[sys_test]` sentinel 注入投骰/效果骰演练 |
 | 模组 schema | `.docs/scenario-schema.md` —— 「基于剧本游戏模式」frame/freedom/forbidden 三槽 + 全字段语义；schema_version=1 |
+| 模组图像资产 | `.docs/scenario-schema.md` 第 11.1 节 —— 封面 ≤ 120 KB / 800 px,场景 ≤ 200 KB / 1024 px,JPEG q82,单模组累计 ≤ 3 MB |
 
 ## 常见坑（容易踩、踩了贵）
 
@@ -186,6 +187,7 @@ scripts/
 8. **`#10b981` 是绿色不是金色**。CSS 变量 `--color-coc-gold` / Tailwind class `text-coc-gold` 名字带 "gold" 但值是绿色，不要被名字误导改成黄色——这是 UI 铁律。
 9. **滚动条统一用 `custom-scrollbar` class**，禁止自写 `::-webkit-scrollbar` 覆写。
 10. **`.docs/keeper-*.json` 是玩家私有模组配置**，被 `.dockerignore` 排除，**不会进镜像**。改完不要 commit 它。
+11. **不要把未压缩的模组图像直接进仓库**。`src/data/modules/<id>/assets/` 里所有图必须按 `.docs/scenario-schema.md` 11.1 节压到上限以内(封面 1.25 MB → 71 KB 是已验证基线)，否则镜像与仓库会被一张图拖肥。
 
 ## 工作流（与本项目协作的"启动键"）
 
