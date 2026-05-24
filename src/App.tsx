@@ -72,8 +72,6 @@ import { KEEPER_RESPONSE_SCHEMA } from "./lib/llmSchemas";
 import SettingsPanel from "./components/SettingsPanel";
 import { WebGameSave, ApiSettings } from "./types";
 import type {
-  GameMode,
-  ScenarioState,
   ScenarioActions,
 } from "./types";
 import { getModuleById } from "./data/modules";
@@ -90,6 +88,7 @@ import {
   isLatestKeeperRollRequest,
   findPendingTailRollRequest,
   buildCancellationReport,
+  isInternalSystemMarker,
 } from "./lib/rollCancellation";
 
 /** 二阶段效果骰队列项 — 详见 .docs/two-stage-roll.md。 */
@@ -438,15 +437,24 @@ export default function App() {
   const handleSendPlayerMessage = async (
     textToSend: string,
     isSystemReport: boolean = false,
+    /**
+     * 调用方可显式传入"刚刚被改写过的 messages",用于规避 setState 闭包陷阱:
+     * 例如 handleRollComplete 在 setMessages 里清空 rollRequest 后立刻调用本函数,
+     * 此时函数闭包读到的 messages 还是旧值(rollRequest 未清),会误判为"放弃声明"
+     * 并把旧 rollRequest 重新写回 → 下一回合 keeper 卡渲染成"已错过"。
+     * 投骰收尾路径必须显式把"清空后"的 messages 传进来。
+     */
+    messagesOverride?: ChatMessage[],
   ) => {
     if (!textToSend.trim() || isKeeperLoading) return;
+    const baseMessages = messagesOverride ?? messages;
     // CoC 7e 严格合规：SAN 检定挂起期间，玩家不可推进剧情。系统回报例外（SAN 检定结束后会以 system 身份发回）。
     if (activeSanity && !isSystemReport) return;
     // 规则 10:INT 检定 modal 挂起期间也不允许玩家发声(系统回报除外)
     if (pendingMadnessCheck && !isSystemReport) return;
 
     // 终局闸:dead / insane / victory / ambiguous 状态封盘——玩家所有输入(包括 system 回报)都不再推进 LLM。
-    const currentStatus = deriveScenarioStatus(messages);
+    const currentStatus = deriveScenarioStatus(baseMessages);
     if (
       currentStatus === "dead" ||
       currentStatus === "insane" ||
@@ -468,7 +476,7 @@ export default function App() {
     // 那就视为玩家撤回了行为意图 — 在新消息之前注入 [放弃声明] system 标记。
     // 该回报与玩家新消息合并进入同一次 LLM 调用,不再单独触发新调用。
     const cancellationMsgs: ChatMessage[] = [];
-    const pendingTail = findPendingTailRollRequest(messages);
+    const pendingTail = findPendingTailRollRequest(baseMessages);
     if (pendingTail && pendingTail.parsedResponse?.rollRequest) {
       const rr = pendingTail.parsedResponse.rollRequest;
       // 原 rollRequest 留在历史卡片上(派生函数会把它渲染为"已错过"),不清空字段 —
@@ -537,7 +545,7 @@ export default function App() {
       } : prev);
     }
 
-    const updated = [...messages, ...cancellationMsgs, playerMsg, ...dyingGateMsgs, ...madnessGateMsgs];
+    const updated = [...baseMessages, ...cancellationMsgs, playerMsg, ...dyingGateMsgs, ...madnessGateMsgs];
     setMessages(updated);
     setInputText("");
 
@@ -1923,6 +1931,7 @@ export default function App() {
       };
     }
     setActiveRoll(null);
+    let messagesAfterClear: ChatMessage[] | null = null;
     setMessages((prev) => {
       // 找到队尾那条带 rollRequest 的 keeper 消息(即玩家刚刚投的那条),清空其 rollRequest
       const tail = prev[prev.length - 1];
@@ -1938,11 +1947,18 @@ export default function App() {
             rollRequest: null,
           },
         };
-        return [...prev.slice(0, -1), cleared];
+        const next = [...prev.slice(0, -1), cleared];
+        messagesAfterClear = next;
+        return next;
       }
+      messagesAfterClear = prev;
       return prev;
     });
-    handleSendPlayerMessage(messageReport, true);
+    // 闭包陷阱规避:把 setMessages 里刚刚算出的"清空后 messages"显式喂给
+    // handleSendPlayerMessage,否则它读组件 state 仍是清空前的旧值,
+    // findPendingTailRollRequest 会误把刚投完的卡片当成"未消费",导致下一轮
+    // 出现"已错过"+ [放弃声明] 的二连错乱。
+    handleSendPlayerMessage(messageReport, true, messagesAfterClear ?? undefined);
   };
 
   // Keeper's automatic roll complete callback
@@ -2533,7 +2549,20 @@ export default function App() {
 
             {/* Conversation Timeline Log */}
             <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar bg-[radial-gradient(ellipse_at_bottom,_var(--tw-gradient-stops))] from-[#131517]/40 via-[#0e1011] to-[#0d0e10]">
-              {messages.map((m) => (
+              {(() => {
+                // 对话计数 — 只对玩家与 KP 的发言累加,system 标记(包括内部隐藏与可见的事件卡)不计入。
+                // 用于疯狂态等"我撑了几句"的判断;system 事件密集时不会扰动这个数字。
+                const turnIndexById = new Map<string, number>();
+                let turnCount = 0;
+                for (const m of messages) {
+                  if (m.sender === "keeper" || m.sender === "player") {
+                    turnCount += 1;
+                    turnIndexById.set(m.id, turnCount);
+                  }
+                }
+                return messages.filter((m) => !isInternalSystemMarker(m)).map((m) => {
+                  const turnIndex = turnIndexById.get(m.id);
+                  return (
                 <div
                   key={m.id}
                   className={`flex ${m.sender === "player" ? "justify-end" : m.sender === "system" ? "justify-center" : "justify-start"}`}
@@ -2567,6 +2596,11 @@ export default function App() {
                       className="max-w-xl bg-[#c1a067]/10 border border-[#c1a067]/45 rounded-lg rounded-tr-none p-3.5 text-xs text-gray-100 font-sans shadow-lg leading-relaxed shadow-yellow-500/5"
                     >
                       <div className="font-semibold text-[#c1a067] mb-1 font-sans text-right">
+                        {turnIndex !== undefined && (
+                          <span className="text-[10px] font-mono text-gray-500 mr-2 align-middle">
+                            #{turnIndex}
+                          </span>
+                        )}
                         调查员: {character?.name}
                       </div>
                       <div className="whitespace-pre-wrap font-sans">
@@ -2595,6 +2629,11 @@ export default function App() {
                               title={`生成模型 · ${m.model}`}
                             >
                               {m.model}
+                            </span>
+                          )}
+                          {turnIndex !== undefined && (
+                            <span className="text-[10px] font-mono text-gray-500 ml-2">
+                              #{turnIndex}
                             </span>
                           )}
                         </div>
@@ -2859,7 +2898,9 @@ export default function App() {
                     </div>
                   )}
                 </div>
-              ))}
+              );
+                });
+              })()}
 
               {isKeeperLoading && (
                 <div

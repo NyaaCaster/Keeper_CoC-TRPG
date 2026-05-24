@@ -56,3 +56,20 @@ export function buildCancellationReport(
 ): string {
   return `[放弃声明] 玩家撤回了"${skillName}"判定声明（reason: "${reason}"）。请按真实 KP 反应处理：通常让该意图自然过去；当撤回的犹豫本身在场景里有意义时（紧迫战斗的喘息、对方 NPC 看到伸手又收回、被追逐时停下脚步），可在 narrative 中让"犹豫"产生后果。**不要**直接重发同一个 rollRequest——除非剧情条件再次主动施加。`;
 }
+
+/**
+ * 判定一条消息是否是"纯给 LLM 看"的内部 system 标记，对玩家不应可见。
+ * 用于聊天 UI 渲染前过滤；这些消息仍会进存档、仍会喂 LLM。
+ *
+ * 当前覆盖：
+ *   - sys_cancel_*  [放弃声明]
+ *
+ * 未来若想隐藏 sys_dying_gate_*、sys_madness_gate_* 等指令型 system 标记，
+ * 在此处追加 id 前缀即可——所有出口共用一份判定。
+ */
+const INTERNAL_SYSTEM_ID_PREFIXES = ["sys_cancel_"] as const;
+
+export function isInternalSystemMarker(message: ChatMessage): boolean {
+  if (message.sender !== "system") return false;
+  return INTERNAL_SYSTEM_ID_PREFIXES.some((prefix) => message.id.startsWith(prefix));
+}
