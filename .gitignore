@@ -11,3 +11,7 @@ coverage/
 
 # Local Claude harness state (per-user permissions etc.)
 .claude/settings.local.json
+
+# 模组转写期源材料(页面截图 / 私人 OCR 笔记 / 提取草稿)
+# 仅本地开发期使用,不进仓库;最终产物只有 src/data/modules/<id>/scenario.yaml
+.docs/.work/*-extract/

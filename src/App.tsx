@@ -63,11 +63,25 @@ import {
   buildElementSandboxLimiter,
   buildCombatDerivedBlock,
   buildInventoryBlock,
+  buildScenarioModeBlock,
   sanitizeKeeperResponse,
 } from "./lib/keeperPrompt";
 import { KEEPER_RESPONSE_SCHEMA } from "./lib/llmSchemas";
 import SettingsPanel from "./components/SettingsPanel";
 import { WebGameSave, ApiSettings } from "./types";
+import type {
+  GameMode,
+  ScenarioState,
+  ScenarioActions,
+} from "./types";
+import { getModuleById } from "./data/modules";
+import {
+  buildScenarioContextBlock,
+  buildNarrativeStyleBlock,
+  applyScenarioActions,
+} from "./lib/scenarioRuntime";
+import type { RollContext as RollContextForScenario } from "./lib/scenarioRuntime";
+import type { Scenario } from "./data/modules/_schema/scenario";
 import { getImagePublicPrefix } from "./lib/publicConfig";
 import {
   isLatestKeeperRollRequest,
@@ -214,6 +228,19 @@ export default function App() {
     scp: boolean;
   }>(initialSave ? initialSave.enabledFeatures : { typemoon: true, scp: true });
 
+  // 剧本模式状态。老存档 / llm-generated 模式下 gameMode = "llm-generated",scenarioState 为空。
+  // Phase 2 暂不暴露 UI 入口,切到 scenario-based 需要手改存档 JSON。
+  const [gameMode, setGameMode] = useState<GameMode>(
+    initialSave?.gameMode ?? "llm-generated",
+  );
+  const [scenarioState, setScenarioState] = useState<ScenarioState | null>(
+    initialSave?.scenarioState ?? null,
+  );
+  const activeScenario: Scenario | null =
+    gameMode === "scenario-based" && scenarioState
+      ? getModuleById(scenarioState.moduleId) ?? null
+      : null;
+
   // UI states
   const [inputText, setInputText] = useState<string>("");
   const [isKeeperLoading, setIsKeeperLoading] = useState<boolean>(false);
@@ -316,6 +343,15 @@ export default function App() {
   const [currentLocation, setCurrentLocation] =
     useState<string>("古木教堂的隐秘密道");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * 剧本模式专用:玩家最近一次成功投出的判定结果。
+   * 由 handleRollComplete / handleKeeperRollComplete 在投骰收尾时刷新,
+   * 由 applyKeeperResponse 内的 applyScenarioActions 读取以校验
+   * sceneTransition 的 requires-skill 出口与 clueDiscovered 的 method=skill 条件。
+   * 一旦消费过(无论接受还是拒绝),由 applyKeeperResponse 自行清空,避免跨回合复用。
+   */
+  const lastRollContextRef = useRef<RollContextForScenario | null>(null);
 
   // Scroll to bottom of message thread
   const scrollToBottom = () => {
@@ -805,12 +841,19 @@ export default function App() {
 
     try {
       const dynamicInstructions = await loadDynamicInstructions();
+      const scenarioBlock =
+        gameMode === "scenario-based" && activeScenario && scenarioState
+          ? buildScenarioModeBlock() +
+            buildScenarioContextBlock(activeScenario, scenarioState) +
+            buildNarrativeStyleBlock(activeScenario.narrativeStyle)
+          : "";
       const systemInstruction =
         SYSTEM_INSTRUCTION +
         dynamicInstructions +
         buildElementSandboxLimiter(tmEnabled, scpEnabled) +
         buildCombatDerivedBlock(activeChar) +
-        buildInventoryBlock(activeChar);
+        buildInventoryBlock(activeChar) +
+        scenarioBlock;
       const userText = buildKeeperContext(currentHistory);
 
       const textOutput = await dispatchLlm({
@@ -1351,18 +1394,55 @@ export default function App() {
       });
     }
 
+    // ---------- 剧本模式:scenarioActions 校验 + 落账 + 反向标记 ----------
+    // 仅当 gameMode === "scenario-based" 且持有合法 scenario + scenarioState 时才处理;
+    // llm-generated 模式下 LLM 不应下发本字段,即使下了也直接忽略。
+    let scenarioAutoEnding:
+      | { kind: "victory" | "ambiguous" | "dead" | "insane"; epilogue?: string }
+      | null = null;
+    if (
+      gameMode === "scenario-based" &&
+      activeScenario &&
+      scenarioState &&
+      keeperData.scenarioActions
+    ) {
+      const scenarioResult = applyScenarioActions(
+        keeperData.scenarioActions,
+        scenarioState,
+        activeScenario,
+        lastRollContextRef.current,
+      );
+      // 一次性消费 — 无论接受/拒绝都清空,避免跨回合的"幽灵骰"复用
+      lastRollContextRef.current = null;
+
+      if (scenarioResult.nextState !== scenarioState) {
+        setScenarioState(scenarioResult.nextState);
+      }
+      if (scenarioResult.systemMarkers.length > 0) {
+        const baseTs = Date.now();
+        scenarioResult.systemMarkers.forEach((line, i) => {
+          newMsgs.push({
+            id: `sys_scenario_${baseTs}_${i}`,
+            sender: "system",
+            timestamp: new Date().toLocaleTimeString(),
+            text: line,
+          });
+        });
+      }
+      scenarioAutoEnding = scenarioResult.autoEnding;
+    }
+
     // Create main message card with KeeperResponse
     const snapshotModuleName =
       keeperData.gameState?.moduleName || gameModuleName;
     const snapshotLocation =
       keeperData.gameState?.currentLocation || currentLocation;
 
-    // 终局闸:scenarioEndOverride 优先级高于 LLM 自行下发的 keeperData.scenarioEnd。
-    // - dead / insane:抹除所有"还能继续推剧情"的字段,只保留 narrative + scenarioEnd + gameState。
-    // - dying:保留 LLM 的 narrative,但抹除 rollRequest/keeperRoll/sanityCheck/clue/sceneImage —
-    //   单回合垂死窗口内不允许任何技能/检定触发,玩家本回合只能输入纯叙事遗言。
-    // - null(救起):不强制抹除,LLM 可能在救起 narrative 中包含次回合的钩子(npcDialogue 等)。
-    const finalScenarioEnd = scenarioEndOverride ?? keeperData.scenarioEnd ?? null;
+    // 终局闸:scenarioEndOverride 优先级最高(HP/SAN 硬规则护栏),
+    // 其次是剧本模式 scenarioActions.endingProposed 校验通过自动写出的 scenarioAutoEnding,
+    // 最后才是 LLM 在 keeperData.scenarioEnd 里自行下发的(llm-generated 模式主路径)。
+    const finalScenarioEnd =
+      scenarioEndOverride ?? scenarioAutoEnding ?? keeperData.scenarioEnd ?? null;
     const isTerminalKind = finalScenarioEnd && (
       finalScenarioEnd.kind === "dead" ||
       finalScenarioEnd.kind === "dying" ||
@@ -1746,6 +1826,13 @@ export default function App() {
   // 让"投完后历史卡片不再显示 REQUIRES DESTINY ROLL"和"未投骰且不再队尾的卡片显示已错过"
   // 在派生层完全自洽。
   const handleRollComplete = (result: RollResult, messageReport: string) => {
+    if (activeRoll) {
+      lastRollContextRef.current = {
+        skill: activeRoll.skillName,
+        difficulty: activeRoll.difficulty,
+        successType: result.successType,
+      };
+    }
     setActiveRoll(null);
     setMessages((prev) => {
       // 找到队尾那条带 rollRequest 的 keeper 消息(即玩家刚刚投的那条),清空其 rollRequest
@@ -2136,6 +2223,8 @@ export default function App() {
         clues,
         enabledFeatures,
         currentLocation,
+        gameMode,
+        scenarioState: scenarioState ?? undefined,
       });
     }
   }, [
@@ -2148,6 +2237,8 @@ export default function App() {
     clues,
     enabledFeatures,
     currentLocation,
+    gameMode,
+    scenarioState,
   ]);
 
   useEffect(() => {

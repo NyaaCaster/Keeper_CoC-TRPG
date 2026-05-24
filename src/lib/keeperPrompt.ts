@@ -103,6 +103,53 @@ export function buildInventoryBlock(character: CharacterSheet | null | undefined
   );
 }
 
+/**
+ * 节 12 · 剧本模式铁律。仅当 gameMode === "scenario-based" 时由 App.tsx 拼接。
+ *
+ * 本块是**行为契约**:告诉 LLM 怎么用 scenarioActions 通道、frame/freedom/forbidden 三槽语义、
+ * 哪些动作必须经前端校验、违反后会被怎么处理。
+ *
+ * 与之配套的是 scenarioRuntime 的 buildScenarioContextBlock(动态当前回合切片)
+ * 与 buildNarrativeStyleBlock(文风指导)。三块由 App.tsx 在 gameMode 分支里拼。
+ */
+export function buildScenarioModeBlock(): string {
+  return (
+    "\n\n" +
+    "12. **剧本模式铁律**(本块仅在玩家选择「基于剧本游戏模式」时注入,llm-generated 模式下本块不会出现):\n" +
+    "    本场跑团基于一个**预制模组**进行;模组数据(scenes / npcs / clues / flags / endings / narrative_style)以 [剧本模式·当前回合上下文] 与 [剧本模式·叙事文风指导] 注入块的形式同步给你,你**必须**按这些数据走流程,不得凭空再造主线、人物或结局。\n" +
+    "    - **12.1 三槽语义**:每个剧本节点同时声明 frame(不可篡改的事实)/ freedom(可挑用的语料库)/ forbidden(红线)。\n" +
+    "       - frame.* **任何回合都不可违反**——summary、facts、kp_secret(已解锁的)、exits、stats、voice_guidelines、reveal_md、triggers 等都是数据契约;偏离即视为脱稿。\n" +
+    "       - freedom.* 是**语料池**,可挑用、不必全用,情绪需要时允许偏离(高潮可换节奏、可用未列入的具体物件,只要不违反 frame 与 forbidden)。\n" +
+    "       - forbidden / global_forbidden / forbidden_phrasings 是**红线**,任一项违反都会被认定为破稿;forbidden_phrasings 关\"怎么说\"(元描述、人称、术语),forbidden 关\"说什么\"(情节、事实、揭露时机)。\n" +
+    "    - **12.2 场景跳转走 scenarioActions.sceneTransition**:玩家走出当前场景时,你必须 ① 在 narrative 里克制描写过场 ② 在 scenarioActions.sceneTransition 写 toSceneId(必须是当前场景 frame.exits 列出的某条边的 to)。前端会校验目标存在 + 边存在 + 边的 condition 已满足(free / requires-clue 已发现 / requires-flag 匹配 / requires-skill 当回合投骰成功)。\n" +
+    "       - **任一不满足前端拒绝并下回合注入 [场景非法·拒绝] 标记**;你必须改口、回到当前场景或换合法出口。\n" +
+    "       - **不要在 narrative 里描述玩家\"已经走到了下一个场景\"**——前端通过 scenarioActions.sceneTransition 落账后才视为真切到该场景,否则就是空说。\n" +
+    "    - **12.3 线索发现走 scenarioActions.clueDiscovered**:仅当玩家声明动作 + 满足 clue.frame.discovery 条件时下发。\n" +
+    "       - discovery.method = skill: 先走规则 4 的 rollRequest 流程(用 clue.frame.discovery.skill 与 difficulty),**只有本回合实际投骰成功**才允许在**下一回合**下发 clueDiscovered;同回合既发 rollRequest 又发 clueDiscovered 会被前端拒(因为投骰还没出结果)。\n" +
+    "       - discovery.method = auto-on-enter: 玩家**首次进入** location_scene 后立刻下发,无需投骰。\n" +
+    "       - discovery.method = flag / npc-give: 看 conditionFlag 是否满足、giverNpc 是否在场。\n" +
+    "       - **任一不满足前端拒绝并注入 [线索条件未满足·拒绝]**;你不得绕过 reveal_md(玩家看到的固定文本由前端从 clue.frame.revealMd 读出,你只在 narrative 里描写发现时刻的氛围,不要照抄 reveal_md)。\n" +
+    "    - **12.4 终局判断走 scenarioActions.endingProposed**:**只在你确信玩家已经走完该 ending 的所有 trigger flag** 时下发(上下文里的 [终局条件清单] 全 ✓)。\n" +
+    "       - 前端复核 endings[].triggers AND 逻辑;满足才放行 + 自动落 scenarioEnd + 注入 [终幕条件已满足];不满足则拒绝并回注 [终幕条件未达成·拒绝]。\n" +
+    "       - 同时仍可下发原 scenarioEnd(规则 9/11 的 victory/ambiguous/dead/insane 闸)——两个通道**互不替代**;endingProposed 只是\"按模组配置触发某个具体结局\",scenarioEnd 是\"前端最终落终局态\"的唯一通道。**模组好/灰结局优先用 endingProposed**,前端校验通过后会替你自动写 scenarioEnd。\n" +
+    "    - **12.5 flag 写入走 scenarioActions.flagSet**:战斗胜负、叙事抉择等\"运行时才能确定\"的 flag(模组 yaml 里 writableBy 含 'scenario-actions' 的那些)由你在叙事完成后下发。\n" +
+    "       - 例:玩家击杀 boss → flagSet: [{ flagId: 'flag.boss-defeated', value: true, reason: '玩家用霰弹枪击穿头部' }]。\n" +
+    "       - 前端校验 flag.writableBy 含 'scenario-actions';不含的 flag 拒绝设置(那些 flag 由 clue.unlocks 或 timeline.effects 自动维护)。\n" +
+    "    - **12.6 时间推进走 scenarioActions.timeAdvance**:按 7e 时间惯例自己拨表,minutes 字段填本回合应推进的分钟数。\n" +
+    "       - 7e 惯例对照:快速感官检定(侦查/聆听/心理学一次)= 几分钟、话术单次 5~15 分钟、Library Use 一次 = **半天 / 240 分钟**(7e 明文)、急救 = 5 分钟、医疗按伤势小时级、追踪/导航 = 小时级、跨城市旅行按地理判断、战斗回合 = 不拨表。\n" +
+    "       - 前端把 minutes 累加到 scenarioState.elapsedMinutes;Phase 2 不接日历驱动效应(timeline 触发 / 跨日疯狂 / HP 恢复留 V2)——你**不需要**为日历驱动操心,只如实拨表即可。\n" +
+    "    - **12.7 narrative_style 优先级**:模组的 [剧本模式·叙事文风指导] 注入块**覆写**规则 8 的克系笔法默认值;frame.pov / tense / forbidden_phrasings 是硬约束,freedom 是可挑用语料。模组没声明 narrative_style 时回退到规则 8。\n" +
+    "    - **12.8 与既有规则的优先级**:终局闸(规则 9) > endingProposed(本节) > 模组主线推进;疯狂干涉(规则 10)与本节正交,疯狂态期间继续按规则 10 处理,scenarioActions 里**只**填明确合法的动作,其它字段保持 null。\n" +
+    "    - **12.9 llm-generated 模式禁用**:如果上下文里**没有** [剧本模式·当前回合上下文] 注入块,scenarioActions 必须为 null——这是 llm-generated 模式,你按原路径走,**不要**主动召唤 scenarioActions。\n" +
+    "    - **12.10 时代锚点(era)硬约束**:[剧本模式·当前回合上下文] 顶部的「时代锚点」一行(来自 meta.era)是**整本模组的硬时代设定**,**任何 narrative / NPC 台词 / 道具 / 线索描写都不得越界**:\n" +
+    "       - era=1920s:允许电报、煤气灯、手摇电话、留声机、汽油车、火车、报纸、打字机、左轮、温彻斯特步枪;**禁止**手机、互联网、GPS、监控摄像头、微波炉、塑料袋、电视、私家车导航、智能门锁、即时通讯,以及任何 1925 年后才量产的物件。语言层避免赛博朋克 / 网络黑话 / 现代俚语。\n" +
+    "       - era=modern:允许手机、互联网、GPS、监控、机动车、即时通讯、现代医疗、信用卡;古董元素允许出现但应作为\"旧物\"语境(博物馆、阁楼、二手店),不是日常物。\n" +
+    "       - era=other:按上下文里 eraNote 的说明严格执行——既不要照搬 1920s 也不要照搬 modern。\n" +
+    "       - **当 character.background 与 meta.era 冲突时,以 meta.era 为准**(模组的时代不可被角色卡覆写);若你需要在 narrative 里调和这个矛盾,可叙事性地处理(\"她带着一台对这个时代而言古怪的设备……\"),但**不可**让玩家用越界物件解决谜题。\n" +
+    "       - 与本铁律相关的另一处可挑用语料是 [剧本模式·当前回合上下文] 末尾的 global_freedom.era_atmosphere_md,那是**风格补充**而非时代红线;时代红线由本节(12.10)决定。\n"
+  );
+}
+
 export function clampBonusPenalty(req: any) {
   if (!req || typeof req !== "object") return;
   for (const k of ["bonus", "penalty"] as const) {

@@ -3,6 +3,16 @@ import { getImagePublicPrefix } from "./publicConfig";
 
 const SAVES_KEY = "keeper_game_saves";
 
+/**
+ * 读时迁移:老存档没有 gameMode,统一视为 llm-generated。
+ * scenario-based 模式的存档会带 gameMode + scenarioState,这里不做形状校验,
+ * 让消费侧(applyKeeperResponse / scenarioRuntime)在读时按 schema 处理缺漏。
+ */
+function migrateLegacySave(save: WebGameSave): WebGameSave {
+  if (save.gameMode) return save;
+  return { ...save, gameMode: "llm-generated" };
+}
+
 // localStorage 只允许存储白名单前缀的图片 URL（来自 /api/public-config）。
 // 任何 data:URI 或第三方地址（含已废弃的 base64 老存档）写入前都会被剔除，
 // 避免存档体积膨胀以及因 base64 撑爆 localStorage 配额。
@@ -34,7 +44,9 @@ export function getAllSaves(): WebGameSave[] {
     const data = localStorage.getItem(SAVES_KEY);
     if (!data) return [];
     const saves: WebGameSave[] = JSON.parse(data);
-    return saves.sort((a, b) => b.lastUpdated - a.lastUpdated);
+    return saves
+      .map(migrateLegacySave)
+      .sort((a, b) => b.lastUpdated - a.lastUpdated);
   } catch (e) {
     console.error("Failed to load saves", e);
     return [];

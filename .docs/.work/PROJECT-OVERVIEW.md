@@ -143,7 +143,15 @@ src/data/
   ├─ cocSkills.ts              ← 7e 标准技能注册表(1920s / modern 双时代)
   ├─ cocOccupations.ts         ← 职业模板 + coreSkills 五种 kind 表达
   ├─ cocWeapons.ts             ← 武器结构化条目
-  └─ presets.ts                ← 18 张预设调查员
+  ├─ presets.ts                ← 18 张预设调查员
+  └─ modules/                  ← 「基于剧本游戏模式」模组数据基座（Phase 1 已落）
+      ├─ _schema/
+      │   ├─ scenario.ts       ← Scenario TS SSOT(camelCase；详见 .docs/scenario-schema.md）
+      │   └─ validator.ts      ← yaml(snake_case)→TS(camelCase) + 引用完整性 + BFS + 结局可达性
+      └─ <module-id>/          ← 各模组目录（meta.id 必须等于目录名；Phase 1.4 起填入）
+scripts/
+  ├─ validate-modules.ts       ← 扫描模组、调 validator、检查资产存在性；prebuild 钩子
+  └─ test-validator.ts         ← validator 14 用例自测（最小样例 + 12 个故意失败）
 .docs/                         ← 项目内规范与决策文档(下面单列重要的几篇)
 .docs/.work/                   ← 给 Claude Code 看的工作简报(本文所在地)
 ```
@@ -164,6 +172,7 @@ src/data/
 | 技能表 | `.docs/skill-1920s.md` / `.docs/skill-modern.md` —— 两套时代的标准技能 |
 | 职业表 | `.docs/occupation-list.md` —— 职业模板 + 核心技能 |
 | 测试命令 | `.docs/testing-commands.md` —— `[sys_test]` sentinel 注入投骰/效果骰演练 |
+| 模组 schema | `.docs/scenario-schema.md` —— 「基于剧本游戏模式」frame/freedom/forbidden 三槽 + 全字段语义；schema_version=1 |
 
 ## 常见坑（容易踩、踩了贵）
 
@@ -188,6 +197,7 @@ src/data/
 | 提交 + 推送 | `commit-push` skill —— Conventional Commits（英文小写起首），`git add <file>` 显式指定，**不**附 `Co-Authored-By` |
 | 验证改动 | `verify` skill / `run` skill |
 | 代码审查 | `code-review` skill |
+| 模组校验 | `npm run validate:modules` —— 跑 14 用例自测 + 扫 `src/data/modules/*/scenario.yaml`。`prebuild` 钩子已挂,任一模组校验失败 → 拒绝构建 |
 
 Windows 特有坑：
 

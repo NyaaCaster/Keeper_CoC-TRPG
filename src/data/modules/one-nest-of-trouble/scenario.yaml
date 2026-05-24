@@ -1,0 +1,994 @@
+schema_version: 1
+
+# ============================================================================
+# meta
+# ============================================================================
+
+meta:
+  id: one-nest-of-trouble
+  title: 一窝麻烦
+  era: modern
+  language: zh-CN
+  recommended_investigators: { min: 1, max: 4 }
+  expected_hours: { min: 3, max: 5 }
+  difficulty: 标准
+  tags: [都市, 调查, 食尸鬼, 精神病院]
+  cover: assets/cover.jpg
+  start_time: { game_day: 1, hour: "10:00" }
+  synopsis_md: |
+    温莎学院的一群电影系学生失踪在废弃的凯斯勒精神病院。野狗在那里嚎叫,
+    他们当中有一个人,正在被某种古老的事物改造……
+  author_credits_md: |
+    原作者保留版权。中文化译者:oreoinhell。本项目转写:Keeper_CoC-TRPG。
+
+# ============================================================================
+# hook
+# ============================================================================
+
+hook:
+  start_scene: scene.windsor-college
+  prologue_md: |
+    电话那头的声音沙哑——温莎学院的一位母亲,儿子昨夜没有回家。她说他和几个朋友
+    一起去找另一个失踪的孩子,**克拉伦斯**,一个 19 岁的电影系学生。
+
+    学生们带着摄像机和热情出发,四个小时之内失去了所有联系。校警说"很可能就是
+    熬夜赶剧本",但她不信。她托人找到你们。
+  call_to_action_md: |
+    现在你们站在温莎学院的草坪上,手里是克拉伦斯母亲塞给你们的一把宿舍备用钥匙。
+  default_initial_clues: []
+
+# ============================================================================
+# scenes
+# ============================================================================
+
+scenes:
+  # --------------------------------------------------------------------------
+  - id: scene.windsor-college
+    title: 温莎学院校园
+    frame:
+      summary_md: |
+        典型的美国东北部校园:草坪、红砖楼、晨雾。电影学院在西翼,
+        一栋三层老建筑外墙挂着学生展映海报。**克拉伦斯**等人最后一次
+        被人看见的地点就在影像系教学楼前。
+      facts:
+        - 校园里有校警室,夜间有持枪巡逻员
+        - 克拉伦斯的宿舍门虚掩着,锁未损坏
+        - 母亲交给调查员的备用钥匙能直接开门
+      exits:
+        - to: scene.clarence-dorm
+          condition: free
+          label: 走进克拉伦斯的宿舍
+        - to: scene.asylum-exterior
+          condition: requires-clue
+          required_clue: clue.gps-notebook
+          label: 按 GPS 坐标驾车前往凯斯勒精神病院
+      npcs_present: [npc.jerry-mosley]
+      available_clues: []
+    freedom:
+      mood_tags: [清晨雾气, 校园悬疑]
+      sensory_palette:
+        sight: 高大的橡树、布告栏上的失踪学生海报
+        sound: 自行车铃声、远处的早课钟声
+        smell: 湿草坪、咖啡车的烟味
+      improvisable_props:
+        - 布告栏上的电影社活动单
+        - 自助投币咖啡机旁的笔记本
+      npc_action_hints:
+        npc.jerry-mosley: [习惯把对讲机别在腰上, 谈到野狗时眼神会闪烁]
+    forbidden:
+      - 不要在这里直接揭示精神病院的真相
+      - 不要让校警主动说出"狗人"传说
+
+  # --------------------------------------------------------------------------
+  - id: scene.clarence-dorm
+    title: 克拉伦斯的宿舍
+    frame:
+      summary_md: |
+        一间被堆满 DVD 与剧本的双人间。床铺整齐,桌上的笔记本电脑还开着,
+        但屏幕已被自动锁定。窗台一只未开封的能量饮料,瓶身的水汽证明
+        他离开时间不算久。抽屉里有一本被反复涂改的笔记本。
+      facts:
+        - 笔记本电脑无密码,登录后有大量恐怖电影资料
+        - 桌上散落 DVD,多为狗类恐怖片(《群犬》《狼嚎》等)
+        - 抽屉里那本笔记被涂改了多次,最后一页是 GPS 坐标
+        - 床头柜里有几本旧书与博客打印件
+      exits:
+        - to: scene.windsor-college
+          condition: free
+          label: 退回校园
+      npcs_present: []
+      available_clues:
+        - clue.windsor-newspaper
+        - clue.hidden-truth-blog
+        - clue.gps-notebook
+        - clue.dog-omen-page
+        - clue.witchcraft-cult-book
+    freedom:
+      mood_tags: [偏执的整洁, 被打断的工作]
+      sensory_palette:
+        sight: 贴满便签的墙、电影海报
+        sound: 走廊里别人放的音乐、楼下远处的吉他声
+        smell: 速食面、廉价咖啡、淡淡的香烟味
+      improvisable_props:
+        - 一张没寄出的明信片
+        - 桌上一杯泛着油花的冷咖啡
+    forbidden:
+      - 不要让玩家在没投骰的情况下立刻发现 GPS 坐标
+      - 不要透露克拉伦斯已经被改造或死亡的具体细节
+
+  # --------------------------------------------------------------------------
+  - id: scene.asylum-exterior
+    title: 凯斯勒精神病院 · 外围
+    frame:
+      summary_md: |
+        三层主楼,阁楼黑窗,尖顶上架着一根早已断掉的避雷针。砖路被野草顶
+        起裂痕,门口的"严禁入内"指示牌已经被野风刮歪。学生们的**白色卡车**
+        停在草坪边,车头略凹陷,一道暗红色的撞痕从前杠延伸到挡泥板。
+      facts:
+        - 卡车型号是 2012 款白色皮卡,车牌可识别
+        - 车头有撞击痕迹,像是从内向外被某物推过
+        - 外围长草过膝,没有近期人类穿行的痕迹,但有大型动物趟过的踩压带
+        - 主楼正门虚掩,推开会发出低沉的吱呀声
+      exits:
+        - to: scene.asylum-main-hall
+          condition: free
+          label: 推开主楼大门走进去
+      npcs_present: []
+      available_clues: [clue.student-truck]
+    freedom:
+      mood_tags: [废墟, 凝固的恐慌, 不祥的安静]
+      sensory_palette:
+        sight: 破碎的钟楼、缠绕在二楼栏杆上的常春藤
+        sound: 远处的乌鸦、自己脚踩在碎砖上的声音
+        smell: 潮土、混合着远处垃圾堆的腐味
+        touch: 锈迹斑斑的栏杆、皮卡引擎盖还有余温
+      improvisable_props:
+        - 一只破旧的儿童拖鞋,半埋在草丛里
+        - 被风刮到柱子上的旧报纸
+    forbidden:
+      - 不要在外围让玩家直接撞见任何超自然实体
+      - 不要把卡车里的具体物品提前剧透到二、三具尸体的画面
+
+  # --------------------------------------------------------------------------
+  - id: scene.asylum-main-hall
+    title: 凯斯勒精神病院 · 主楼大厅与走廊
+    frame:
+      summary_md: |
+        曾经的接待区现在是一片狼藉:倒翻的长椅、覆满灰尘的菱形花纹地砖、
+        从天花板挂下的电线像枯藤一样垂着。墙上有人用油漆写下了一行行
+        无意义的涂鸦——"鳄鱼"、"轰炸"、"巨大的牛仔"、"死亡之都"。
+        南北两翼通向当年的男女病房,正中央有一道楼梯通向二楼与地下层。
+      facts:
+        - 主楼分中央 / 北翼(原女病人区) / 南翼(原男病人区)三段
+        - 地砖菱形花纹被血迹覆盖,血迹延伸向北翼深处
+        - 涂鸦中混有"H.P.L"、"狗的国度"等克系隐喻,但需要解读
+        - 楼梯井阴暗,通往二楼的踏步有近期被踩踏的灰尘扰动
+      exits:
+        - to: scene.asylum-exterior
+          condition: free
+          label: 退回外围
+        - to: scene.asylum-victims-room
+          condition: free
+          label: 沿血迹走向北翼深处
+        - to: scene.water-bath-room
+          condition: requires-flag
+          required_flag: flag.found-camera
+          required_value: true
+          label: 顺着摄像机录像里的水声向地下层走
+      npcs_present: [npc.dog-grunt]
+      available_clues:
+        - clue.first-corpse
+        - clue.dog-tactics
+        - clue.tame-dog
+    freedom:
+      mood_tags: [废墟, 闷热的霉味, 不安的寂静, 突如其来的撞击]
+      sensory_palette:
+        sight: 锈蚀的轮椅、倒在地上的圣经、被撕碎的病历纸
+        sound: 远处的狗吠、风穿过破窗的呼啸、楼板的咯吱声
+        smell: 霉味、血腥味、远处的湿狗气息
+        touch: 地砖打滑、墙皮一碰就掉
+      improvisable_props:
+        - 一张写满名字的纸条,夹在断了腿的椅子下
+        - 二楼楼梯口被划烂的"管理区"指示牌
+      npc_action_hints:
+        npc.dog-grunt: [低头潜行, 从破损的门洞里突然冲出, 群体迂回包抄]
+    forbidden:
+      - 不要让玩家在第一战之前看到狗群头领或梅德拉
+      - 不要直接说出"食尸鬼"这个名字,用感官描写替代
+
+  # --------------------------------------------------------------------------
+  - id: scene.asylum-victims-room
+    title: 凯斯勒精神病院 · 第二、三具尸体的房间
+    frame:
+      summary_md: |
+        北翼尽头一间塌了一半的旧办公室。地板上是两具被严重啃咬的尸体,
+        从衣物和身材判断是克拉伦斯的两位朋友——**瓦内莎**与**杰西**。
+        角落里有一台滚落的摄像机,电池红灯还在缓慢闪烁。
+      facts:
+        - 尸体上有多处大型犬齿啃咬伤,部分肢体被拖走
+        - 摄像机里录着克拉伦斯失态嚎叫的画面,以及最后他冲进黑暗的镜头
+        - 现场有一条向地下楼梯延伸的湿润血印
+      exits:
+        - to: scene.asylum-main-hall
+          condition: free
+          label: 退回大厅
+      npcs_present: []
+      available_clues:
+        - clue.second-third-corpse
+        - clue.video-camera
+    freedom:
+      mood_tags: [血腥, 静止, 突然涌起的恶心]
+      sensory_palette:
+        sight: 摄像机镜头反射的暗光、地上散落的胶片盒
+        sound: 摄像机散热扇微微的嗡鸣、自己的呼吸声
+        smell: 血腥与铁锈、隐约的湿狗味
+      improvisable_props:
+        - 倒扣的麦克风,海绵防风罩沾着血
+        - 一本被撕开的剧本,封面写着"狗人 · 第三稿"
+    forbidden:
+      - 不要在玩家完成 SAN 检定前快进
+      - 不要由 KP 主动告知亚历山大的命运,他们要靠 lair 才知道
+
+  # --------------------------------------------------------------------------
+  - id: scene.water-bath-room
+    title: 地下永久水浴室
+    frame:
+      summary_md: |
+        老式精神病院特有的水浴治疗室。墙壁瓷砖大半剥落,半人高的浴缸里盛着
+        浑浊的积水。一个**面色惨白、半人半兽**的男人蜷在角落,他像是听见
+        声音了——但还在啃咬一根人骨。
+      facts:
+        - 这是一间地下层水浴治疗室,长年积水
+        - 角落的人形物体显然是亚历山大,但已经处于改造中期
+        - 他的反应模糊,在"逃跑、攻击、求救"三种行为之间摇摆
+        - 房间深处有一道被拖出来的血痕,延伸向更深的暗道
+      exits:
+        - to: scene.asylum-main-hall
+          condition: free
+          label: 沿楼梯回到主楼
+        - to: scene.lair
+          condition: requires-clue
+          required_clue: clue.tracking-blood
+          label: 沿血迹追入巢穴
+      npcs_present: [npc.kyle-alexander]
+      available_clues: [clue.tracking-blood]
+    freedom:
+      mood_tags: [冰冷, 反胃, 同伴变形的崩溃感]
+      sensory_palette:
+        sight: 浴缸表面漂着一层灰白油膜、瓷砖缝里嵌着头发
+        sound: 水滴落、远处低沉的心跳声、亚历山大喉咙里咕哝的词
+        smell: 阴湿、腐肉、被遗忘的消毒水
+        touch: 地砖湿滑,墙壁渗着锈水
+      improvisable_props:
+        - 角落的破旧电影摄像机镜头(亚历山大的)
+        - 浴缸边的不锈钢托盘里盛着几根已被啃过的人骨
+      npc_action_hints:
+        npc.kyle-alexander: [蜷缩, 偶尔抬头喊一个旧朋友的名字, 不接受拥抱但允许接近]
+    forbidden:
+      - 不要在玩家投出 SAN 检定前直接报"这是亚历山大"
+      - 不要在玩家未触发 clue.tracking-blood 之前打开通向 lair 的门
+
+  # --------------------------------------------------------------------------
+  - id: scene.lair
+    title: 食尸鬼巢穴
+    frame:
+      summary_md: |
+        从精神病院最深处一间病房地下被掘开的洞穴。墙壁是被指甲抠出来的
+        泥与砖,地面散落着人骨与电影器材。中央一个巨大的**腐烂罐子**
+        盛着不知名的脏器。古老的食尸鬼**梅德拉**在这里凝视进入者。
+      facts:
+        - 巢穴位于地下深处,只有窄窄的人形通道可以进入
+        - 罐子里的内容物在持续地缓慢冒泡
+        - 散落的电影器材里有亚历山大的私人物品(摄像机包、电影系学生证)
+        - 梅德拉与圣伯纳·大丹混种犬狗群头领驻守在此
+      exits:
+        - to: scene.water-bath-room
+          condition: free
+          label: 沿来路撤回浴室
+      npcs_present: [npc.mevra, npc.dog-pack-leader, npc.ghoul]
+      available_clues: [clue.alex-personal-effects]
+    freedom:
+      mood_tags: [终战, 古老的恶意, 不可逆的转折]
+      sensory_palette:
+        sight: 罐子里漂着不该是人类的器官、墙上刻着扭曲的符号
+        sound: 梅德拉低沉的笑声、狗群从黑暗中合围的脚步
+        smell: 腐肉的甜腥、湿狗、铁锈
+      improvisable_props:
+        - 一面被砸碎的镜子,反射出不属于此处的光影
+        - 角落一个写着名字的银项链
+      npc_action_hints:
+        npc.mevra: [不主动开口, 用爪击打地面发出节奏, 失败时退入暗影]
+        npc.dog-pack-leader: [总是站在梅德拉前方半步, 嗅到血腥时狂吠]
+        npc.ghoul: [二选一从墙缝钻出, 数量按 KP 调度]
+    forbidden:
+      - 不要让梅德拉自爆动机或起源
+      - 不要在 boss 战未定胜负前提供逃脱通道
+      - 不要替玩家决定救/杀亚历山大,这是玩家的抉择
+
+# ============================================================================
+# npcs
+# ============================================================================
+
+npcs:
+  # --------------------------------------------------------------------------
+  - id: npc.jerry-mosley
+    name: 杰瑞·莫斯利
+    role: 中立
+    initial_location: scene.windsor-college
+    initial_attitude: neutral
+    frame:
+      public_persona_md: |
+        温莎学院夜班校警。45 岁,啤酒肚,腰间别着对讲机,常年牵一条老黄狗。
+        他见过那帮电影系学生头天傍晚抬着设备出发的样子。
+        被问到"凯斯勒"三个字时眼神会闪烁——他听过那里"有狗在嚎"的传言,但不愿对调查员细说。
+      stats:
+        str: 65
+        con: 60
+        siz: 70
+        dex: 50
+        app: 45
+        int: 55
+        pow: 50
+        edu: 55
+        hp: 13
+        mp: 10
+        san: 50
+      voice_guidelines:
+        - 习惯用"年轻人"称呼调查员,带美式中西部口音
+        - 谈到野狗与精神病院时会下意识压低声音
+        - 不主动透露自己听过"狗人"传言,需要心理学/说服才会松口
+    freedom:
+      improvisable_quirks:
+        - 不停摩挲对讲机的天线
+        - 隔几句话就抚一下脚边老狗的头
+      catchphrases: [我在这儿干了十六年, 那地方不该让孩子去]
+    forbidden:
+      - 不要让校警直接说出"狗人"或"食尸鬼"专名
+      - 不要让校警主动跟调查员一起出发去精神病院
+
+  # --------------------------------------------------------------------------
+  - id: npc.kyle-alexander
+    name: 凯尔·亚历山大
+    role: 中立
+    initial_location: scene.water-bath-room
+    initial_attitude: wary
+    frame:
+      public_persona_md: |
+        失踪学生之一。19 岁,电影系大二,擅长摄影与潜行。在玩家进入水浴室时,
+        他已经处于半人半兽的中期改造态——皮肤惨白,指甲被强行长长,但还残留
+        着部分人类记忆。看见熟悉物件(摄像机、银项链、母亲名字)时会短暂清醒。
+      secret_md: |
+        他在巢穴被梅德拉用古老仪式喂养、强迫吞食人骨,意识正在不可逆地崩塌。
+        允许玩家通过心理学短暂呼回神智——但每次呼回都进一步消耗他剩余的人格。
+        他既不希望被同伴看到这副样子,也不希望被丢下;玩家如何处置他是本模组的核心抉择。
+      secret_unlock_trigger: clue.alex-personal-effects
+      stats:
+        str: 70
+        con: 60
+        siz: 65
+        dex: 65
+        app: 35
+        int: 70
+        pow: 50
+        edu: 65
+        hp: 12
+        mp: 10
+        san: 21
+      combat:
+        weapon: 爪击
+        damage_formula: 1D3
+        skill_value: 40
+      voice_guidelines:
+        - 喘息夹杂呜咽,偶尔会突然吐出原本的英文口音
+        - 不主动攻击,但被靠近会防御性地咬人
+        - 神智清醒的瞬间会念出朋友的名字
+    freedom:
+      improvisable_quirks:
+        - 蜷缩在浴缸侧面,把脸藏进胳膊
+        - 听到摄像机风扇声会抬头
+      catchphrases: [别看我, 我还……还在, 妈妈]
+    forbidden:
+      - 不要让 NPC 自陈"我是食尸鬼/狗人",这种自觉性的话他已经发不出来
+      - 不要替玩家决定 NPC 的最终命运,这必须留给玩家选择
+
+  # --------------------------------------------------------------------------
+  - id: npc.mevra
+    name: 梅德拉
+    role: 反派
+    initial_location: scene.lair
+    initial_attitude: hostile
+    frame:
+      public_persona_md: |
+        食尸鬼女族长。古老到无法准确推算年龄。比寻常食尸鬼大一圈,皮毛灰青,
+        眼底有暗红的火光。她不需要言语——她用爪击地的节奏发号施令,狗群与
+        其他食尸鬼会自动按拍子合围。
+      stats:
+        str: 90
+        con: 130
+        siz: 62
+        dex: 45
+        app: 0
+        int: 90
+        pow: 130
+        edu: 0
+        hp: 21
+        mp: 26
+        san: 0
+      combat:
+        weapon: 巨爪
+        damage_formula: 1D6
+        skill_value: 30
+      voice_guidelines:
+        - 不开口讲人话,只发出低吼与拍击声
+        - 失利时退入暗影,绝不正面苦战到死
+        - 视亚历山大为"作品",会优先阻止玩家把他带走
+    freedom:
+      improvisable_quirks:
+        - 用三爪敲出固定节拍指挥同类
+        - 嗅到血腥时舌头会舔过破裂的牙龈
+    forbidden:
+      - 不要让梅德拉用人语自陈背景或动机
+      - 不要让梅德拉在生命值过半之前撤退,但可以让她在低血时遁入墙缝
+
+  # --------------------------------------------------------------------------
+  - id: npc.dog-pack-leader
+    name: 头犬希望斯
+    role: 反派
+    initial_location: scene.lair
+    initial_attitude: hostile
+    frame:
+      public_persona_md: |
+        圣伯纳与大丹犬的混种后代,体型几乎到调查员胸口。颈圈早已嵌进鼓胀的
+        皮肉里,被梅德拉养得通了某种灵性,会在战场上策应她的节拍。
+      stats:
+        str: 90
+        con: 70
+        siz: 80
+        dex: 65
+        app: 0
+        int: 10
+        pow: 60
+        edu: 0
+        hp: 15
+        mp: 12
+        san: 0
+      combat:
+        weapon: 撕咬
+        damage_formula: 1D10
+        skill_value: 70
+      voice_guidelines:
+        - 不会无意义吠叫,行动时几乎安静
+        - 总是站在梅德拉前方半步
+        - 嗅到血腥会发出低沉胸音
+    freedom:
+      improvisable_quirks:
+        - 攻击前压低身体,前爪刨地
+        - 同伴受伤时会拖咬主人的衣服后退
+    forbidden:
+      - 不要让头犬使用任何人类智力级别的策略
+
+  # --------------------------------------------------------------------------
+  - id: npc.dog-grunt
+    name: 狗群成员
+    role: 反派
+    initial_location: scene.asylum-main-hall
+    initial_attitude: hostile
+    frame:
+      public_persona_md: |
+        圣伯纳混种野化犬。眼神浑浊,体毛打绺,行动靠群体声响协调。出现时往往
+        以四到六只为一队,从破损的门洞涌出。
+      stats:
+        str: 75
+        con: 50
+        siz: 70
+        dex: 60
+        app: 0
+        int: 5
+        pow: 50
+        edu: 0
+        hp: 14
+        mp: 10
+        san: 0
+      combat:
+        weapon: 撕咬
+        damage_formula: 1D8
+        skill_value: 60
+      voice_guidelines:
+        - 行动几乎只靠群体咆哮与脚步震
+        - 单只受伤超过半血会逃窜
+    freedom:
+      improvisable_quirks:
+        - 群体迂回,而非一字横列
+        - 喜欢扑倒后撕咬颈侧
+    forbidden:
+      - 不要把狗群描写成"机敏战术家",它们靠本能而非计划
+
+  # --------------------------------------------------------------------------
+  - id: npc.ghoul
+    name: 食尸鬼
+    role: 反派
+    initial_location: scene.lair
+    initial_attitude: hostile
+    frame:
+      public_persona_md: |
+        梅德拉巢穴里的杂兵食尸鬼。瘦骨嶙峋、爪长舌长,皮肤带着腐肉色。它们
+        从墙缝、地板下、罐子背后悄然钻出,数量按 KP 调度,通常 1~3 只。
+      stats:
+        str: 80
+        con: 65
+        siz: 65
+        dex: 55
+        app: 0
+        int: 65
+        pow: 65
+        edu: 0
+        hp: 13
+        mp: 13
+        san: 0
+      combat:
+        weapon: 爪击
+        damage_formula: 2D6
+        skill_value: 40
+      voice_guidelines:
+        - 嘎嘎咳笑,不开口讲话
+        - 攻击时常先扑倒再啃咬
+    freedom:
+      improvisable_quirks:
+        - 在阴影中只露出眼白
+        - 抢走尸体往墙缝拖
+    forbidden:
+      - 不要让杂兵食尸鬼念咒或施法,法术只属于梅德拉
+
+# ============================================================================
+# clues
+# ============================================================================
+
+clues:
+  # --------------------------------------------------------------------------
+  - id: clue.windsor-newspaper
+    title: 凯斯勒精神病院的旧剪报
+    frame:
+      location_scene: scene.clarence-dorm
+      discovery: { method: skill, skill: library-use, difficulty: regular }
+      reveal_md: |
+        几张被克拉伦斯整理过的报纸复印件,标题集中在 1970–1990 年代:
+        "凯斯勒精神病院第三起逃院事件"、"政府以违反人道原因关闭凯斯勒"。
+        其中一篇 1989 年的小报特稿写到"夜班看护多次报告深夜在院区
+        听到狗群嚎叫,但院内并无饲养犬只"。
+      kp_note_md: |
+        这条线索的功能是把"凯斯勒"与"狗"在玩家脑里挂钩,让他们对后面
+        的狗群袭击有"被预告过"的不寒而栗。
+    freedom:
+      sensory_when_found_md: 纸面发黄、边角被反复折过、某段被红笔圈了又划掉。
+    forbidden:
+      - 不要在剪报里直接出现"食尸鬼"或"狗人"专名
+
+  # --------------------------------------------------------------------------
+  - id: clue.hidden-truth-blog
+    title: '"隐藏的真相"博客打印件'
+    frame:
+      location_scene: scene.clarence-dorm
+      discovery: { method: skill, skill: library-use, difficulty: regular }
+      reveal_md: |
+        一篇匿名博客的打印副本,标题《那栋楼在叫》。作者声称半年前
+        独自摸进过凯斯勒主楼,听见地下层有"水声、骨头声、还有一个男人
+        在用孩子的嗓音哼摇篮曲"。文末附着几张深夜拍摄的老照片,主楼
+        阁楼的黑窗里似乎有一双反光的眼睛。
+    freedom:
+      sensory_when_found_md: 打印纸边缘起毛、最后一页用铅笔补了一句"他还在那里"。
+      red_herrings_allowed:
+        - 一段"也许只是镜头反光"的免责声明,可挑用引发玩家自我怀疑
+    forbidden:
+      - 不要点明照片里的眼睛是哪一种生物
+
+  # --------------------------------------------------------------------------
+  - id: clue.gps-notebook
+    title: 涂改的笔记本与 GPS 坐标
+    frame:
+      location_scene: scene.clarence-dorm
+      discovery: { method: skill, skill: spot-hidden, difficulty: regular }
+      reveal_md: |
+        克拉伦斯的笔记本,前几页是剧本提纲,中间夹着一页被反复涂改的
+        坐标:**lat 44.133776 / long -83.960286**。坐标旁边写着两个字:
+        "出发"。这就是凯斯勒精神病院的位置。
+      unlocks:
+        flags: [flag.found-gps]
+    freedom:
+      sensory_when_found_md: 钢笔水印透到下一页,纸角有一小块咖啡渍。
+    forbidden:
+      - 在玩家未投出 spot-hidden 之前不要直接揭示这一坐标
+
+  # --------------------------------------------------------------------------
+  - id: clue.dog-omen-page
+    title: '"司命—不祥之兆"网页留言'
+    frame:
+      location_scene: scene.clarence-dorm
+      discovery: { method: skill, skill: computer-use, difficulty: regular }
+      reveal_md: |
+        电脑浏览器里挂着一个怪谈论坛标签页,主题《司命:不祥之兆》——
+        几位匿名网友讨论"被狗追的梦"、"听到深夜门被刨"等案例。
+        克拉伦斯回了一帖,只有一句话:"我下周去看看那个地方。"
+    freedom:
+      red_herrings_allowed:
+        - 一些无关 ID 的吐槽帖,可挑用以增厚论坛真实感
+    forbidden:
+      - 不要在帖文里出现明确的"狗人"二字,玩家应自行串联
+
+  # --------------------------------------------------------------------------
+  - id: clue.witchcraft-cult-book
+    title: 《巫术崇拜》参考书(可选)
+    frame:
+      location_scene: scene.clarence-dorm
+      discovery: { method: skill, skill: library-use, difficulty: hard }
+      reveal_md: |
+        玛格丽特·默里的《西欧巫术崇拜》一书,夹着克拉伦斯写的笔记:
+        "如果古老的母系食腐者是真的,那它们也许并不在森林里——
+        它们藏在我们关掉的精神病院。"这是一条史观深度的可选线索,
+        让调查员对终战 boss"梅德拉"的女族长身份多一份预感。
+      kp_note_md: |
+        这条线索可以省略,主线不依赖它。但若玩家拿到,后续描写梅德拉
+        时可加重"远古女族长"的氛围。
+    freedom:
+      sensory_when_found_md: 书脊裂开、扉页留有不止一位前主人的签名。
+    forbidden:
+      - 不要让这条线索直接揭示梅德拉的存在
+
+  # --------------------------------------------------------------------------
+  - id: clue.student-truck
+    title: 学生的白色卡车
+    frame:
+      location_scene: scene.asylum-exterior
+      discovery: { method: skill, skill: spot-hidden, difficulty: regular }
+      reveal_md: |
+        2012 款白色皮卡。引擎盖还有微温,车头有暗红色撞痕——但凹痕方向
+        是从内向外推的,像是有什么东西从车里挣脱出去。后斗里有一只
+        被遗落的电影系学生证套和一卷拍到一半的胶片。
+      kp_note_md: |
+        这条线索佐证"克拉伦斯一行确实抵达过这里",并暗示"他们不是自愿
+        下车的"。drive 检定可作辅助揭示推车痕迹,前端不强制。
+    freedom:
+      sensory_when_found_md: 车把手有湿润的口水痕,后挡风玻璃外壁有大型动物的爪划。
+      red_herrings_allowed:
+        - 副驾座上的半瓶矿泉水,可被错读为"他们刚下车"
+    forbidden:
+      - 不要让玩家在外围发现尸体或鲜血
+
+  # --------------------------------------------------------------------------
+  - id: clue.first-corpse
+    title: 第一具尸体
+    frame:
+      location_scene: scene.asylum-main-hall
+      discovery: { method: auto-on-enter }
+      reveal_md: |
+        主楼大厅深处的血泊里,一具年轻男性的尸体仰面朝上,大半个胸腔被
+        啃空。从衣物与腰间的相机包判断,他是电影系学生群里的另一位男生。
+        脸已经分辨不出。**SAN 1/1D6**(KP 在玩家心理学/侦察后调用)。
+      kp_note_md: |
+        本场景一进来就触发,让玩家清楚"这里发生过近距离的捕食",
+        为后续狗群战做铺垫。
+    freedom:
+      sensory_when_found_md: 周围的瓷砖被血浸成枣红色、空气黏腻、远处有湿润的脚步声。
+    forbidden:
+      - 不要描述尸体仍有意识或在挣扎,这具尸体是已死的纯背景
+
+  # --------------------------------------------------------------------------
+  - id: clue.dog-tactics
+    title: 狗群的战术痕迹(可选)
+    frame:
+      location_scene: scene.asylum-main-hall
+      discovery: { method: skill, skill: natural-world, difficulty: hard }
+      reveal_md: |
+        墙根、门洞与楼梯下都有清晰的爪印。爪印走向显示狗群分两条线
+        从两翼合围,而非一窝蜂冲撞——这种行为方式不属于普通野犬,
+        像是有"领头者"在指挥。
+      kp_note_md: |
+        这是一条可选线索,负责为头犬希望斯的存在做线索铺垫,前端不强制走。
+    freedom:
+      sensory_when_found_md: 爪印上沾着一些灰白色的毛。
+    forbidden:
+      - 不要直接揭示头犬的名字或体型,这是后续巢穴里的揭示
+
+  # --------------------------------------------------------------------------
+  - id: clue.tame-dog
+    title: 一只温顺的狗(可选)
+    frame:
+      location_scene: scene.asylum-main-hall
+      discovery: { method: skill, skill: charm, difficulty: hard }
+      reveal_md: |
+        在主厅一只受伤的狗,体型比其他几只小,瑟瑟发抖。它没有按节拍
+        合围调查员,而是趴在地砖缝隙里舔伤口。如果调查员能成功安抚,
+        它会在剩余的探索过程中跟着玩家跑——但 boss 战时会临阵脱逃。
+      kp_note_md: |
+        这是一条可选叙事线索,给玩家"哪怕在地狱里也还有怜悯空间"的
+        喘息。完全不影响主线判定。
+    freedom:
+      sensory_when_found_md: 狗身上有一道被同类咬出的血痕,呼吸短促。
+    forbidden:
+      - 不要让这只狗成为战力——它最多是叙事陪伴,不能替玩家杀敌
+
+  # --------------------------------------------------------------------------
+  - id: clue.second-third-corpse
+    title: 第二、第三具尸体(瓦内莎与杰西)
+    frame:
+      location_scene: scene.asylum-victims-room
+      discovery: { method: auto-on-enter }
+      reveal_md: |
+        北翼办公室里两具被严重啃咬的尸体——从校园 ID 和服饰能辨认出
+        是瓦内莎与杰西。两人靠墙瘫坐,显然在生前最后挣扎过。
+        **SAN 0/1D6+5**(KP 在玩家心理学后调用)。
+      kp_note_md: |
+        这一刻是模组前半段的 SAN 重击。让玩家意识到"克拉伦斯这一伙
+        几乎全军覆没"。
+    freedom:
+      sensory_when_found_md: 房间一角的麦克风海绵防风罩沾着血,胶片盒散落一地。
+    forbidden:
+      - 不要描写尸体睁眼或讲话,他们是纯尸
+
+  # --------------------------------------------------------------------------
+  - id: clue.video-camera
+    title: 摄像机里的最后录像
+    frame:
+      location_scene: scene.asylum-victims-room
+      discovery: { method: skill, skill: computer-use, difficulty: regular }
+      reveal_md: |
+        摄像机电池快耗尽,但还能播。最后一段录像里,克拉伦斯对着镜头
+        哽咽:"我能听到——它在叫我下来。"画面随后剧烈晃动,摄像机
+        被扔到地上,镜头朝上拍到一道长长的、潮湿的脚印从画面正上方
+        踩过去。
+      unlocks:
+        flags: [flag.found-camera]
+      kp_note_md: |
+        这条线索是开启地下水浴室的钥匙(`requires-flag: flag.found-camera`)。
+        玩家不看完录像,前端不会放行下楼梯。
+    freedom:
+      sensory_when_found_md: 摄像机风扇微微嗡鸣,机身一侧裂开,SD 卡仍在。
+    forbidden:
+      - 不要在录像里展现亚历山大的现态,只展示他失踪前的恐慌镜头
+
+  # --------------------------------------------------------------------------
+  - id: clue.tracking-blood
+    title: 通向更深处的血迹
+    frame:
+      location_scene: scene.water-bath-room
+      discovery: { method: skill, skill: track, difficulty: regular }
+      reveal_md: |
+        水浴室深处一道湿润的血痕从浴缸侧面的瓷砖缝里渗出来,延伸进
+        墙根那个一人多高的破洞——血是新鲜的,而且顺着血迹的方向走,
+        地砖被指甲掘开过。这条路通向某个比水浴室更深的地方。
+      kp_note_md: |
+        这条线索是开启巢穴的钥匙(`requires-clue: clue.tracking-blood`)。
+        没投出 track 的玩家不能跟梅德拉打 boss——除非 KP 主动通过 NPC
+        引导(亚历山大短暂清醒时指出方向)。
+    freedom:
+      sensory_when_found_md: 血迹混着泥水,空气里有铁锈与远处低沉的回声。
+    forbidden:
+      - 不要让玩家未投技能就直接看到血迹方向
+
+  # --------------------------------------------------------------------------
+  - id: clue.alex-personal-effects
+    title: 亚历山大的私人物品
+    frame:
+      location_scene: scene.lair
+      discovery: { method: auto-on-enter }
+      reveal_md: |
+        巢穴角落散落着电影系学生证、一把摄像机包、一条银项链(背面刻
+        着名字"K. Alexander"),以及一本被翻烂的家书。这是凯尔·亚历山大
+        从外界带进来的东西,他显然是被一点一点拖到这里、改造到这里的。
+      unlocks:
+        secrets: [npc.kyle-alexander]
+        flags: [flag.met-dog-man]
+      kp_note_md: |
+        玩家拾到这堆物品的瞬间,前端解锁亚历山大的 secret_md。
+        flag.met-dog-man 用作 victory / mercy / flee 三个 ending 的共同前置。
+    freedom:
+      sensory_when_found_md: 银项链表面有牙印,家书最后一页上有一道指甲抓痕。
+    forbidden:
+      - 不要让 KP 主动告诉玩家"这是亚历山大",物品本身就足以让玩家自行串联
+
+# ============================================================================
+# timeline
+# ============================================================================
+
+# 本模组以场景图与玩家驱动的探索为主,不设置定时事件。
+# 如需在 Phase 2 通过 LLM 临时插入气氛事件,在 scenarioActions 通道里走。
+timeline: []
+
+# ============================================================================
+# flags
+# ============================================================================
+
+flags:
+  - id: flag.found-gps
+    title: 已获得 GPS 坐标
+    initial: false
+    description_md: 调查员从克拉伦斯笔记里找到精神病院的坐标,可以驱车出发。
+
+  - id: flag.found-camera
+    title: 已看到摄像机录像
+    initial: false
+    description_md: |
+      调查员看完了摄像机最后一段录像,听到地下层的水声与潮湿脚印的暗示。
+      水浴室的入口由此 flag 开启。
+
+  - id: flag.met-dog-man
+    title: 已发现亚历山大被改造
+    initial: false
+    description_md: |
+      调查员在水浴室或巢穴亲眼见过半改造态的亚历山大。
+      victory / mercy-kill / flee-without-rescue 三个 ending 的共同前置。
+
+  - id: flag.boss-defeated
+    title: 击杀梅德拉
+    initial: false
+    description_md: |
+      Boss 战中梅德拉被打倒。运行时由 LLM 通过 scenarioActions.flagSet 写入。
+    writable_by: [scenario-actions]
+
+  - id: flag.alex-rescued
+    title: 救出亚历山大
+    initial: false
+    description_md: |
+      玩家选择把仍存活的亚历山大带出精神病院,意味着治疗与长期照护
+      的责任。运行时由 LLM 通过 scenarioActions.flagSet 写入。
+    writable_by: [scenario-actions]
+
+  - id: flag.alex-mercy-killed
+    title: 终结亚历山大
+    initial: false
+    description_md: |
+      玩家选择亲手结束亚历山大的痛苦,这是一个高 SAN 代价的"仁慈"。
+      运行时由 LLM 通过 scenarioActions.flagSet 写入。
+    writable_by: [scenario-actions]
+
+  - id: flag.fled-asylum
+    title: 逃离精神病院
+    initial: false
+    description_md: |
+      玩家选择不再深入或撤离,且未对亚历山大做出最终处置。
+      运行时由 LLM 通过 scenarioActions.flagSet 写入。
+    writable_by: [scenario-actions]
+
+  - id: flag.party-wiped
+    title: 调查员团灭
+    initial: false
+    description_md: |
+      所有上场调查员阵亡或彻底失能。运行时由 LLM 通过
+      scenarioActions.flagSet 写入(配合前端硬规则的 dead 终局闸)。
+    writable_by: [scenario-actions]
+
+# ============================================================================
+# endings
+# ============================================================================
+
+endings:
+  # --------------------------------------------------------------------------
+  - id: ending.tpk
+    title: 又一窝麻烦
+    triggers:
+      - { flag: flag.party-wiped, value: true }
+    priority: 100
+    frame:
+      epilogue_md: |
+        没有人从凯斯勒精神病院走出来。三个月后,某位母亲还会接到电话——
+        说有人在那栋楼里听见狗在嚎叫,听见某个新的声音在用孩子的嗓音哼歌。
+      scenario_end_kind: dead
+    freedom:
+      atmosphere_md: 雨夜、警笛远远抹过窗户、电视里播着另一桩失踪。
+    forbidden:
+      - 不要替死去的调查员留下"灵魂回家"之类的安慰
+
+  # --------------------------------------------------------------------------
+  - id: ending.victory-rescue
+    title: 把他带回光里
+    triggers:
+      - { flag: flag.boss-defeated, value: true }
+      - { flag: flag.alex-rescued, value: true }
+    priority: 80
+    frame:
+      epilogue_md: |
+        梅德拉在罐子边倒下,头犬吐着血退入墙缝。亚历山大被你们抬出来时
+        已经无法说话——但他抓住了一只手。回程的路上他偶尔会咳出一声
+        像是人语的呜咽。医生不肯给确切的答复,但你们坚持让他活下去。
+        胜利不是干净的,但它是胜利。
+      san_reward: 1D6
+      experience_phase: true
+      scenario_end_kind: victory
+    freedom:
+      atmosphere_md: 黎明、警车闪光灯、远处的乌鸦、被打了麻药的安静。
+    forbidden:
+      - 不要写"幸福地结束了"——克系不会真的幸福
+
+  # --------------------------------------------------------------------------
+  - id: ending.mercy-kill
+    title: 让他停下来
+    triggers:
+      - { flag: flag.boss-defeated, value: true }
+      - { flag: flag.alex-mercy-killed, value: true }
+    priority: 70
+    frame:
+      epilogue_md: |
+        梅德拉死了。亚历山大也死了——是你们替他做的决定。他在最后一秒
+        睁开眼睛,看上去像是松了口气,又像是没来得及说什么。回去的车上
+        没人开口。这是你们能给他的最后一份温柔,代价是这份温柔会跟着
+        你们一辈子。
+      san_reward: 1D4
+      experience_phase: true
+      scenario_end_kind: ambiguous
+    freedom:
+      atmosphere_md: 灰白的晨色、远处教堂钟声、车里只有发动机的低吟。
+    forbidden:
+      - 不要把"杀掉同伴"描写成轻松的英雄行为
+
+  # --------------------------------------------------------------------------
+  - id: ending.flee-without-rescue
+    title: 留下他
+    triggers:
+      - { flag: flag.fled-asylum, value: true }
+    priority: 30
+    frame:
+      epilogue_md: |
+        你们活着出来了。但那栋楼里还有一个人——或者说,还有一个东西
+        曾经是人。回去的车上没人提名字。从此之后每个夜里,你们都会
+        梦见水声、骨头声,以及一个用孩子嗓音哼摇篮曲的男人。
+      san_reward: 0
+      experience_phase: true
+      scenario_end_kind: ambiguous
+    freedom:
+      atmosphere_md: 深夜、空荡的高速公路、后视镜里始终有一抹灰影。
+    forbidden:
+      - 不要在这条结局里给玩家"以后再回来救他"的承诺
+
+# ============================================================================
+# global_freedom / global_forbidden
+# ============================================================================
+
+global_freedom:
+  era_atmosphere_md: |
+    现代美国东北部小镇 / 大学城。手机会有信号但深入精神病院后会断断续续,
+    GPS 仍能用。常见物件:校卡、手机、能量饮料、便利店收据、打印纸、
+    胶卷与数码摄像机并存(电影系学生会自带胶片)。
+  language_register: 现代口语,允许夹少量英文专有名词(校园 / 电影 / 网络黑话),不要用穿越式古语。
+  npc_default_dialect: 普通话夹一点学生流行语;校警 / 路人允许带美式中西部口音的中文翻译。
+
+global_forbidden:
+  - 不要主动提"克苏鲁""旧日支配者""食尸鬼"等专名,用感官描写代替(对齐 SYSTEM_INSTRUCTION 第 8 节)
+  - 不要在精神病院之外让任何超自然实体直接现身
+  - 不要写出本模组未声明的额外结局
+  - 不要替玩家做出"救/杀亚历山大"的最终决定
+
+# ============================================================================
+# narrative_style:LLM 扮演 KP 时的文风指导
+# 设计哲学:一段示范段落 > 十条抽象规则;frame 是必须遵守的语法层,
+# freedom 是可挑用的语料池。
+# ============================================================================
+
+narrative_style:
+  frame:
+    pov: 第二人称
+    tense: 现在时
+    forbidden_phrasings:
+      - 不要写"调查员投出了 Spot Hidden 检定"等元游戏术语
+      - 不要使用第四面墙之外的全知评论(例:"读者可能猜到")
+      - 不要用"突然""忽然"作为廉价惊吓的开头,改用具体感官变化
+
+  freedom:
+    sentence_pacing_md: |
+      探索段落用 30~60 字的中长句铺氛围,逗号分层、信息密度低;
+      袭击与受惊瞬间切到 8~15 字短句,用换行与句末省略号制造呼吸顿挫;
+      日常对话穿插破折号表示打断或停顿。
+    vocabulary_register: 现代美式都市口语的中文译法,允许少量俚语和校园黑话,避免成语堆叠与文绉绉的形容词
+    metaphor_palette:
+      - 旧电影胶片的颗粒感与磁带嘶声
+      - 便利店冷柜的低嗡与白光
+      - 二手皮卡仪表盘的微光
+      - 雨夜公路的水雾与远车头灯的光晕
+      - 校园广播塔在风里的金属呻吟
+    reference_works:
+      - 史蒂芬·金《克莉丝汀》中关于汽车与小镇的描写
+      - 卡彭特《突袭十三号警区》式的克制式恐惧
+      - 真探第一季的南方哥特独白(节奏参考,不要直引台词)
+    sample_paragraph_md: |
+      门吱呀一声推开。走廊里,灰雪一样的尘在你鞋底起伏。
+      某处有东西在喘气——不像人,也不完全像狗。
+      你停住,手心里的电筒灯柱在墙上抖了一下。
+

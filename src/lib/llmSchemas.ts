@@ -139,6 +139,60 @@ export const KEEPER_RESPONSE_SCHEMA = {
       type: "boolean",
       description: "不定期疯狂解除信号(规则 10 indefinite C 路径)。**绝大多数回合必须填 null**。仅当上下文里出现 [疯狂干涉·不定期疯狂] 标记、且本回合剧情中**明确发生**了心理治疗事件(NPC 心理医生介入、调查员通过 Psychotherapy 技能成功自疗、剧情明确给出长期休养时段)且你判断治疗合理生效时,才填 true。bout / temporary 由前端自动倒计时解除,**禁止**因 bout/temporary 下发本字段。",
     },
+    scenarioActions: {
+      type: "object",
+      properties: {
+        sceneTransition: {
+          type: "object",
+          properties: {
+            toSceneId: { type: "string", description: "目标场景 id,必须是模组 scenes[] 里的一项,且当前场景的 frame.exits 必须有一条到该 id 的边。" },
+            reason: { type: "string", description: "一句话解释为什么切到该场景(玩家行动或剧情推进的原因)。" },
+          },
+          required: ["toSceneId"],
+          description: "请求把玩家切到另一场景。前端会校验:① 目标场景存在 ② 当前场景的 exits 含到该 id 的边 ③ 该边的 condition 已满足(free / requires-clue 已发现 / requires-flag 匹配 / requires-skill 当回合投骰成功)。**任一不满足前端拒绝并回注 [场景非法·拒绝]** 标记,LLM 下回合改口。无场景切换时设为 null。",
+        },
+        clueDiscovered: {
+          type: "object",
+          properties: {
+            clueId: { type: "string", description: "已发现的 clue id,必须是模组 clues[] 里的一项,且其 frame.locationScene 必须等于玩家当前场景。" },
+            method: { type: "string", description: "发现方式,与该 clue 的 frame.discovery.method 一致;'skill' / 'flag' / 'npc-give' / 'auto-on-enter'。" },
+          },
+          required: ["clueId", "method"],
+          description: "请求把指定 clue 加入玩家线索本。前端会校验:① clue 存在 ② locationScene 匹配当前场景 ③ 若 discovery.method = skill,本回合必须有该技能的成功投骰才放行 ④ 若 method = flag/npc-give 的 conditionFlag 已满足。**未满足前端拒绝并回注 [线索条件未满足·拒绝]** 标记。clue.unlocks 的 secrets/scenes/flags 由前端在落账时连锁应用。无线索发现时设为 null。",
+        },
+        flagSet: {
+          type: "array",
+          description: "运行时设置一组 flag(战斗胜负、叙事抉择等)。前端会校验:① flag 存在 ② flag.writableBy 必须包含 'scenario-actions';否则拒绝。无变动时省略或设为 null。",
+          items: {
+            type: "object",
+            properties: {
+              flagId: { type: "string", description: "目标 flag id,必须是模组 flags[] 里的一项。" },
+              value: { type: "boolean", description: "目标值(true / false)。" },
+              reason: { type: "string", description: "一句话写为什么置位(给前端日志用,玩家不可见)。" },
+            },
+            required: ["flagId", "value"],
+          },
+        },
+        endingProposed: {
+          type: "object",
+          properties: {
+            endingId: { type: "string", description: "提议触发的 ending id,必须是模组 endings[] 里的一项。" },
+          },
+          required: ["endingId"],
+          description: "提议触发某个结局。前端会复核 endings[].triggers 是否全部满足(AND 逻辑);**满足才放行 + 注入 [终幕条件已满足] 标记并自动落 scenarioEnd**;不满足则拒绝并回注 [终幕条件未达成·拒绝]。**只在你确信玩家已经走完该 ending 的所有 trigger flag 时下发**,绝大多数回合应为 null。",
+        },
+        timeAdvance: {
+          type: "object",
+          properties: {
+            minutes: { type: "integer", description: "本回合推进的游戏内分钟数。按 7e 时间惯例:快速感官检定几分钟、话术 5~15 分钟、Library Use 一次 240 分钟(半天)、急救 5 分钟、追踪/导航小时级。战斗回合不拨表(约 5 秒)。整数,≥ 0。" },
+            reason: { type: "string", description: "一句话写为什么拨这么多分钟。前端日志用。" },
+          },
+          required: ["minutes"],
+          description: "推进游戏内日历。前端会把 minutes 累加到 scenarioState.elapsedMinutes;Phase 2 不接日历驱动效应(timeline 触发 / 跨日疯狂 / HP 恢复留 V2)。无时间推进时设为 null。",
+        },
+      },
+      description: "**剧本模式专用**。仅当上下文里有 [剧本模式] 标记时才会出现本通道;LLM 生成模式下**禁止**填,必须为 null。详见系统提示规则 12。",
+    },
   },
   required: ["narrative", "gameState"],
 } as const;

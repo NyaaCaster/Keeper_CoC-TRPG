@@ -388,6 +388,52 @@ export interface KeeperResponse {
    * 普通的疯狂状态(bout/temporary)由前端自动倒计时解除,**不**需要 LLM 下发本字段。
    */
   madnessRecover?: boolean | null;
+
+  /**
+   * 剧本模式专用通道。仅当 gameMode === "scenario-based" 且 KP prompt 节 12 注入时,
+   * LLM 才允许下发本字段;llm-generated 模式下**禁止**填,必须为 null。
+   *
+   * 所有动作经前端 applyKeeperResponse 校验:不合法 → 拒绝 + 回注 [场景非法·拒绝] /
+   * [线索条件未满足·拒绝] / [终幕条件未达成·拒绝];合法 → 落账 + 注入对应正向标记。
+   */
+  scenarioActions?: ScenarioActions | null;
+}
+
+export interface ScenarioActions {
+  sceneTransition?: ScenarioSceneTransition | null;
+  clueDiscovered?: ScenarioClueDiscovered | null;
+  flagSet?: ScenarioFlagSet[] | null;
+  endingProposed?: ScenarioEndingProposed | null;
+  timeAdvance?: ScenarioTimeAdvance | null;
+}
+
+export interface ScenarioSceneTransition {
+  /** 目标场景 id;必须是当前场景某条 exit 的 to */
+  toSceneId: string;
+  reason?: string;
+}
+
+export interface ScenarioClueDiscovered {
+  /** clue id;必须是当前场景的 availableClues 里的一项 */
+  clueId: string;
+  /** 与该 clue 的 frame.discovery.method 一致 */
+  method: "skill" | "flag" | "npc-give" | "auto-on-enter";
+}
+
+export interface ScenarioFlagSet {
+  flagId: string;
+  value: boolean;
+  reason?: string;
+}
+
+export interface ScenarioEndingProposed {
+  endingId: string;
+}
+
+export interface ScenarioTimeAdvance {
+  /** 推进的游戏内分钟数,整数,≥ 0 */
+  minutes: number;
+  reason?: string;
 }
 
 export interface WebGameSave {
@@ -400,7 +446,62 @@ export interface WebGameSave {
   clues: ClueItem[];
   enabledFeatures: { typemoon: boolean; scp: boolean };
   currentLocation: string;
+  /**
+   * 游戏模式。缺省视为 "llm-generated"(老存档兼容)。
+   * - llm-generated:LLM 凭空生成剧本(原路径)
+   * - scenario-based:基于预制模组,LLM 按 frame/freedom/forbidden 走
+   */
+  gameMode?: GameMode;
+  /**
+   * 仅在 gameMode === "scenario-based" 时存在;由 scenarioRuntime 维护。
+   * 老存档无此字段;切到剧本模式时由前端按模组 hook 初始化。
+   */
+  scenarioState?: ScenarioState;
 }
+
+export type GameMode = "llm-generated" | "scenario-based";
+
+/**
+ * 剧本模式运行时状态。所有 id 引用对应模组的 scene/clue/npc/flag id。
+ *
+ * 设计原则:
+ * - 只持久化"会变"的状态;模组数据本身不进存档(模组打进镜像)
+ * - npcAttitude / endingFlags 用 Record<string, ...> 而非 Map,localStorage 友好
+ */
+export interface ScenarioState {
+  /** 模组目录名,等于 scenario.meta.id */
+  moduleId: string;
+  /** 玩家当前所在场景 id */
+  currentSceneId: string;
+  /** 已访问过的场景 id 列表(去重,按访问顺序追加) */
+  visitedSceneIds: string[];
+  /** 已发现的线索 id 列表 */
+  discoveredClueIds: string[];
+  /** 已解锁 secret 的 NPC id 列表(secret_unlock_trigger 满足后入册) */
+  unlockedSecretIds: string[];
+  /** NPC 当前态度。键 = NpcId,值 = NpcAttitude;缺省走 npc.initialAttitude */
+  npcAttitude: Record<string, ScenarioNpcAttitude>;
+  /** flag 当前布尔状态。键 = FlagId;缺省走 flag.initial */
+  endingFlags: Record<string, boolean>;
+  /**
+   * 游戏内已推进的累计分钟数(基于 meta.startTime 的偏移)。
+   * Phase 2 仅前端累加,不接日历驱动效应(疯狂日切/HP 恢复留 V2)。
+   */
+  elapsedMinutes: number;
+  /** 已触发的 timeline event id 列表(once: true 的归档用;Phase 2 timeline 驱动留 V2) */
+  triggeredTimelineIds: string[];
+}
+
+/**
+ * 与 scenario.ts 的 NpcAttitude 同口径,这里复制一遍避免存档类型反向依赖 schema。
+ * 校验时通过运行时常量比对,不强引用 schema 类型。
+ */
+export type ScenarioNpcAttitude =
+  | "hostile"
+  | "wary"
+  | "neutral"
+  | "friendly"
+  | "trusting";
 
 export interface ChatMessage {
   id: string;
