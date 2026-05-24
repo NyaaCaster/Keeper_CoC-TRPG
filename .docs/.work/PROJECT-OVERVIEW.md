@@ -35,7 +35,7 @@ LLM **只**承担守密人（Keeper / KP）一个智能体身份：叙事、设�
 | 4.7 | 现金/弹药 | 必须走 `characterUpdates` 通道，禁止在 narrative 里口头报数 |
 | 5.1 | SAN 检定不可回避 | 永远明骰，触发即强制弹窗 |
 | 6 / 6.1 / 6.2 | clue / sceneImage / prompt | "档案" vs "勾子" vs "按需配图" 三层取舍 |
-| 7 | 第一回合 | 直接拉开第一幕，禁止介绍规则/选时代/写"游戏准备室" |
+| 7 / 12.11 | 第一回合 | 直接拉开第一幕，禁止介绍规则/选时代/写"游戏准备室"；剧本模式下卷入动机必须采用 `hook.prologue_md` 给定的因果，禁止改写成"勘察已发生的凶案 / 警局派来 / 刚收到报警"等模组未声明的起因 |
 | 8 | 谜语人原则 | 神话/型月/SCP 专有名词不直报，用感官化描写 |
 | 9 | 终局闸 | dying / dead / insane 由前端硬规则注入，单回合裁决禁止拖场 |
 | 10 | 疯狂干涉 | bout / temporary / indefinite 三态由前端注入，LLM 按表项叙事化曲解 |
@@ -91,6 +91,18 @@ LLM 每回合返回 `KeeperResponse`（`src/types.ts:288-391`），所有字段�
 | `madnessRecover` | 仅用于 indefinite 疯狂的剧情解除信号 | LLM |
 
 **Schema 实现**：`src/lib/llmSchemas.ts` 对 Gemini 走原生 `responseSchema`；对 Anthropic / OpenAI 兼容把 schema 描述拼进 system prompt 末尾 + `response_format: json_object`。`extractJsonObject()` 容忍模型偶尔吐出的 ```` ```json ```` 包裹。
+
+### LLM 失败兜底（系统错误卡 + 一键重发）
+
+`ChatMessage`（`src/types.ts`）携带三字段实现"网络断线 → 一键重发"：
+
+| 字段 | 用途 |
+|---|---|
+| `retryable: boolean` | `sender === "system"` 的错误卡才置 true，触发"重新生成"按钮 |
+| `retryHistorySnapshot: ChatMessage[]` | 出错前的 `currentHistory` 快照，重发时整段塞回 LLM |
+| `retryFeatures: { typemoon, scp }` | 出错时的世界观开关，避免重发后用户已切其它模组 |
+
+`App.tsx::handleKeeperRetry` 收到 errMsgId + 快照 + features 后：先把错误卡从消息流移除 → 调 `triggerKeeperNarration(snapshot, character, features)` 重新走一遍。**不要**把 retry 字段写进 KeeperResponse —— 那是 LLM 的输出契约，retry 是前端 UI 状态。
 
 ## 前端 → LLM 的反向信号（系统标记注入）
 
@@ -191,6 +203,8 @@ scripts/
 11. **不要把未压缩的模组图像直接进仓库**。`src/data/modules/<id>/assets/` 里所有图必须按 `.docs/scenario-schema.md` 11.1 节压到上限以内(封面 1.25 MB → 71 KB 是已验证基线)，否则镜像与仓库会被一张图拖肥。
 12. **从外部 PDF/docx 转写模组时,`meta.recommended_occupations` 必填、`preset_investigators` 在原作有 pre-gens 时必须落卡**。判定原则与字段语义见 `.docs/scenario-schema.md` §15.3——不允许"先填一半,后面补"，prebuild 时 schema 校验会拒绝构建。
 13. **剧本预设调查员的卡槽优先级 + 字段锁**:`preset_investigators[i]` 在 Phase 3 创角阶段按数组下标占据卡槽 0..N-1(从左到右越靠前越优先);若 N < 3,用同 era 系统模板兜底补到 3 张。`name / age / gender / nationality / identity / background_story_md / occupation` 在剧本模式下完全锁定,**LLM 不允许覆盖**——这些字段必须在模组转写期就完整定稿,否则 schema 校验会拒。
+14. **`triggerKeeperNarration` 在剧本模式首轮必须带 `scenarioOverride`**。`setGameMode / setScenarioState` 是异步的,如果触发函数紧跟着读组件 state 拼 `scenarioBlock`,闭包里仍是旧值(`gameMode === "llm-generated"` / `scenarioState === null`),hook 块永远进不去 prompt——首轮 LLM 就会脱模组飞。`App.tsx` 的解法是给 `triggerKeeperNarration` 加 `scenarioOverride?: { gameMode, scenario, scenarioState }` 参数,创建期入口必须显式传新值;后续玩家回合 state 已落地,可省略。**任何会"setState 后立刻读 state"的路径都要走 override 而不是闭包**。
+15. **控制台日志面板是可下载/可单条复制的诊断窗口**(`ConsoleLogPanel.tsx`)。请求 / 响应 / 错误 meta 已扩到包括完整 systemInstruction、userText、keeperData、errorBody/Stack、provider/model/gameMode/scenarioId 等。调试 LLM 注入失误时**先开这个面板**复制 request 看 systemInstruction 末尾是不是真带了 scenarioBlock,再决定改 prompt 还是改注入条件——不要凭直觉猜。
 
 ## 工作流（与本项目协作的"启动键"）
 
