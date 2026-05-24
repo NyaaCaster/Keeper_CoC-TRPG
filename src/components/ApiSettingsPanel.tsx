@@ -18,6 +18,8 @@ import {
   LlmProviderKind,
   ImageProviderKind,
   QinyHostKind,
+  QINY_DEFAULT_LLM_MODEL,
+  QINY_DEFAULT_IMAGE_MODEL,
   resolveQinyRegisterUrl,
 } from "../types";
 import {
@@ -70,11 +72,23 @@ export default function ApiSettingsPanel({
   };
 
   const handleLlmProviderChange = (p: LlmProviderKind) => {
-    setSettings((s) => ({ ...s, llm: { ...s.llm, provider: p } }));
+    setSettings((s) => {
+      const next = { ...s, llm: { ...s.llm, provider: p } };
+      if (p === "qiny" && !s.llm.model) {
+        next.llm.model = QINY_DEFAULT_LLM_MODEL;
+      }
+      return next;
+    });
   };
 
   const handleImageProviderChange = (p: ImageProviderKind) => {
-    setSettings((s) => ({ ...s, image: { ...s.image, provider: p } }));
+    setSettings((s) => {
+      const next = { ...s, image: { ...s.image, provider: p } };
+      if (p === "qiny" && !s.image.model) {
+        next.image.model = QINY_DEFAULT_IMAGE_MODEL;
+      }
+      return next;
+    });
   };
 
   const handleExport = () => {

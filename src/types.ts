@@ -481,9 +481,12 @@ export interface ApiSettings {
   };
 }
 
+export const QINY_DEFAULT_LLM_MODEL = "gemini-3.5-flash-low";
+export const QINY_DEFAULT_IMAGE_MODEL = "gpt-image-2";
+
 export const DEFAULT_API_SETTINGS: ApiSettings = {
-  llm: { provider: "qiny", apiKey: "", model: "", customBaseUrl: "", qinyHost: "com" },
-  image: { provider: "qiny", apiKey: "", model: "", qinyHost: "com" },
+  llm: { provider: "qiny", apiKey: "", model: QINY_DEFAULT_LLM_MODEL, customBaseUrl: "", qinyHost: "com" },
+  image: { provider: "qiny", apiKey: "", model: QINY_DEFAULT_IMAGE_MODEL, qinyHost: "com" },
 };
 
 // Kept for legacy imports. Defaults to the .com host.
