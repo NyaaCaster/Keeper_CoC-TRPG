@@ -1027,25 +1027,6 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <button
-                    id="game-mode-llm-btn"
-                    type="button"
-                    onClick={() => setGameMode("llm-generated")}
-                    className="p-6 rounded border border-[#c1a067]/25 bg-black/40 text-left transition relative overflow-hidden hover:border-[#c1a067] hover:bg-[#c1a067]/10 active:scale-[0.99]"
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <Wand2 className="w-5 h-5 text-[#c1a067]" />
-                      <span className="text-base font-semibold text-[#c1a067] font-sans">踏入虚空</span>
-                      <span className="ml-auto text-[10px] uppercase font-mono tracking-widest text-gray-500">
-                        LLM-Generated
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-400 leading-relaxed font-sans">
-                      由 KP 即兴架构原创模组——你提供时代与内容模块,LLM 现场推演大纲、人物与诡计。
-                      每一次都是新故事,代价是叙事一致性依赖模型即兴。
-                    </p>
-                  </button>
-
-                  <button
                     id="game-mode-scenario-btn"
                     type="button"
                     onClick={() => {
@@ -1065,6 +1046,25 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                     <p className="text-xs text-gray-400 leading-relaxed font-sans">
                       从已转写的克系经典模组中选一本——场景、线索、NPC、结局都已固定,
                       LLM 仅负责扮演 KP 把它演给你。叙事更稳,适合追求"原作味道"的玩家。
+                    </p>
+                  </button>
+
+                  <button
+                    id="game-mode-llm-btn"
+                    type="button"
+                    onClick={() => setGameMode("llm-generated")}
+                    className="p-6 rounded border border-[#c1a067]/25 bg-black/40 text-left transition relative overflow-hidden hover:border-[#c1a067] hover:bg-[#c1a067]/10 active:scale-[0.99]"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <Wand2 className="w-5 h-5 text-[#c1a067]" />
+                      <span className="text-base font-semibold text-[#c1a067] font-sans">踏入虚空</span>
+                      <span className="ml-auto text-[10px] uppercase font-mono tracking-widest text-gray-500">
+                        LLM-Generated
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 leading-relaxed font-sans">
+                      由 KP 即兴架构原创模组——你提供时代与内容模块,LLM 现场推演大纲、人物与诡计。
+                      每一次都是新故事,代价是叙事一致性依赖模型即兴。
                     </p>
                   </button>
                 </div>
@@ -1360,7 +1360,15 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                               onClick={() => setSelectedScenarioId(sc.meta.id)}
                               className="text-left p-4 rounded border border-[#c1a067]/25 bg-black/40 hover:border-[#c1a067] hover:bg-[#c1a067]/10 transition active:scale-[0.99] relative overflow-hidden"
                             >
-                              <div className="flex items-baseline justify-between gap-2 mb-1">
+                              {sc.meta.recommended && (
+                                <span
+                                  className="absolute top-2 right-2 text-[10px] font-mono uppercase tracking-widest text-[#c1a067] bg-black/70 border border-[#c1a067]/60 px-1.5 py-0.5 rounded shadow-sm"
+                                  title="项目方推荐模组"
+                                >
+                                  ★ 推荐
+                                </span>
+                              )}
+                              <div className="flex items-baseline justify-between gap-2 mb-1 pr-16">
                                 <h4 className="text-base font-bold text-[#c1a067] font-sans line-clamp-1">
                                   《{sc.meta.title}》
                                 </h4>
