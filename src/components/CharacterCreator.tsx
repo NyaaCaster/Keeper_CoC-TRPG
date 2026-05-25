@@ -48,6 +48,8 @@ import {
   User,
   RotateCcw,
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   Heart,
   Zap,
   Eye,
@@ -200,6 +202,9 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
   // Character creation mode
   const [mode, setMode] = useState<"choose" | "custom">("choose");
   const [selectedPresetIndex, setSelectedPresetIndex] = useState<number>(0);
+  // 多于 3 张预设时,卡片网格分页显示;每页固定显示 3 张,左右箭头切页;
+  // 选中索引可跨页,网格仍按"3 张/页"渲染,选中卡跨到非当前页时高亮跟随翻页。
+  const [presetPageStart, setPresetPageStart] = useState<number>(0);
 
   // PC Avatar upload (Base64)
   const [customAvatar, setCustomAvatar] = useState<string>("");
@@ -346,6 +351,21 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
       overview: p.backgroundText || "资深的前线秘仪探求者，屡次协助收容或发掘星神崇拜设施迹象。"
     }));
   }, [gameMode, selectedScenario, moduleOutline?.presets, selectedEra, featureTypeMoon, featureScp]);
+
+  // activePresets 列表变化(例如切换模组或时代)时,重置选中卡与翻页起点。
+  React.useEffect(() => {
+    setSelectedPresetIndex(0);
+    setPresetPageStart(0);
+  }, [activePresets.length]);
+
+  // 选中卡跨页时,把当前页同步到选中卡所在的"3 张窗口"。
+  React.useEffect(() => {
+    const PAGE_SIZE = 3;
+    if (selectedPresetIndex < presetPageStart || selectedPresetIndex >= presetPageStart + PAGE_SIZE) {
+      const aligned = Math.floor(selectedPresetIndex / PAGE_SIZE) * PAGE_SIZE;
+      setPresetPageStart(aligned);
+    }
+  }, [selectedPresetIndex, presetPageStart]);
 
   // 创建期 「深渊复核 → 下载调查员角色卡」 入口。运行期入口在 CharacterDossierPanel 里直接
   // 调 downloadCharacterCard(sheet.creationSnapshot ?? sheet)；两者共享同一渲染模块。
@@ -1683,59 +1703,100 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
                 animate={{ opacity: 1, y: 0 }}
                 className="space-y-6 animate-none"
               >
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {activePresets.map((preset, index) => (
-                    <div 
-                      id={`preset-${index}-card`}
-                      key={preset.name + "-" + index}
-                      onClick={() => setSelectedPresetIndex(index)}
-                      className={`p-4 rounded cursor-pointer border transition hover:bg-black/40 text-left relative flex flex-col justify-between ${
-                        selectedPresetIndex === index 
-                          ? "border-[#c1a067] bg-black/60 shadow-[0_0_15px_rgba(193,160,103,0.15)]" 
-                          : "border-transparent bg-[#1a1c1d]/50"
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-[9px] text-[#c1a067] font-mono uppercase tracking-wider">PRESET INVESTIGATOR</span>
-                          {selectedPresetIndex === index && <Check className="w-3.5 h-3.5 text-[#c1a067]" />}
-                        </div>
-                        <div className="text-md font-bold text-gray-100 line-clamp-1">{preset.name}</div>
-                        <div className="flex items-center gap-1.5 text-xs text-[#c1a067] font-sans mt-0.5 mb-2 line-clamp-1">
-                          <span>{preset.occupation}</span>
-                          <span className="text-gray-600">•</span>
-                          <span className="text-gray-350">{preset.gender || "男"} · {preset.age || 30}岁</span>
-                        </div>
-                        
-                        {(preset as any).overview && (
-                          <div className="text-[10px] text-gray-400 font-sans italic line-clamp-3 leading-relaxed mb-3 bg-black/30 p-2 rounded border border-gray-900 leading-normal select-text">
-                            {(preset as any).overview}
-                          </div>
-                        )}
-                      </div>
-
-                      <div>
-                        <div className="space-y-1 mb-3 bg-black/25 p-1.5 rounded text-[10.5px] font-sans">
-                          <div className="flex justify-between text-gray-400">
-                            <span>HP: <span className="text-red-400 font-semibold">{preset.hp}</span></span>
-                            <span>MP: <span className="text-blue-400 font-semibold">{preset.mp}</span></span>
-                            <span>SAN: <span className="text-green-400 font-semibold">{preset.san}</span></span>
-                            <span>LUC: <span className="text-yellow-400 font-semibold">{(preset.attributes as any).luck}</span></span>
-                          </div>
-                        </div>
-
-                        <div className="text-xs text-gray-450 space-y-0.5 font-sans border-t border-gray-800/60 pt-2">
-                          <div className="text-[#c1a067]/80 text-[9px] font-mono tracking-widest uppercase mb-1 font-bold">精要技术特长</div>
-                          {Object.entries(preset.skills).filter(([s]) => s !== "克苏鲁神话").slice(0, 3).map(([s, val]) => (
-                            <div key={s} className="flex justify-between items-center text-[10.5px]">
-                              <span>• {s}</span>
-                              <span className="font-mono text-gray-350 font-semibold">{val}%</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                <div className="space-y-2">
+                  {activePresets.length > 3 && (
+                    <div className="flex items-center justify-between text-[11px] font-mono text-[#c1a067]/70 uppercase tracking-wider px-1">
+                      <span>preset roster · {activePresets.length} 张可选</span>
+                      <span>
+                        当前 {Math.min(presetPageStart + 1, activePresets.length)}–
+                        {Math.min(presetPageStart + 3, activePresets.length)} / {activePresets.length}
+                      </span>
                     </div>
-                  ))}
+                  )}
+
+                  <div className="flex items-stretch gap-2">
+                    {activePresets.length > 3 && (
+                      <button
+                        type="button"
+                        aria-label="上一组预设角色"
+                        disabled={presetPageStart <= 0}
+                        onClick={() => setPresetPageStart((s) => Math.max(0, s - 3))}
+                        className="shrink-0 w-8 md:w-10 flex items-center justify-center rounded border border-gray-800 bg-black/30 text-[#c1a067] hover:border-[#c1a067]/60 hover:bg-black/50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {activePresets.slice(presetPageStart, presetPageStart + 3).map((preset, i) => {
+                        const index = presetPageStart + i;
+                        return (
+                        <div
+                          id={`preset-${index}-card`}
+                          key={preset.name + "-" + index}
+                          onClick={() => setSelectedPresetIndex(index)}
+                          className={`p-4 rounded cursor-pointer border transition hover:bg-black/40 text-left relative flex flex-col justify-between ${
+                            selectedPresetIndex === index
+                              ? "border-[#c1a067] bg-black/60 shadow-[0_0_15px_rgba(193,160,103,0.15)]"
+                              : "border-transparent bg-[#1a1c1d]/50"
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[9px] text-[#c1a067] font-mono uppercase tracking-wider">PRESET INVESTIGATOR</span>
+                              {selectedPresetIndex === index && <Check className="w-3.5 h-3.5 text-[#c1a067]" />}
+                            </div>
+                            <div className="text-md font-bold text-gray-100 line-clamp-1">{preset.name}</div>
+                            <div className="flex items-center gap-1.5 text-xs text-[#c1a067] font-sans mt-0.5 mb-2 line-clamp-1">
+                              <span>{preset.occupation}</span>
+                              <span className="text-gray-600">•</span>
+                              <span className="text-gray-350">{preset.gender || "男"} · {preset.age || 30}岁</span>
+                            </div>
+
+                            {(preset as any).overview && (
+                              <div className="text-[10px] text-gray-400 font-sans italic line-clamp-3 leading-relaxed mb-3 bg-black/30 p-2 rounded border border-gray-900 leading-normal select-text">
+                                {(preset as any).overview}
+                              </div>
+                            )}
+                          </div>
+
+                          <div>
+                            <div className="space-y-1 mb-3 bg-black/25 p-1.5 rounded text-[10.5px] font-sans">
+                              <div className="flex justify-between text-gray-400">
+                                <span>HP: <span className="text-red-400 font-semibold">{preset.hp}</span></span>
+                                <span>MP: <span className="text-blue-400 font-semibold">{preset.mp}</span></span>
+                                <span>SAN: <span className="text-green-400 font-semibold">{preset.san}</span></span>
+                                <span>LUC: <span className="text-yellow-400 font-semibold">{(preset.attributes as any).luck}</span></span>
+                              </div>
+                            </div>
+
+                            <div className="text-xs text-gray-450 space-y-0.5 font-sans border-t border-gray-800/60 pt-2">
+                              <div className="text-[#c1a067]/80 text-[9px] font-mono tracking-widest uppercase mb-1 font-bold">精要技术特长</div>
+                              {Object.entries(preset.skills).filter(([s]) => s !== "克苏鲁神话").slice(0, 3).map(([s, val]) => (
+                                <div key={s} className="flex justify-between items-center text-[10.5px]">
+                                  <span>• {s}</span>
+                                  <span className="font-mono text-gray-350 font-semibold">{val}%</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        );
+                      })}
+                    </div>
+
+                    {activePresets.length > 3 && (
+                      <button
+                        type="button"
+                        aria-label="下一组预设角色"
+                        disabled={presetPageStart + 3 >= activePresets.length}
+                        onClick={() => setPresetPageStart((s) => Math.min(activePresets.length - 3, s + 3))}
+                        className="shrink-0 w-8 md:w-10 flex items-center justify-center rounded border border-gray-800 bg-black/30 text-[#c1a067] hover:border-[#c1a067]/60 hover:bg-black/50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Detailed display card */}
