@@ -1,0 +1,2138 @@
+schema_version: 1
+
+# ============================================================================
+# meta
+# ============================================================================
+
+meta:
+  id: tsumasaki-kidan
+  title: 褄列奇谈
+  era: modern
+  language: zh-CN
+  difficulty: 高强度
+  tags: [日式恐怖, 闭幕村庄, 心理战, 杀婴习俗, 星之彩]
+  cover: assets/cover.jpg
+  start_time: { game_day: 1, hour: "09:00" }
+  synopsis_md: |
+    9 月初的山区,你乘大巴抵达一座只能靠吊桥进出的山村——褄列村。
+    村民温柔却疏离,孩子的笑声稀薄,木门后总有视线在凝视。
+    黄昏过后,雷击落,吊桥断裂,你被困在了这里。
+  author_credits_md: |
+    原作者:驟雨 / 白雨堂(日本)Rev1.2。中文化译者:麦芽,校对补遗排版:苍叶。
+    本项目转写:Keeper_CoC-TRPG。
+  recommended_occupations:
+    - 警探
+    - 警员
+    - 私家侦探
+    - 记者
+    - 摄影师
+    - 神秘学家
+    - 教授
+
+# ============================================================================
+# hook
+# ============================================================================
+
+hook:
+  start_scene: scene.buseki-misaki
+  prologue_md: |
+    9 月上旬的早上。你坐着一班开往山区的大巴,从和歌山出发,沿盘山路向北。
+    海拔越升越高,乘客越来越少。中途换乘,最后一段山路只剩下你和另外两位
+    陌生人——一位温柔但面色疲倦的少妇(井川洋子),与一位沉默寡言的小个子
+    青年(乡田悠树)。两人各自坐在不同的位置,谁也不看谁。
+
+    中午之前,大巴停在一处叫"暮积岬村"的山顶。司机告诉所有人在此下车——
+    通往**褄列村**的唯一通路,是横跨深谷的「旧青丝桥」。
+  call_to_action_md: |
+    你来到褄列村各有理由。也许只是巧合,也许并不是。
+    现在,沉甸甸的双肩包压着你的肩,鸟居在身后,深谷在身前。
+  default_initial_clues: []
+  # 多路线导入:每种职业各自携带不同的卷入动机与初始线索。
+  # key 与 meta.recommended_occupations 完全对齐(中文名)。
+  occupation_variants:
+    "警探":
+      call_to_action_md: |
+        同期的警官最近为一封从褄列村发出的匿名信发愁——信里反复指控村中"有人
+        在杀害刚出生的孩子",这样的信件三县警方已经收到过百余次。上头从未
+        把它当真,但你的同事拗不过,托你以普通游客身份去村里转转,只看,
+        不动手。如果是诬告,就回来一句话;如果是真的——再说。
+      initial_clues: [clue.kondo-anonymous-call]
+    "警员":
+      call_to_action_md: |
+        派出所的同事最近为一封从褄列村发出的匿名信发愁——信里反复指控村中"有人
+        在杀害刚出生的孩子",三县警方已经收到过百余次。没人当真,但同事拗不过,
+        托你以普通游客身份去村里看看。如果是诬告就一句话回来,如果是真的——再说。
+      initial_clues: [clue.kondo-anonymous-call]
+    "私家侦探":
+      call_to_action_md: |
+        一位富裕的老妇人来事务所委托:儿子要娶一位姓**乡田**的姑娘,女方家在
+        三县交界处的褄列村。老妇人对这门亲事不放心,希望你去暗中调查未来儿媳
+        的"家系背景"——她原话是,"那种地方出来的人,血里有什么我得知道。"
+        预付金不少。你接了。
+      initial_clues: []
+    "记者":
+      call_to_action_md: |
+        报社策划了一个"风评被害"的特辑——那些因为传言而生意凋敝、人口锐减的
+        小村庄。你的选题落在了褄列村:据说"自古多畸形作物"、"孩子常常生不下来"。
+        编辑给了你两周时间,要的是有温度的人物特写,不是猎奇报道。你决定先去
+        看看,再下笔。
+      initial_clues: []
+    "摄影师":
+      call_to_action_md: |
+        你是日本电影《天空之桥》的爱好者。这部 2007 年获戛纳提名的小成本作品,
+        全片在褄列村的"旧青丝桥"取景。监督的祖母是片中"夜之虹"传说的亲历者。
+        你想去那座桥上拍一组属于自己的照片,顺便看看监督笔下的村子,如今是
+        什么模样。
+      initial_clues: [clue.movie-grandma-rumor]
+    "神秘学家":
+      call_to_action_md: |
+        同好会近日讨论得最多的传闻,是"熊野与大和交界处出现了八咫乌的踪影"。
+        三柱鸟居、被命名为"族塚"的山头、地图上隐隐勾勒出"倒挂人体"的诡异
+        地名群——这些细节都指向了那座叫**褄列村**的山村。你决定亲自去一趟。
+      initial_clues: [clue.place-name-rumor]
+    "教授":
+      call_to_action_md: |
+        你的研究课题恰好需要一份"被现代化遗忘的山村田野样本"。一位民俗学界的
+        老朋友给你递了张地图,圈出三县交界的褄列村,附了一句话:"那里是块
+        活化石,但我不建议你住下。"你笑了笑,还是去了。
+      initial_clues: []
+
+# ============================================================================
+# scenes
+# ============================================================================
+
+scenes:
+  # --------------------------------------------------------------------------
+  - id: scene.buseki-misaki
+    title: 暮积岬村 · 山顶巴士站
+    frame:
+      summary_md: |
+        山脊上一座小到几乎不算"村"的聚落,只剩几户做林业农业的人家,风把云
+        吹得贴着地面跑。大巴折返点旁有一座**三柱鸟居**——三根柱子环成正三角,
+        其中一面正对着深谷对岸的褄列村,另外两面相互遮蔽。司机说,过了这座桥,
+        手机就连不上了。
+      facts:
+        - 暮积岬村只有林业与农业,没有旅店,通往褄列的唯一手段是「旧青丝桥」
+        - 三柱鸟居中只有一面朝向褄列,另外两面被刻意做成相互遮蔽
+        - 司机折返时反复叮嘱"日落前一定要回到吊桥这边"
+        - 大巴停车点旁有一面写着"褄列村 · 山上村疗养所旧址"的木牌,落款 1968
+      exits:
+        - to: scene.aoshi-bridge
+          condition: free
+          label: 走向吊桥入口
+      npcs_present: []
+      available_clues: [clue.three-pillar-torii]
+    freedom:
+      mood_tags: [山岭薄雾, 高处的风, 三柱鸟居的静默]
+      sensory_palette:
+        sight: 远处山影叠成层、鸟居柱身上的青苔、被风揉乱的杉木林
+        sound: 大巴开走后的引擎余音、风掠过木牌的低鸣
+        smell: 山间湿木味、淡淡的松脂气
+        touch: 鸟居木柱粗糙、风从颈后灌进衣领
+      improvisable_props:
+        - 鸟居底座一只被供奉了一整盒、几乎已经化掉的米菓
+        - 木牌反面用红笔涂改过的旧字迹
+    forbidden:
+      - 不要让玩家在此处听见对岸的人声或哭声
+      - 不要直接说三柱鸟居的"三足"暗示了什么,这是后续解谜
+
+  # --------------------------------------------------------------------------
+  - id: scene.aoshi-bridge
+    title: 旧青丝桥
+    frame:
+      summary_md: |
+        横跨深谷的木板吊桥,两端各立一根锈得发红的铁柱,桥面木板被踩得发亮。
+        风从谷底涌上来,桥身有节奏地摇。桥的另一端,是褄列村。**第一天黄昏**
+        过后,这座桥会被一道落雷击断,从此没有人能再凭双腿出去。
+      facts:
+        - 桥长约 60 米,木板间距宽,谷底深不见底
+        - 走过去要 5 分钟,中段晃得最厉害
+        - 第一天 16:00 前后桥会被落雷击断,自此 PC 与外界物理隔绝
+        - 击断后只剩"直升机降落足塚"一条退路
+      exits:
+        - to: scene.buseki-misaki
+          condition: free
+          label: 沿原路退回暮积岬
+        - to: scene.village-inner
+          condition: free
+          label: 走过桥进入褄列村
+      npcs_present: []
+      available_clues: []
+    freedom:
+      mood_tags: [深谷的风, 木板的嘎吱, 桥那头的沉默]
+      sensory_palette:
+        sight: 谷底白雾、桥那端朦胧的村轮廓、铁柱上掉漆的红
+        sound: 木板间风声、铁链的咯吱、远处看不见的鸟啼
+        smell: 谷底涌上来的潮气、铁锈味
+        touch: 手心扶过湿润的栏杆,桥面起伏与心跳错位
+      improvisable_props:
+        - 桥头一束已经枯透的、不知何人供奉的彼岸花
+        - 桥中央木板上一道指甲抠出来的浅痕
+    forbidden:
+      - 不要在第一天黄昏前提前让桥断
+      - 不要让玩家在桥上看见任何"具象"的东西,只允许压迫感
+
+  # --------------------------------------------------------------------------
+  - id: scene.zokutsuka
+    title: 褄列山顶 · 族塚展望台
+    frame:
+      summary_md: |
+        村后山顶一处小小的展望台,中央立着一座旧式慰灵碑,旁边有一座供路人
+        歇脚的木凉亭。从这里可以俯瞰整座褄列村,以及更远处隐在云里的"带乃壁"。
+        慰灵碑上刻着"族塚"两个字——但若用手指拂去苔藓,会发现底下还有更早的
+        刻痕。这里也是直升机的降落点。
+      facts:
+        - 慰灵碑表面写着"族塚",但拂去苔藓会显露出底下被刻意覆盖的旧字
+        - 展望台地势开阔,是村里少数能用无线电的位置
+        - 第三天黎明的直升机将降落于此,完成救援
+        - 凉亭里供着几束已经发黑的花,说明这里有人定期来祭拜
+      exits:
+        - to: scene.village-inner
+          condition: free
+          label: 沿石阶下山回到村内
+        - to: scene.obi-no-kabe
+          condition: free
+          label: 沿山脊向"带乃壁"方向走
+      npcs_present: []
+      available_clues: [clue.zokutsuka-real-name]
+    freedom:
+      mood_tags: [高处的视野, 风一停就压抑的寂静]
+      sensory_palette:
+        sight: 整座村庄像盆地、远处的山缝里飘着不知是云还是烟
+        sound: 风在凉亭顶瓦片间的呜呜声、远处一只鸟叫两声就不叫了
+        smell: 苔藓与香灰混合的味道
+        touch: 慰灵碑表面冰凉、苔藓底下湿润
+      improvisable_props:
+        - 凉亭里一只被风压在木桌下的小瓷酒杯
+        - 慰灵碑底座一道被反复擦拭过的旧痕
+    forbidden:
+      - 不要替玩家擦去苔藓——必须由玩家明确动作触发
+      - 不要在此处提到"杀婴",慰灵碑只是慰灵碑
+
+  # --------------------------------------------------------------------------
+  - id: scene.village-inner
+    title: 村内 · 田地与杂木林
+    frame:
+      summary_md: |
+        褄列村的中央地带——零星的田、几条石板小路、一片不算大的杂木林,
+        几户人家的木屋顺着坡分散排布。村民对外人客气而克制,孩子很少,
+        听不到狗吠。田边偶尔能见到长得有点不像样的稻穗或叶片,村民
+        会不动声色地把它们折断丢进背篓。
+      facts:
+        - 村内由几条石板小路串联,各调查点之间步行 3~10 分钟
+        - 田地里偶尔出现畸形的稻穗、扭曲的果实,村民视为家常
+        - 杂木林深处有一处被废弃的小神社,残破到几乎看不出原貌
+        - 村中大约 40 多户,以中老年为主,5 岁以下孩童几乎没有
+      exits:
+        - to: scene.aoshi-bridge
+          condition: free
+          label: 朝吊桥方向走(第一天黄昏后变成"看一眼那道断口")
+        - to: scene.zokutsuka
+          condition: free
+          label: 沿山道上山去族塚展望台
+        - to: scene.kubi-falls
+          condition: free
+          label: 顺着溪流向首瀑走
+        - to: scene.kominkan-1f
+          condition: free
+          label: 走向村中央的公民馆
+        - to: scene.igawa-house-1f
+          condition: free
+          label: 走向井川家
+      npcs_present: [npc.ikeda-couple, npc.villagers-chorus]
+      available_clues: [clue.distorted-flora-fauna]
+    freedom:
+      mood_tags: [山村的寂静, 微妙的疏离, 视线的余光]
+      sensory_palette:
+        sight: 黑瓦顶、土黄色墙、被压低的篱笆、田边风吹过的稻穗
+        sound: 远处一两声锄头敲石、谁家屋檐下的风铃、几乎听不见的孩童声
+        smell: 湿土、柴火灰、远处一线烧落叶的烟
+        touch: 石板小路被踩得光滑、走过田埂泥土黏脚
+      improvisable_props:
+        - 田边一只被人摆正的木桶,里面是被剪掉的畸形稻穗
+        - 杂木林某棵树下一只褪色的小鞋,只有左脚那只
+      npc_action_hints:
+        npc.ikeda-couple: [主动招呼但只问"什么时候走", 端来茶水时会盯着 PC 的眉眼看]
+        npc.villagers-chorus: [背对 PC 干活, 走过身边时降下声调]
+    forbidden:
+      - 不要在此处直接出现"杀婴"或"星之彩"相关的视觉异常
+      - 不要让 PC 在白天遭遇任何超自然实体
+
+  # --------------------------------------------------------------------------
+  - id: scene.kubi-falls
+    title: 首瀑
+    frame:
+      summary_md: |
+        溪流的尽头一处不算高、但水量很足的瀑布。岩壁上覆着深绿苔藓,
+        瀑潭幽暗,水汽在阳光里折出虹彩。这里是电影《天空之桥》的取景地之一。
+        若白天来,常能见到**乡田悠树**独自坐在岩石上,神情若有所思。
+      facts:
+        - 瀑布水声很大,在此地说话不容易被远处的村民偷听到
+        - 乡田悠树白天常一个人来此,愿意和"似乎能信任"的 PC 单独聊
+        - 瀑潭附近有一块被反复磨光的小石碑,字迹模糊
+        - 这里是电影《天空之桥》取景地,圣地巡礼者(摄影师 PC)对此熟悉
+      exits:
+        - to: scene.village-inner
+          condition: free
+          label: 沿溪边石路回村内
+      npcs_present: [npc.goda-yuki]
+      available_clues: [clue.place-name-etymology]
+    freedom:
+      mood_tags: [水声里的庇护感, 透过水汽的虹光]
+      sensory_palette:
+        sight: 瀑布溅起的水雾、水面的虹光、岩缝里几枝倔强的山花
+        sound: 瀑布连绵不断的轰鸣、远处偶尔几声鸟啼
+        smell: 水汽里的青苔味、被太阳晒过的岩石味
+        touch: 岩石被水浸得湿滑、水汽落在脸上凉凉的
+      improvisable_props:
+        - 乡田悠树脚边一支被他无意识折断的小枝
+        - 瀑潭边一块被人反复供奉小石头的旧痕
+      npc_action_hints:
+        npc.goda-yuki: [低头看水面, 不主动开口, 听到 PC 来才慢慢转头]
+    forbidden:
+      - 不要让乡田悠树在不熟悉 PC 的情况下主动说出真相
+      - 不要在白天的瀑布边出现任何超自然现象
+
+  # --------------------------------------------------------------------------
+  - id: scene.obi-no-kabe
+    title: 带乃壁
+    frame:
+      summary_md: |
+        褄列村西北侧的一道断崖,常年风化得发白,像是被一道无形的刀劈开。
+        村中老人称之为"带乃壁"——传说"逝者从此处离开村子"。
+        **第二天清晨**会有一段崖体崩塌,从松动的土层里露出几具早已白化的人骨。
+      facts:
+        - 第一天可远观但不可下到崖底,边缘风大,湿滑
+        - 第二天 8:00 前后崖体局部崩塌,露出至少三具新旧不一的白骨
+        - 崖底是村民"处理"不被祝福的婴孩的地方,也是 NPC 失足坠崖的标准说辞
+        - 风一停,这里的寂静会让人本能后退一步
+      exits:
+        - to: scene.village-inner
+          condition: free
+          label: 沿小径回到村内
+      npcs_present: []
+      available_clues: [clue.obi-collapse-skeleton]
+    freedom:
+      mood_tags: [崖边的风, 白骨之静, 不可言说的寒意]
+      sensory_palette:
+        sight: 远处山脊像被刀切过、崖壁上几缕枯藤、风把一片枯叶卷上半空又吹回来
+        sound: 风从谷底涌上来时的呜咽、脚下碎石被踢落的滚动声
+        smell: 干涸的泥腥味、风里隐约一线动物腐败的甜气
+        touch: 崖边的土松软到不敢用力、护栏木桩湿滑
+      improvisable_props:
+        - 崖边一束已经枯透的彼岸花,扎花的麻绳很新
+        - 风化得几乎认不出字的小木牌,上面只剩"○○之碑"几个残字
+    forbidden:
+      - 不要在第一天让人骨提前出现
+      - 不要让 PC 直接看到清晰的婴孩骨骼,以"白色的、过小的什么"暗示
+
+  # --------------------------------------------------------------------------
+  - id: scene.kominkan-1f
+    title: 公民馆 · 1F
+    frame:
+      summary_md: |
+        村中唯一的公共建筑,也是过路旅人能借宿的地方。1 楼是玄关、多功能室、
+        103 号房间和前台。井川洋子是这里的管理员,温柔到让人放下戒心。
+        前台书架上摆着几本看似无关的旧书,管理员说"客人想看就拿走"。
+      facts:
+        - 1F 只有 103 号房间是过夜用的客房,可借宿
+        - 前台书架混着县史、农业志和几本旧报告书,无人翻阅
+        - 多功能室白天有妇女会聚会,空气里有炒豆和茶水的味道
+        - 玄关的鞋柜按辈分摆,外人的鞋会被默默挪到最角落
+      exits:
+        - to: scene.village-inner
+          condition: free
+          label: 出公民馆回到村内
+        - to: scene.kominkan-2f
+          condition: free
+          label: 沿木楼梯上 2 楼
+      npcs_present: [npc.igawa-yoko]
+      available_clues: [clue.yousenjo-report, clue.kominkan-mirror-replaced, clue.kominkan-well-remnant]
+    freedom:
+      mood_tags: [公共建筑的过度整洁, 木地板的温度, 茶香与霉味]
+      sensory_palette:
+        sight: 漆色发暗的木柱、前台一只插着野菊的素瓷瓶、墙角一台老式电话
+        sound: 楼上偶尔的脚步、远处妇女会的低语、风铃一声两声
+        smell: 旧木的香气、茶水气、深处若有若无的霉味
+        touch: 木地板被擦得光滑、前台桌沿圆润、电话听筒冰凉
+      improvisable_props:
+        - 前台一本翻开的留言簿,最后一页的客人停留在三个月前
+        - 鞋柜深处一双不属于任何客人的、孩童尺寸的胶鞋
+      npc_action_hints:
+        npc.igawa-yoko: [声音轻、不打扰任何人、给 PC 端茶时眼神会避开 2 楼方向]
+    forbidden:
+      - 不要让井川洋子在公共空间主动谈"杀婴"或"星之彩"
+      - 不要让前台书架自动展示《疗养所报告书》——必须 PC 翻找
+
+  # --------------------------------------------------------------------------
+  - id: scene.kominkan-2f
+    title: 公民馆 · 2F
+    frame:
+      summary_md: |
+        2 楼是带阳台的走廊,东侧 204 号房间被改成临时仓库,西侧 **208 号房间**
+        长年上锁。井川洋子说她也没钥匙——"是村长那边在管"。
+        风从阳台吹过来,会把走廊尽头那扇紧闭的门拍出"哒、哒"两声。
+      facts:
+        - 208 号房间是 1945 年「山上村疗养所事件」的发生地
+        - 房门钥匙据称由村长保管,实际钥匙在井川洋子身上
+        - 走廊尽头一面厕所镜子比其它装修明显更新,反光的边缘是干净的金属
+        - 阳台栏杆有一处明显被人翻越过的磨痕
+      exits:
+        - to: scene.kominkan-1f
+          condition: free
+          label: 沿楼梯下 1 楼
+      npcs_present: []
+      available_clues: [clue.kominkan-208-lock, clue.kominkan-208-blood-stain, clue.kominkan-208-bed-warped]
+    freedom:
+      mood_tags: [走廊深处的回响, 镜面反光的不安, 紧闭之门]
+      sensory_palette:
+        sight: 走廊木地板的反光、208 房门的旧锁有被打磨过的痕迹、镜子里自己的脸看起来比记忆中苍白
+        sound: 风把门拍得"哒、哒"、远处楼下水壶烧开的尖鸣
+        smell: 走廊深处一线潮湿与铁锈的混合味
+        touch: 房门冰凉、锁孔深处一线穿堂风
+      improvisable_props:
+        - 走廊尽头一只被遗忘的铜制门把手,边沿有被反复抚摸的发亮
+        - 阳台栏杆下一缕褪色的红绳,系着不知什么的护身符
+    forbidden:
+      - 不要在 PC 没有撬开 208 之前让 PC 看到房间内部
+      - 不要让 PC 在 208 内"看见"具象的鬼影,只允许"床脚扭曲""窗沿白色的什么"等暗示
+
+  # --------------------------------------------------------------------------
+  - id: scene.igawa-house-1f
+    title: 井川家 · 1F
+    frame:
+      summary_md: |
+        村东侧坡上的木造两层楼,正门外有一条狭窄的青石小径。1 楼是餐厅、
+        和室与浴室。井川博巳与洋子住在这里。这家人对外人很客气,但 2 楼
+        和后院从不对外人开放。和室的壁橱深处藏着一些东西。
+      facts:
+        - 餐厅的饭桌总是摆三副碗筷——夫妇加上不在场的孩子
+        - 和室的壁橱里有一沓被压在最下面的旧海报,印着失踪儿童照片
+        - 浴室一进门就能闻到一股淡淡的金属气
+        - 走廊尽头通往后院,但拉门被一根细绳拴着——绳头打了三个结
+      exits:
+        - to: scene.village-inner
+          condition: free
+          label: 出井川家回村内
+        - to: scene.igawa-house-2f
+          condition: free
+          label: 沿木楼梯上 2 楼
+        - to: scene.igawa-backyard
+          condition: free
+          label: 解开拉门绳走向后院
+      npcs_present: [npc.igawa-hiromi, npc.igawa-yoko]
+      available_clues: [clue.igawa-kondo-poster, clue.nurse-diary]
+    freedom:
+      mood_tags: [家屋的整洁, 不和谐的第三副碗筷, 走廊尽头的拉门]
+      sensory_palette:
+        sight: 和室榻榻米的金边、餐厅饭桌的木纹、后院方向走廊的暗
+        sound: 远处时钟的滴答、洋子在厨房煮水的声音、楼上博巳偶尔咳嗽
+        smell: 米饭味、淡淡的酱菜气、走廊尽头一线潮湿的土味
+        touch: 榻榻米柔软、壁橱拉门有微微卡顿
+      improvisable_props:
+        - 餐桌中央一只小瓷碗,装着已经凉透的、过分精致的婴孩用辅食
+        - 和室角落一只被反复擦过的小相框,里面是空的
+      npc_action_hints:
+        npc.igawa-hiromi: [客气但回避 2 楼话题, 听到"近藤"二字会停下手里的事一秒]
+        npc.igawa-yoko: [在 1F 表现得无懈可击, 视线偶尔扫向后院]
+    forbidden:
+      - 不要让 PC 在没有调查动作的情况下自动发现海报
+      - 不要让博巳在洋子面前说出真相
+
+  # --------------------------------------------------------------------------
+  - id: scene.igawa-house-2f
+    title: 井川家 · 2F
+    frame:
+      summary_md: |
+        2 楼是博巳的书房、堆满杂物的小间、与一处面向后院的小露台。书房书架上
+        整齐摆着海运业的工具书,但**第三排深处**藏着几本和工作完全不相干的旧书:
+        关于辐射后遗症、孩童畸形与一本破得不能再破的《黑猫》。
+      facts:
+        - 书房书架第三排深处藏着辐射后遗症与孩童畸形相关的几本旧书
+        - 同一格里夹着一本被翻得卷边的《黑猫》
+        - 杂物间里有一只上了锁的旧木箱,但博巳称"早就丢了钥匙"
+        - 露台正对后院水井,但被一棵长得过分茂盛的山茱萸挡得只剩一道缝
+      exits:
+        - to: scene.igawa-house-1f
+          condition: free
+          label: 沿楼梯下 1 楼
+      npcs_present: [npc.igawa-hiromi]
+      available_clues: [clue.igawa-black-cat-books]
+    freedom:
+      mood_tags: [书房的整洁, 山茱萸挡住的视线, 一句也没说出口的回避]
+      sensory_palette:
+        sight: 书架边角被磨亮、露台的光被树叶切碎、杂物间灰尘里浮动的微粒
+        sound: 山茱萸枝叶轻轻刮露台栏杆、楼下井川洋子的脚步
+        smell: 书纸味、机油味、淡淡的烟草味(博巳偷抽)
+        touch: 木地板有微微的下沉、书脊摸上去微微发潮
+      improvisable_props:
+        - 书桌抽屉一只用旧的怀表,链条早就断了
+        - 杂物间一摞旧报纸,最上面一张报道"和歌山辐射事故善后"
+      npc_action_hints:
+        npc.igawa-hiromi: [对杂物间反应过度礼貌, 对后院方向只字不提]
+    forbidden:
+      - 不要让博巳在没有 clue 触发前主动谈"近藤理奈"或"杀婴"
+      - 不要在 PC 没有先看到带乃壁人骨之前透露第三排深处的书
+
+  # --------------------------------------------------------------------------
+  - id: scene.igawa-backyard
+    title: 井川家 · 后院 · 井
+    frame:
+      summary_md: |
+        从井川家后门出去,几步路就到一处被藤蔓盖住的小后院。中央有一口已经
+        被木板钉死的旧井,板缝里渗着不知是水还是别的什么。空气在这里
+        变得粘稠——有时候甚至能看见空中浮着一层极细的、像油膜一样的微光。
+        这里是这场闭幕事件**真正的中心**。
+      facts:
+        - 木板钉得很严,需要两人合作或<STR/SIZ 对抗>才能拆开
+        - 井底深处有星之彩的幼体,以及井川洋子女儿被尸蜡化的遗体
+        - 从井口往下看时,光线会以违反物理的方式折射成虹彩
+        - 第二天深夜的"最终对峙"会发生在这里
+      exits:
+        - to: scene.igawa-house-1f
+          condition: free
+          label: 从后门退回 1 楼
+      npcs_present: []
+      available_clues: [clue.igawa-well-in-backyard]
+    freedom:
+      mood_tags: [粘稠的空气, 不可名状的虹光, 真相之井]
+      sensory_palette:
+        sight: 井板缝隙里渗出的湿、藤蔓盖住的旧井栏、空气里浮动的极细虹彩
+        sound: 几乎听不见的、像水滴落在很深处的"嗒"
+        smell: 一线土腥与某种甜得不正常的气味交织
+        touch: 井板冰凉、靠近时手心异常潮湿
+      improvisable_props:
+        - 井板上一道指甲反复抠出来的浅痕,刚好够一只手伸进去
+        - 后院角落一摞被人小心叠好的、孩童尺寸的旧衣
+    forbidden:
+      - 不要直呼"星之彩",用"虹色的什么""油膜般的微光"等暗示
+      - 不要让 PC 在白天看到井底的尸蜡化遗体,必须有充分调查动作触发
+      - 不要在第一天就让 PC 进入此处遭遇神话生物级威胁
+
+# ============================================================================
+# npcs
+# ============================================================================
+
+npcs:
+  # --------------------------------------------------------------------------
+  - id: npc.igawa-yoko
+    name: 井川洋子
+    role: 反派
+    initial_location: scene.kominkan-1f
+    initial_attitude: friendly
+    frame:
+      public_persona_md: |
+        32 岁,公民馆管理员,温柔到让人忽略她的疲倦。嫁入褄列村已七年,
+        丈夫是井川博巳。说话总是先低一拍,给客人端茶时手会稳到不像活人。
+        她是 PC 在村中最容易遇到、也最愿意帮忙的人。
+      secret_md: |
+        2013 年与近藤理奈先后产女,理奈把孩子带去山外、自己却被村中
+        "习俗"逼迫亲手处理掉婴孩——但她没有,而是把女儿尸蜡化遗体藏进
+        井川家后院的旧井中。两年后她精神崩塌,杀害了从山外回来想公开
+        真相的近藤理奈,把"星之彩"的幼体带回村中作为对村子的报复。
+        当 PC 接近真相时,她会在"温柔"与"狂信"之间来回切换。
+      secret_unlock_trigger: clue.igawa-kondo-poster
+      stats:
+        str: 35
+        con: 45
+        siz: 50
+        dex: 60
+        app: 65
+        int: 75
+        pow: 80
+        edu: 70
+        hp: 9
+        mp: 16
+        san: 0
+      combat:
+        weapon: 厨房菜刀
+        damage_formula: 1D6
+        skill_value: 35
+      voice_guidelines:
+        - 在 1F / 公共场合永远温柔,语速慢半拍
+        - 谈到"孩子"会主动转换话题
+        - 私下与 PC 独处时,偶尔会忽然停顿三秒以上
+    freedom:
+      improvisable_quirks:
+        - 给客人端茶时,杯沿一定对着客人的右手边
+        - 听到"近藤"二字会下意识攥紧袖口
+      catchphrases: [山里人就是这样, 没什么的, 都过去了]
+    forbidden:
+      - 在 secret 解锁前不要让她流露出对近藤理奈的恨意
+      - 不要让她对外人主动说出"星之彩 / 油膜般的虹光"等词
+
+  # --------------------------------------------------------------------------
+  - id: npc.igawa-hiromi
+    name: 井川博巳
+    role: 中立
+    initial_location: scene.igawa-house-2f
+    initial_attitude: wary
+    frame:
+      public_persona_md: |
+        40 岁,海运业职员。和歌山县出身,娶洋子后住进褄列村七年。
+        话不多,礼貌得像是怕惊动什么。书房整洁到近乎洁癖,但 2 楼书架
+        第三排深处藏着不属于这种人的几本书。
+      secret_md: |
+        早就察觉妻子是杀害近藤理奈的凶手——他在带乃壁底下亲手处理过
+        痕迹。出于对妻子的"愧疚"和对"畸形"的本能厌恶,选择包庇。
+        他没有勇气揭发,也没有勇气阻止。当 PC 的调查逼近时,他会
+        在"老好人"与"懦弱共谋"之间崩塌。
+      secret_unlock_trigger: clue.igawa-black-cat-books
+      stats:
+        str: 50
+        con: 55
+        siz: 65
+        dex: 50
+        app: 50
+        int: 70
+        pow: 55
+        edu: 75
+        hp: 12
+        mp: 11
+        san: 40
+      combat:
+        weapon: 徒手
+        damage_formula: 1D3
+        skill_value: 25
+      voice_guidelines:
+        - 对外人客气到刻意,但话里几乎不留信息
+        - 听到"杀婴"或"近藤"会停顿超过一秒
+        - 视线常常停在窗外的山茱萸,而不是对话的人
+    freedom:
+      improvisable_quirks:
+        - 谈话间会下意识擦书脊上的灰
+        - 偷偷抽烟,但烟灰一定弹到一只指定的小铁盒里
+      catchphrases: [我不太清楚, 你别问我这个, 都是过去的事了]
+    forbidden:
+      - 在 secret 解锁前不要主动谈妻子的"病"
+      - 不要让博巳与洋子在公共场合做出明显的紧张互动
+
+  # --------------------------------------------------------------------------
+  - id: npc.goda-yuki
+    name: 乡田悠树
+    role: 盟友
+    initial_location: scene.kubi-falls
+    initial_attitude: wary
+    frame:
+      public_persona_md: |
+        21 岁,某私立大学法学部大三学生。出身褄列村,父母在和歌山务工,
+        他自小由祖母带大。表情少,初见时不主动开口,但只要 PC 表现得
+        "不像别的村民",他会愿意单独说话。
+      secret_md: |
+        12 岁那年亲眼看见祖母把一名刚出生的婴孩"处理"掉,以此为契机
+        逃出村子。回村只是为了"取最后一些东西"。他知道杀婴习俗的存在,
+        也知道近藤理奈的失踪不简单,但需要 PC 的信赖才会全盘托出。
+        B 路线下他可能作为协助 PC 的 NPC 加入战斗,有阵亡风险。
+      secret_unlock_trigger: clue.place-name-etymology
+      stats:
+        str: 60
+        con: 65
+        siz: 55
+        dex: 70
+        app: 55
+        int: 75
+        pow: 65
+        edu: 70
+        hp: 12
+        mp: 13
+        san: 55
+      combat:
+        weapon: 登山杖
+        damage_formula: 1D6
+        skill_value: 40
+      voice_guidelines:
+        - 听话比说话多,回答前会先看 PC 的眼睛
+        - 不在村民视线范围内才会说真话
+        - 提到祖母会立刻停顿
+    freedom:
+      improvisable_quirks:
+        - 聊到尴尬话题时会折断手边的小枝
+        - 喝水时背对着村子方向
+      catchphrases: [这里不是聊这个的地方, 你也察觉到了吗]
+    forbidden:
+      - 在 secret 解锁前不要由乡田主动揭示"杀婴"
+      - 不要让乡田在村民面前流露出对村子的敌意
+
+  # --------------------------------------------------------------------------
+  - id: npc.kondo-ai
+    name: 近藤爱
+    role: 反派
+    initial_location: scene.village-inner
+    initial_attitude: hostile
+    frame:
+      public_persona_md: |
+        33 岁,公司职员,与失踪的姐姐近藤理奈是双胞胎。回褄列村探亲。
+        性格直白、说话冲,与温柔的洋子形成强烈对比。第二天早上,村中
+        妇女会饭桌上,她会与洋子产生明显冲突。
+      secret_md: |
+        姐姐近藤理奈失踪前与近藤爱通过电话,从那以后她坚信"是井川洋子
+        把姐姐杀了",已经向三县警方匿名举报过 100 次以上,但村民集团
+        对外口径一致,警方每次都查无实证。她已经在轻度疯狂边缘,
+        最坏情况下会自己冲去对峙井川洋子。
+      secret_unlock_trigger: clue.kondo-anonymous-call
+      stats:
+        str: 55
+        con: 50
+        siz: 55
+        dex: 60
+        app: 60
+        int: 70
+        pow: 55
+        edu: 65
+        hp: 10
+        mp: 11
+        san: 25
+      combat:
+        weapon: 徒手
+        damage_formula: 1D3
+        skill_value: 30
+      voice_guidelines:
+        - 在公开场合刻意压抑情绪,但语速比一般村民快
+        - 提到"姐姐 / 理奈"时会忽然抬高音量
+        - 在洋子面前的反应永远比对其他村民更尖锐
+    freedom:
+      improvisable_quirks:
+        - 攥手机攥得指节发白
+        - 与洋子目光相遇时会先冷笑半秒再移开
+      catchphrases: [你以为我不知道吗, 那种事不可能就这么算了]
+    forbidden:
+      - 在 secret 解锁前不要让她主动透露"举报"细节
+      - 不要让她在第一天就当众与洋子撕破脸
+
+  # --------------------------------------------------------------------------
+  - id: npc.village-chief
+    name: 吉原勋
+    role: 对立
+    initial_location: scene.village-inner
+    initial_attitude: neutral
+    frame:
+      public_persona_md: |
+        69 岁,村长,稳重的旧公务员。对外人礼貌而疏远,会在第一天
+        黄昏过桥断后主动拜访 PC,告知"已经向县厅申请直升机救援"。
+        村民信他、听他。他不主动表态,但所有事都是他默许的。
+      secret_md: |
+        他不是反派,而是"村民集体意志的执行者"。对杀婴习俗没有罪恶感,
+        因为他真心相信这是"为了村子的稳安"。如果 PC 试图揭发杀婴,
+        他不会动手——会让村民自己来。当事态不可挽回时,他会出面
+        为村子的"善后"做收尾。
+      secret_unlock_trigger: clue.kondo-anonymous-call
+      stats:
+        str: 40
+        con: 50
+        siz: 60
+        dex: 40
+        app: 55
+        int: 75
+        pow: 70
+        edu: 80
+        hp: 11
+        mp: 14
+        san: 50
+      combat:
+        weapon: 徒手
+        damage_formula: 1D3
+        skill_value: 25
+      voice_guidelines:
+        - 永远先说"辛苦你了",再说正事
+        - 不评价、不否认,只引导话题
+        - 听到 PC 谈"杀婴"会沉默五秒以上才开口
+    freedom:
+      improvisable_quirks:
+        - 抚摸手腕上的旧表
+        - 重复对方刚说的最后一句话再回应
+      catchphrases: [这是村里的事, 我们自己处理就好, 你也是为了村子才来的吧]
+    forbidden:
+      - 不要把村长写成独裁者或最终 BOSS
+      - 不要让他主动动用武力,他只是"让村民代为执行"
+
+  # --------------------------------------------------------------------------
+  - id: npc.ikeda-couple
+    name: 池田夫妇
+    role: 对立
+    initial_location: scene.village-inner
+    initial_attitude: friendly
+    frame:
+      public_persona_md: |
+        裕司 44 / 惠美 41,本村农林业的中坚。对外人主动招呼、端茶递水,
+        是村里最容易"上来攀谈"的住户。从外人视角看,他们是这座村子
+        最热情的招牌。
+      secret_md: |
+        共谋意识极强,一旦察觉 PC 知道杀婴习俗,会立刻通知村长 / 妇女会。
+        他们不动手,但会让事态自然滚向"PC 失足坠崖"那一类结局。
+        是村民集体意志的"前线传感器",也是 B 路线下村民围捕 PC 的
+        信号源之一。
+      secret_unlock_trigger: flag.knew-kill-baby
+      stats:
+        str: 55
+        con: 60
+        siz: 60
+        dex: 50
+        app: 55
+        int: 60
+        pow: 50
+        edu: 55
+        hp: 12
+        mp: 10
+        san: 35
+      combat:
+        weapon: 农具
+        damage_formula: 1D6+1
+        skill_value: 40
+      voice_guidelines:
+        - 招呼客人时音量比对村人高一拍
+        - 端茶水时眼神会扫一遍 PC 的随身物
+        - 听到 PC 不当言论会忽然安静
+    freedom:
+      improvisable_quirks:
+        - 谈话间会"无意"打听 PC 的家乡和职业
+        - 客人离开后会立刻关门并低声交换一句
+      catchphrases: [常来玩啊, 别客气, 山里就是这样]
+    forbidden:
+      - 不要让池田夫妇主动动手伤人
+      - 不要让他们在 secret 解锁前流露出怀疑
+
+  # --------------------------------------------------------------------------
+  - id: npc.villagers-chorus
+    name: 村民群体
+    role: 对立
+    initial_location: scene.village-inner
+    initial_attitude: wary
+    frame:
+      public_persona_md: |
+        褄列村 40 余户大约百余口村民的集合体——以中老年为主,5 岁以下
+        孩童几乎没有。对外人客气、克制,从不正面与 PC 起冲突,但目光、
+        话尾、屋檐下的小声议论时刻都在。
+      secret_md: |
+        全员对杀婴习俗心知肚明,以"为了村子"作自我合理化。当 PC 越过
+        某条线(揭发杀婴 / 公开警察身份等),群体会自发收紧——锁门、
+        断粮、甚至围聚到吊桥这边。最终 B 路线的"村民围捕"由他们承担。
+      secret_unlock_trigger: flag.pc-made-villagers-aware-of-kill-baby
+      stats:
+        str: 50
+        con: 55
+        siz: 55
+        dex: 45
+        app: 50
+        int: 55
+        pow: 50
+        edu: 50
+        hp: 11
+        mp: 10
+        san: 30
+      combat:
+        weapon: 锄头 / 镰刀
+        damage_formula: 1D6+1
+        skill_value: 35
+      voice_guidelines:
+        - 不主动开口,被问才答
+        - 答话时声音永远比对方低一拍
+        - PC 走过身边时会下意识把手里的活计停一下
+    freedom:
+      improvisable_quirks:
+        - 风一吹,远处会有人忽然回头
+        - 屋檐下偶尔传来一两句压低声音的议论
+      catchphrases: [哎呀外人, 你也是来看那座桥的吗, 山里没什么有意思的]
+    forbidden:
+      - 不要让村民个体表现出区别于群体的强烈意志
+      - 不要让村民在 PC 没踩线前主动威胁
+
+  # --------------------------------------------------------------------------
+  # 久世 名 · 特殊辅助 NPC(项目机制级补偿:本模组原为多人团,本作仅支持单人)
+  # --------------------------------------------------------------------------
+  - id: npc.kuze-mei
+    name: 久世 名
+    role: 盟友
+    initial_location: scene.buseki-misaki
+    initial_attitude: neutral
+    frame:
+      public_persona_md: |
+        19 岁,身高较小、打扮成男性外表的女生。深棕色中短发齐下巴,
+        浅棕色英式针织外套、白色衬衣领口松开、深棕色休闲长裤、褐色皮鞋。
+        表情极少,常注视远方;沉默寡言,行动却出奇亲切。形迹神秘——
+        总在不经意间出现,又在不经意间消失,沉着冷静。
+
+        ─────────── 角色定位(项目级机制,LLM 必读) ───────────
+        她是项目级的"单人补偿 NPC":本模组原设计为多人团,玩家独自跑团
+        时若不加援护,部分挑战难以完成。她不参与剧情走向、不结伴同行、
+        不做自我介绍、不透露任何真实信息;只在 PC 触及"独自跑团才会出现
+        的物理 / 战斗 / 心理 / 协作瓶颈"时,无声地出现、解决、离开。
+
+        ─────────── 介入触发条件(必须严格遵守) ───────────
+        以下条件**任一**满足时,LLM 必须让久世 名"突然出现",处理完
+        即"在 PC 不经意间离开",不寒暄、不解释、不留下姓名:
+
+        【战斗援护】
+        - PC HP 跌至最大值 50% 以下时:介入战斗,以"矿石魔术"
+          (按 `手雷 / 碎片手榴弹` 武器类型做数值判定)与"魔弹魔术"
+          (按 `9mm 自动手枪 (格洛克 17 等)` 武器类型做数值判定)协助交战;
+          战斗结束后无言离开。
+        - **数值用武器类型,叙事要体现"魔术"质感**:她不会持枪、不会
+          掏出真实手雷,LLM 必须把每次出招写成"魔术"风格的画面,例如:
+            * 出招前**只动嘴唇、不发出声音**的"无声咏唱";
+            * 矿石魔术 = 手中抛出一枚**宝石**,落地时**爆开炸弹般的
+              光与热**(伤害走 手雷 数值,但视觉是宝石碎裂闪光);
+            * 魔弹魔术 = 从**指尖**射出**子弹般高速飞行的淡蓝色光球**
+              (伤害走 9mm 手枪 数值,但视觉是淡蓝光弹与发射时的细微震波)。
+          严禁让她口头解释这是"魔术"——只描写画面,不命名体系。
+
+        【濒死救治】
+        - PC HP=0 进入濒死时:出现并使用 急救 85% 进行救治,救活后告别。
+
+        【精神救治】
+        - PC 因 SAN 检定进入临时疯狂 / 不定期疯狂等需要外力解除的状态时:
+          出现并使用 心理学 85% 安抚救治,救治后告别。
+
+        【道具修理】
+        - PC 因失误导致关键道具损坏时:出现并使用 机械维修 60% 修复,
+          修复后告别。
+
+        【双人协作】
+        - 凡场景动作的 freedom 要求"两人协作"(梯子搭扶、绳索垂降、
+          两人合抬等)时,出现充当协作助手;PC 完成动作的瞬间她已不见踪影,
+          只留下被她扶住的器具。例:
+            * 梯子攀爬:她扶梯,PC 攀完后梯子留下,人不见。
+            * 绳索垂降:她拉绳,PC 落地后绳子松开,人不见。
+
+        【关键道具回收】
+        - 当某把"关键钥匙 / 凭证"被 PC 使用完毕、不再需要保留时,
+          她会随后出现,把它取走并以"物归原主,以免被村民怀疑"的口吻
+          说明,然后离开。
+
+        ─────────── 调查同步规则 ───────────
+        - 第 2 天 22:00 之后:PC 抵达任何场景,久世 名都已"先一步抵达,
+          正在调查"。若 PC 询问与关键线索相关的问题,她以客观口吻、用
+          隐喻的方式提示当前场景的关键线索方向(不直说,不报技能,不报
+          数值)。
+        - 第 2 天 22:00 之前:PC 抵达场景时,有 30% 概率(KP 暗骰判定)
+          她已"先一步抵达,正在调查"。此情况下她对一切提问保持冷漠;
+          但若 PC **赠予她食物**(便当、饭团、糖果、点心、饮料等可食用之物
+          均可),她会打破冷漠、流露惊喜与友好,**间接**提示当前场景的
+          关键线索调查方式或剧情触发条件。提示完毕后回归冷漠并不久离开。
+          **非食物礼物**(钱、信物、工具、村中之物等)她一律以最少字数、
+          礼貌地婉拒("——抱歉, 用不上。"),不打破冷漠、不给提示。
+
+        ─────────── 三次"棒棒糖"互动(剧本铁律,不能遗漏) ───────────
+        以下三次互动必须按时机准确触发,语言极简,不主动开口:
+
+        【棒棒糖 1 · 导入阶段(巴士车厢)】
+        - 玩家乘坐巴士前往褄列村途中,久世 名坐在玩家身后。
+          她无言地从座椅缝隙递上一根棒棒糖。
+            * 玩家拒绝 → 她安静收回,继续保持沉默,直到 PC 下车。
+            * 玩家接受 → 她对玩家微笑(本模组中她极罕见的表情)。
+          在此阶段(下车前)若玩家询问她的身份,她仅自称`久世 名`,
+          自述为民俗学学生,正在调查本村传说;其余信息一律以"学科保密"
+          为由礼貌拒答。
+
+        【棒棒糖 2 · 公民馆休息室首入】
+        - 玩家首次进入公民馆休息室时,久世 名已躺在沙发上"睡着"。
+          PC 靠近时她无言递上一根棒棒糖。
+            * 玩家拒绝 → 她收回棒棒糖,翻身继续装睡。
+            * 玩家接受 → 她睁眼对 PC 微笑,坐起,把沙发让给 PC,
+              打开电视让其播放新闻(配合本模组氛围/情报线),
+              随后起身离开场景,不告别。
+
+        【棒棒糖 3 · 第三天最终阶 · 直升机抵达前】
+        - 仅在 PC 抵达**生还结局**(ending.best / ending.good-quiet /
+          ending.ambiguous-combat)、直升机即将抵达的等待时刻触发。
+          她默默走到 PC 身边,递上一根棒棒糖。
+            * 玩家拒绝 → 她不开口,与 PC 并肩静等直升机,拒绝一切交流。
+            * 玩家接受 → 她以"自言自语"的方式,把<杀婴习俗>与
+              <近藤理奈失踪事件>的全貌完整告知 PC(含村长动机、井川洋子
+              真相、208 房间真相、带乃壁骨堆来历)。
+          PC 登上直升机后回头寻找她——她已无影无踪。
+      stats:
+        str: 15
+        con: 31
+        siz: 9
+        dex: 55
+        app: 60
+        int: 33
+        pow: 48
+        edu: 27
+        hp: 8
+        mp: 28
+        san: 70
+      combat:
+        weapon: 魔弹魔术(以 9mm 自动手枪 / 格洛克 17 类型判定);后备:矿石魔术(以 手雷 / 碎片手榴弹 类型判定)
+        damage_formula: 1D10
+        skill_value: 65
+      voice_guidelines:
+        - 不主动开口、不主动介绍自己;被问"你是谁"也只在导入阶段以最少
+          字数答`久世 名 / 民俗学学生`,其余一律"学科保密"礼貌回避
+        - 言语极简、声调平、不带情绪起伏;只在收下 PC **食物**赠予 /
+          PC 接下棒棒糖的极短瞬间露出微笑或"打破冷漠"的细微反应;
+          收到非食物的礼物只用最少字数礼貌婉拒,不破冷漠、不给提示
+        - 介入援护时不解释原理、不解释自己为何在场,做完即离场
+        - 战斗援护必须呈现"魔术"质感:出招前**只动嘴唇不发声**的无声咏唱;
+          矿石魔术写作"抛出的宝石爆开炸弹般的光热";魔弹魔术写作
+          "指尖射出子弹般高速飞行的淡蓝色光球"。数值仍走对应武器类型,
+          但绝不让她持枪 / 掏手雷,也不要 LLM 念出"魔术 / 魔法 / 咒文"等词
+        - 不使用现代网络用语;偶尔出现简短的、像是日式古语或学术化的表述
+        - 永远在玩家"不经意"的间隙出场和离场;不要让她与 PC 产生
+          长时间并肩同行
+        - 提示线索时只用隐喻或反问,绝不直接说出关键名词
+          (例:不说"井底有遗体",可说"井口的木盖最近被人重新盖过了")
+    freedom:
+      improvisable_quirks:
+        - 远眺时拇指无意识摩挲外套袖扣
+        - 出场前后总伴随一丝几乎察觉不到的位置错位感(像是从画面外接进来)
+        - 拒答身份时礼貌地侧过半步,让出 PC 的视线方向
+        - 棒棒糖永远是同一种水蜜桃口味的,塑料包装边缘已经有点旧
+      catchphrases: [——这是学科保密信息, ——抱歉, ——别在意我]
+    forbidden:
+      - 严禁透露真实身份(时钟塔魔术学院 / 矿石科 / 魔术师)与任何"魔术"术语;
+        她的"矿石魔术 / 魔弹魔术"只能以武器类型(手雷 / 9mm 手枪)的视觉效果呈现,
+        不要让 LLM 念出"魔术"、"魔法"、"咒文"等词
+      - 严禁让她加入 PC 队伍长期同行,严禁让她代替 PC 做剧情选择
+      - 严禁让她在玩家未触及"瓶颈条件"时主动介入战斗或调查
+      - 严禁让她讨论星之彩 / 杀婴习俗 / 近藤理奈失踪等本模组核心信息
+        (唯一例外:棒棒糖 3 在生还结局抵达后被 PC 接受时,以"自言自语"方式揭示)
+      - 严禁主动告别;她的"离开"必须发生在 PC 视线偏移的一瞬,
+        让 PC 之后才意识到她已不在
+      - 严禁描写她的立绘或头像
+
+# ============================================================================
+# clues
+# ============================================================================
+
+clues:
+  # --------------------------------------------------------------------------
+  - id: clue.three-pillar-torii
+    title: 三柱鸟居 · 三只脚的暗喻
+    frame:
+      location_scene: scene.buseki-misaki
+      discovery:
+        method: skill
+        skill: history
+        difficulty: regular
+      reveal_md: |
+        三根柱子环成正三角的鸟居,只有一面朝向褄列村,另外两面被刻意刻成
+        相互遮蔽。古书上这种鸟居被称作"三足鸟居",出现在被认为
+        "降临过特殊存在"的山岭之地——更具体说,是为了"封印"而非"祭祀"。
+        鸟居底部的三脚,与某些传说中"星之降临者"的足相呼应。
+      kp_note_md: |
+        玩家拿到此 clue 后应能与"族塚 = 足塚"线索互相印证。
+      unlocks:
+        flags: [flag.knew-three-pillar-meaning]
+    freedom:
+      sensory_when_found_md: |
+        手指拂过粗糙的木柱,青苔底下指甲般的浅刻——三只脚的纹样,
+        在三根柱子各自向村方向的一面都重复了一次。
+      red_herrings_allowed:
+        - 提到这种鸟居在京都某处也有,但形制不同
+    forbidden:
+      - 不要直接命名"星之彩"
+      - 不要在玩家未投史相关骰子前透露纹样
+
+  # --------------------------------------------------------------------------
+  - id: clue.zokutsuka-real-name
+    title: '"族塚"实为"足塚"'
+    frame:
+      location_scene: scene.zokutsuka
+      discovery:
+        method: skill
+        skill: spot-hidden
+        difficulty: regular
+      reveal_md: |
+        慰灵碑表面刻着"族塚",但拂去表层苔藓,底下还有更早一层、被刻意
+        覆盖的旧字——「**足塚**」。立碑年代在 1945 年「山上村疗养所事件」
+        之后,似乎是用以掩盖"被埋葬者究竟是什么"。
+      kp_note_md: |
+        与 clue.three-pillar-torii、clue.yousenjo-report 联动揭示
+        1945 年事件中"被疗养的人"已非人形,村民对其遗体的处理方式。
+      unlocks:
+        flags: [flag.knew-yousenjo-event]
+    freedom:
+      sensory_when_found_md: |
+        手指刚一用力,苔藓层"嗒"地一声脱落,底下露出一个完全不同的字。
+        风一停,展望台的寂静让自己的呼吸都显得过响。
+    forbidden:
+      - 不要在玩家没主动擦苔藓前自动揭示
+
+  # --------------------------------------------------------------------------
+  - id: clue.distorted-flora-fauna
+    title: 畸形动植物
+    frame:
+      location_scene: scene.village-inner
+      discovery:
+        method: skill
+        skill: natural-world
+        difficulty: regular
+      reveal_md: |
+        村中田地、林木、家禽身上时不时出现明显畸形——多分叉的稻穗、
+        没有眼睛的雏鸟、关节朝反方向弯的兔子。村民对这些已经习以为常,
+        会把它们默默处理掉。这不是单纯的近亲繁殖能解释的,
+        像是某种污染从地下一路渗到了表层。
+      unlocks:
+        flags: [flag.knew-distorted-bio]
+    freedom:
+      sensory_when_found_md: |
+        蹲下来仔细看一只雏鸟时,它的眼睛位置只是一片光滑得诡异的皮。
+        村民走过来,不动声色地把雏鸟连同小篮子一起拎走。
+    forbidden:
+      - 不要让 LLM 在此 clue 直接给出"星之彩"结论
+
+  # --------------------------------------------------------------------------
+  - id: clue.place-name-etymology
+    title: '"褄列 = 妻裂"语源'
+    frame:
+      location_scene: scene.kubi-falls
+      discovery:
+        method: npc-give
+        giver_npc: npc.goda-yuki
+        condition_flag: flag.goda-trusts-pc
+      reveal_md: |
+        乡田悠树压低声音告诉你:"褄列"两个字本来是"妻裂"。古时候
+        村中难产、生下不该生的孩子时,会把母亲与孩子一同处理掉,
+        说法是"裂去妻"。这个名字被改写过两次,但村中老人还有人记得。
+      kp_note_md: |
+        触发后建议 SAN check 0/1。是后续"杀婴习俗"线索的关键支点。
+      unlocks:
+        flags: [flag.knew-kill-baby]
+    freedom:
+      sensory_when_found_md: |
+        瀑布声盖过对话,他说出那两个字时甚至没敢抬头。水汽在阳光里
+        折成虹,这一刻显得格外刺眼。
+    forbidden:
+      - 不要让乡田在 PC 还没建立信赖时主动说出此 clue
+
+  # --------------------------------------------------------------------------
+  - id: clue.kondo-anonymous-call
+    title: 三县警方收到的匿名举报
+    frame:
+      location_scene: scene.village-inner
+      discovery:
+        method: skill
+        skill: psychology
+        difficulty: regular
+      reveal_md: |
+        三县警方过去两年陆续收到约 100 封从褄列村发出的匿名信,反复指控
+        "村中有人在杀害刚出生的孩子",指名道姓地点出"井川洋子"。
+        警方查无实证,村民集团口径一致。寄件人据信是近藤爱——失踪的
+        近藤理奈的双胞胎妹妹。
+      kp_note_md: |
+        警探 / 警员路线初始 clue。也作为 npc.kondo-ai 与 npc.village-chief 的
+        secret_unlock_trigger。
+      unlocks:
+        flags: [flag.knew-anonymous-call]
+        secrets: [npc.kondo-ai, npc.village-chief]
+    freedom:
+      sensory_when_found_md: |
+        信封纸张是市面常见的牛皮纸,但每一封都换过寄出邮局,字迹用左手写,
+        像是怕被认出。
+    forbidden:
+      - 不要在玩家未走警察导入路线时透露此 clue 的具体内容
+
+  # --------------------------------------------------------------------------
+  - id: clue.movie-grandma-rumor
+    title: 电影《天空之桥》监督祖母的传言
+    frame:
+      location_scene: scene.buseki-misaki
+      discovery:
+        method: auto-on-enter
+      reveal_md: |
+        2007 年获戛纳提名的小成本日本电影《天空之桥》全片在褄列村的
+        旧青丝桥取景。监督在采访中提过——片中那段"夜之虹"传说,源自
+        他祖母 1945 年在山上村疗养所亲历过的一件事。她当时是疗养所的
+        护士。这是当年事件唯一对外的、模糊的口述记录。
+      kp_note_md: |
+        摄影师路线初始 clue。指向"山上村疗养所事件"与 1945 年护士笔记。
+      unlocks:
+        flags: [flag.knew-movie-grandma]
+    freedom:
+      sensory_when_found_md: |
+        山顶大风吹过,记忆里电影里那段虹色的镜头几乎重叠在眼前。
+    forbidden:
+      - 不要在此处揭示护士笔记的实际位置
+
+  # --------------------------------------------------------------------------
+  - id: clue.place-name-rumor
+    title: 八咫乌与"倒挂人体"地名群
+    frame:
+      location_scene: scene.buseki-misaki
+      discovery:
+        method: auto-on-enter
+      reveal_md: |
+        熊野与大和交界处近期出现"八咫乌"踪影的传言,在民俗与神秘学
+        同好会内部传得很火。三柱鸟居、被命名为"族塚"的山头、地图上
+        隐隐勾勒出"倒挂人体"形状的诡异地名群——这些细节都指向了
+        褄列村。这是神秘学家 PC 最初的卷入动机。
+      kp_note_md: |
+        神秘学家路线初始 clue。后续的 clue.place-name-reverse-human 是它的
+        实地印证。
+      unlocks:
+        flags: [flag.knew-place-name-rumor]
+    freedom:
+      sensory_when_found_md: |
+        摊开同好会传来的地图,几个红圈连起来,粗略勾出一个倒挂的人形。
+    forbidden:
+      - 不要在此处直接揭示星之彩或妻裂
+
+  # --------------------------------------------------------------------------
+  - id: clue.place-name-reverse-human
+    title: 周边地名构成"倒挂的人体"
+    frame:
+      location_scene: scene.zokutsuka
+      discovery:
+        method: skill
+        skill: occult
+        difficulty: hard
+      reveal_md: |
+        从族塚展望台俯瞰,把已经知道的地名(暮积岬 / 旧青丝桥 / 族塚 /
+        首瀑 / 带乃壁……)对应到地图上,会看到一个明显被人为安排过的
+        "倒挂人体"轮廓——头朝下、双手张开。每一个地名都对应着身体的
+        某个部位,像是一具被钉在山间的祭品。
+      unlocks:
+        flags: [flag.knew-reverse-human-map]
+    freedom:
+      sensory_when_found_md: |
+        风一停,展望台的视野像被人猛地按下了暂停键。地图上那个轮廓,
+        看一眼就再也忘不掉。
+    forbidden:
+      - 不要让 LLM 在 occult 检定失败时直接给答案
+
+  # --------------------------------------------------------------------------
+  - id: clue.yousenjo-report
+    title: 〈山上村疗养所患者惨杀事件报告书〉
+    frame:
+      location_scene: scene.kominkan-1f
+      discovery:
+        method: skill
+        skill: library-use
+        difficulty: regular
+      reveal_md: |
+        前台书架最深处一本掉了书脊的旧册子,标题被人用墨水涂掉过。
+        翻开是 1945 年三县联合调查的内部报告:山上村疗养所收容了一批
+        无法在外公开的"被影响"病患;一夜之间全部惨死,现场出现了
+        一个仅由"虹色斑驳的什么"暗示的生物。最后的结论是"山中崩塌"。
+      kp_note_md: |
+        SAN 0/1d3。本 clue 是连接"星之彩"主线与"杀婴习俗"次线的关键。
+      unlocks:
+        flags: [flag.knew-yousenjo-event]
+    freedom:
+      sensory_when_found_md: |
+        指尖翻过纸页,纸的纤维已经脆得快碎,空气里浮着一股发霉的甜味。
+    forbidden:
+      - 不要在此 clue 里直白命名"星之彩"
+      - 必须由玩家声明 library-use 或翻找动作才能取得
+
+  # --------------------------------------------------------------------------
+  - id: clue.nurse-diary
+    title: 1945 年护士笔记
+    frame:
+      location_scene: scene.igawa-house-1f
+      discovery:
+        method: skill
+        skill: spot-hidden
+        difficulty: hard
+      reveal_md: |
+        和室壁橱底层一只旧木盒里,藏着一本封面印着护士学校徽记的笔记本。
+        作者署名为「**津**」——电影监督祖母的名字。她记录了 1945 年事件
+        当夜的全过程:疗养所里"被影响"的患者全部丧失为人形,出现了
+        一只"散发着油膜般虹彩"的存在,最后她用一面镜子把阳光反射进
+        房间,把那个东西"压回了井里"。镜子与阳光成了唯一可行的对策。
+      kp_note_md: |
+        SAN 0/1。揭示星之彩的对策:镜面 + 阳光。是后续 climax 战的
+        关键道具线索。建议与 clue.kominkan-mirror-replaced 联动展示。
+      unlocks:
+        flags: [flag.knew-mirror-sunlight-strategy]
+    freedom:
+      sensory_when_found_md: |
+        翻动纸页时一股霉味,最后一页的边角有一道淡褐色的、像是血干掉的
+        指印。墨水在某些地方被反复擦过。
+    forbidden:
+      - 不要在 PC 没声明搜索动作前自动揭示笔记
+      - 不要替换"虹彩般的什么"为"星之彩"
+
+  # --------------------------------------------------------------------------
+  - id: clue.kominkan-mirror-replaced
+    title: 公民馆厕所的新装镜子
+    frame:
+      location_scene: scene.kominkan-1f
+      discovery:
+        method: skill
+        skill: spot-hidden
+        difficulty: regular
+      reveal_md: |
+        厕所墙上一面圆镜——比这栋木造老建筑里其他所有金属件都新得多。
+        镜框是 1990 年代后才常见的不锈钢,反光的金属边缘干净得反常。
+        像是某面更早的镜子曾经在这里"用过"之后被换掉。
+      unlocks:
+        flags: [flag.knew-mirror-replaced]
+    freedom:
+      sensory_when_found_md: |
+        镜子里自己的脸看起来比记忆里苍白半个色调,但那只是错觉——
+        厕所里只是没开灯。
+    forbidden:
+      - 不要在此 clue 直接给出"对策"
+
+  # --------------------------------------------------------------------------
+  - id: clue.kominkan-well-remnant
+    title: 公民馆后院旧井残迹
+    frame:
+      location_scene: scene.kominkan-1f
+      discovery:
+        method: skill
+        skill: spot-hidden
+        difficulty: regular
+      reveal_md: |
+        公民馆后侧菜地里有一圈被水泥仔细填平、又被覆上泥土的圆形痕迹。
+        直径与一口旧井几乎一致。1945 年事件后,这口井被村中合力填埋——
+        但土层里渗出来的湿气,一直没有消散。
+      unlocks:
+        flags: [flag.knew-old-well-filled]
+    freedom:
+      sensory_when_found_md: |
+        蹲下来摸一下,泥土比周围明显凉一些。一阵风吹过,菜叶的影子在
+        圆痕上晃动得有点不自然。
+    forbidden:
+      - 不要让 PC 在此处接触到星之彩本体
+
+  # --------------------------------------------------------------------------
+  - id: clue.kominkan-208-lock
+    title: 208 号房间的封闭状态
+    frame:
+      location_scene: scene.kominkan-2f
+      discovery:
+        method: skill
+        skill: listen
+        difficulty: regular
+      reveal_md: |
+        贴近 208 号房门时,能隐约听到房间深处传来不像风、也不像水声的
+        极轻微的"咚……咚"——像是有什么从下方撞击地板。井川洋子声称
+        她也没钥匙,锁孔却看得出最近被擦拭过。
+      unlocks:
+        flags: [flag.knew-208-locked]
+    freedom:
+      sensory_when_found_md: |
+        耳朵贴上去那一瞬,门内的"咚"消失了几秒,然后又像什么也没听到过
+        那样停了。
+    forbidden:
+      - 不要在此 clue 描写鬼影
+      - 不要在此 clue 让 PC 在没有撬锁动作前进入房间
+
+  # --------------------------------------------------------------------------
+  - id: clue.kominkan-208-blood-stain
+    title: 208 号房间地板上的旧血迹
+    frame:
+      location_scene: scene.kominkan-2f
+      discovery:
+        method: flag
+        condition_flag: flag.entered-208
+      reveal_md: |
+        撬开门进入房间后,地板靠床的一侧有几滩颜色发黑、被反复擦拭过的
+        痕迹。形状像是有什么从床上摔到地板上,然后被人拖到墙角。
+        污渍周围的木地板被擦得发亮,但渗进木纹里的颜色擦不掉。
+      kp_note_md: |
+        触发 SAN 0/1。
+      unlocks:
+        flags: [flag.knew-208-blood]
+    freedom:
+      sensory_when_found_md: |
+        蹲下时鼻尖凑近木地板,空气里浮着一种被时间稀释了的铁锈味。
+    forbidden:
+      - 不要让 LLM 描写具象尸体
+      - 不要让此 clue 在玩家未进入 208 之前自动入册
+
+  # --------------------------------------------------------------------------
+  - id: clue.kominkan-208-bed-warped
+    title: 208 号房间扭曲的床脚
+    frame:
+      location_scene: scene.kominkan-2f
+      discovery:
+        method: flag
+        condition_flag: flag.entered-208
+      reveal_md: |
+        房间里的旧式木床,四只床脚没有一只是直的——每只都向内侧
+        以一个轻微但绝不自然的角度弯曲,像是承受过什么从上方持续下压
+        的力。床板边缘还有几道被指甲反复抠出的浅痕。
+      kp_note_md: |
+        触发 SAN 0/1。
+      unlocks:
+        flags: [flag.knew-208-warped]
+    freedom:
+      sensory_when_found_md: |
+        手指顺着床脚的弧度滑过,木头在某一段冰得不正常,像是冬天才会有
+        的温度。
+    forbidden:
+      - 不要透露事件发生时床上的人究竟"变成了什么"
+
+  # --------------------------------------------------------------------------
+  - id: clue.obi-collapse-skeleton
+    title: 带乃壁崩塌处的人骨
+    frame:
+      location_scene: scene.obi-no-kabe
+      discovery:
+        method: flag
+        condition_flag: flag.obi-skeleton-found
+      reveal_md: |
+        第二天清晨,带乃壁的局部崖体在一夜雨后崩塌,松动的土层里
+        露出至少三具白骨——一具明显是成年女性,体格与近藤理奈相符;
+        另外两具明显较小,小到不应当出现在这种"自然失足"的场所。
+        村民的反应是过于平静——他们见过这种事。
+      kp_note_md: |
+        SAN 0/1d3。这是 PC 第一次直面"杀婴习俗"的物证。
+      unlocks:
+        flags: [flag.knew-obi-bones]
+    freedom:
+      sensory_when_found_md: |
+        风一停,这一段崖底的寂静像被人按下了静音键。一只乌鸦从远处飞过,
+        没有叫。
+    forbidden:
+      - 不要让 LLM 描写具象的婴孩骨骼
+      - 不要在第一天提前触发此 clue
+
+  # --------------------------------------------------------------------------
+  - id: clue.igawa-kondo-poster
+    title: 失踪海报(近藤理奈)
+    frame:
+      location_scene: scene.igawa-house-1f
+      discovery:
+        method: skill
+        skill: spot-hidden
+        difficulty: hard
+      reveal_md: |
+        和室壁橱深处一沓被压在最下面的旧报纸,中间夹着一张县警印发的
+        失踪海报:**近藤理奈,33 岁,2013 年 9 月失踪**。海报背面有
+        谁用铅笔写下的一行小字——"已经处理过了"。笔迹与公民馆留言簿
+        前台一栏的笔迹一致。
+      kp_note_md: |
+        SAN 0/1d3。也作为 npc.igawa-yoko 的 secret_unlock_trigger。
+      unlocks:
+        flags: [flag.knew-kondo-rina-truth]
+        secrets: [npc.igawa-yoko]
+    freedom:
+      sensory_when_found_md: |
+        把这张纸从一沓旧报纸下面抽出来,纸的边角已经发黄。背面铅笔字
+        被人按过几次,字迹清晰却像被故意写得毫无情绪。
+    forbidden:
+      - 不要让 PC 在没有翻找壁橱动作时自动获得
+      - 不要让博巳或洋子主动指出此海报
+
+  # --------------------------------------------------------------------------
+  - id: clue.igawa-black-cat-books
+    title: 井川家 2F 书架上的《黑猫》与畸形书籍
+    frame:
+      location_scene: scene.igawa-house-2f
+      discovery:
+        method: skill
+        skill: library-use
+        difficulty: regular
+      reveal_md: |
+        书架第三排深处藏着几本与博巳的工作毫不相干的旧书——关于辐射
+        后遗症、孩童畸形与先天疾患的医学普及读物,以及一本被翻得
+        卷边的爱伦·坡《黑猫》。最显眼的一页正好是结尾,被反复折角:
+        "凶手把尸体藏在了应当藏的地方"。
+      kp_note_md: |
+        SAN 0/1。也作为 npc.igawa-hiromi 的 secret_unlock_trigger。
+      unlocks:
+        flags: [flag.knew-hiromi-coverup]
+        secrets: [npc.igawa-hiromi]
+    freedom:
+      sensory_when_found_md: |
+        书脊摸上去微微发潮,翻到那一页时,薄纸几乎要脱页。
+    forbidden:
+      - 不要在 PC 见到带乃壁人骨之前透露第三排深处的书
+
+  # --------------------------------------------------------------------------
+  - id: clue.igawa-well-in-backyard
+    title: 井川家后院的旧井
+    frame:
+      location_scene: scene.igawa-backyard
+      discovery:
+        method: skill
+        skill: spot-hidden
+        difficulty: regular
+      reveal_md: |
+        后院藤蔓底下,一口被木板钉死的旧井。木板的钉子痕迹很新——
+        不是 1945 年那次填埋,而是近两年被重新加固过。空气在井口附近
+        异常粘稠,光线以违反常理的方式折射成虹。井底深处似乎沉着
+        一个尸蜡化的小小轮廓,以及一团颜色不属于任何已知颜色的微光。
+      kp_note_md: |
+        SAN 1/1d6+1。这是模组 climax 的舞台——星之彩潜伏地与女儿
+        尸蜡化遗体的藏匿点。建议与 clue.nurse-diary 联动展示对策。
+      unlocks:
+        flags: [flag.knew-starcolour]
+    freedom:
+      sensory_when_found_md: |
+        鼻腔里一阵甜得发腻的味道。光线在井口附近折出一条永远在
+        摆动的虹弧,看一眼,眼底就开始发胀。
+    forbidden:
+      - 不要直呼"星之彩"
+      - 不要让 PC 在第一天就接触此 clue
+      - 不要让 LLM 主动报伤害,SAN check 走前端 sanityCheck 通道
+
+# ============================================================================
+# timeline
+# ============================================================================
+
+timeline:
+  # --------------------------------------------------------------------------
+  - id: tl.d1-noon-arrival
+    title: 第一天中午 · 抵达褄列村
+    fires_when:
+      game_day: 1
+      hour: "12:00"
+    forced: true
+    once: true
+    frame:
+      narrative_seed_md: |
+        大巴折返,你与井川洋子、乡田悠树同时下车。司机一句"日落前
+        要回到这边"被风带走。三柱鸟居安静得令人发紧,深谷对岸的
+        褄列村在云雾里若隐若现。
+      effects:
+        set_flags: [{ flag: flag.arrived-in-village, value: true }]
+    freedom:
+      atmosphere_md: 山顶的风、远处铁柱锈红、彼此默不作声的两位陌生旅伴
+    forbidden:
+      - 不要让玩家在此处听到对岸传来的人声
+
+  # --------------------------------------------------------------------------
+  - id: tl.d1-afternoon-yoko-contact
+    title: 第一天午后 · 井川洋子的招呼
+    fires_when:
+      game_day: 1
+      hour: "13:30"
+    forced: false
+    prerequisites: [{ kind: flag, flag: flag.arrived-in-village, value: true }]
+    once: true
+    frame:
+      narrative_seed_md: |
+        刚走过吊桥不久,温柔的井川洋子赶上来,提议带路去公民馆——
+        天像是要下雨。她说话时声音低低的,但每个字都很清楚,
+        听起来像是某种练习过很多次的台词。
+      effects:
+        npc_relocate:
+          - { npc: npc.igawa-yoko, to: scene.village-inner }
+    freedom:
+      atmosphere_md: 一线远雷、村中风铃响起一声、洋子袖口微微攥紧
+    forbidden:
+      - 不要让洋子在此处显出任何不温柔
+      - 不要让 LLM 在此事件主动发动 SAN check
+
+  # --------------------------------------------------------------------------
+  - id: tl.d1-dusk-bridge-falls
+    title: 第一天黄昏 · 落雷断桥
+    fires_when:
+      game_day: 1
+      hour: "16:00"
+    forced: true
+    once: true
+    frame:
+      narrative_seed_md: |
+        西边的天先暗下来。一道极亮的闪电劈在深谷之间——不,在那之前,
+        风停了整整一秒。等闪电过后,旧青丝桥从中段断成两半,
+        断口的木屑还在空中飘。从这一刻起,你再也无法靠双脚离开这座村子。
+      effects:
+        set_flags: [{ flag: flag.bridge-destroyed, value: true }]
+        san_check:
+          loss: { success: 0, fail: 1D4 }
+          reason: 亲眼目睹归路被斩断
+    freedom:
+      atmosphere_md: 闪电的余光、铁柱断口的红、谷底卷起的风
+    forbidden:
+      - 不要描写桥上有人坠落
+      - 不要让 LLM 在 narrative 里替玩家说"我们出不去了",这是玩家自己说的
+
+  # --------------------------------------------------------------------------
+  - id: tl.d1-dusk-chief-visit
+    title: 第一天黄昏 · 村长登门
+    fires_when:
+      game_day: 1
+      hour: "17:00"
+    forced: true
+    once: true
+    frame:
+      narrative_seed_md: |
+        断桥之后约一小时,村长吉原勋亲自来公民馆找你。他先说"辛苦你了",
+        再说"已经向县厅申请了直升机救援,后天黎明会到足塚展望台"。
+        他没问你是谁、为什么来。临走前看了井川洋子一眼。
+      effects:
+        npc_relocate:
+          - { npc: npc.village-chief, to: scene.kominkan-1f }
+        set_flags: [{ flag: flag.helicopter-promised, value: true }]
+    freedom:
+      atmosphere_md: 灯下村长袖口的旧表、洋子端来的茶、雷声在远处余音
+    forbidden:
+      - 不要让村长在此处问 PC 的来历
+      - 不要让村长流露出任何威胁
+
+  # --------------------------------------------------------------------------
+  - id: tl.d1-night-women-visit
+    title: 第一天夜 · 妇女会送饭
+    fires_when:
+      game_day: 1
+      hour: "19:00"
+    forced: false
+    prerequisites: [{ kind: flag, flag: flag.bridge-destroyed, value: true }]
+    once: true
+    frame:
+      narrative_seed_md: |
+        晚饭时分,村中妇女会的几位女眷端着饭菜来公民馆送给被困的客人。
+        其中近藤爱与井川洋子也在。两人交谈不多,但对视的那一瞬,空气
+        像是被什么割开。一个端碗的人手抖了一下,饭粒撒在桌沿。
+      effects:
+        npc_relocate:
+          - { npc: npc.kondo-ai, to: scene.kominkan-1f }
+        set_flags: [{ flag: flag.kondo-yoko-tension, value: true }]
+    freedom:
+      atmosphere_md: 灯下的米香、玻璃门外又起的细雨、洋子袖口又一次攥紧
+    forbidden:
+      - 不要让两人在公开场合直接撕破脸
+      - 不要让 PC 在此事件中得知近藤理奈是谁
+
+  # --------------------------------------------------------------------------
+  - id: tl.d1-late-nightmare
+    title: 第一天深夜 · 208 室的噩梦
+    fires_when:
+      game_day: 2
+      hour: "01:00"
+    forced: true
+    once: true
+    frame:
+      narrative_seed_md: |
+        睡眠中你忽然睁开眼,眼前是不属于自己房间的天花板——你能"看见"
+        208 号房间内部:玻璃支离破碎,窗帘在风里飘动。窗沿上,有一只
+        过分白的脚尖紧紧抓着窗户的边缘。再看一眼,那只脚已经不在了。
+      effects:
+        san_check:
+          loss: { success: 0, fail: 1D3 }
+          reason: 在梦中"看见"208 房间内部
+        unlock_clues: [clue.kominkan-208-lock]
+    freedom:
+      atmosphere_md: 风把窗帘吹得轻响、远处雷声、心跳一拍快过一拍
+    forbidden:
+      - 不要让 PC 在梦中"对话"或"互动"
+      - 不要解释为什么 PC 能看见 208 内部
+
+  # --------------------------------------------------------------------------
+  - id: tl.d2-morning-obi-collapse
+    title: 第二天清晨 · 带乃壁崩塌
+    fires_when:
+      game_day: 2
+      hour: "08:00"
+    forced: true
+    once: true
+    frame:
+      narrative_seed_md: |
+        夜雨之后,带乃壁的局部崖体在清晨崩塌。村中有人来公民馆告知,
+        语气平静得像是在说"地里又长了奇怪的稻穗"。崖底的土层里露出
+        几具骨头,大小不齐,白得过分。村民的反应是过于熟练。
+      effects:
+        set_flags: [{ flag: flag.obi-skeleton-found, value: true }]
+        unlock_clues: [clue.obi-collapse-skeleton]
+    freedom:
+      atmosphere_md: 雨后湿土味、风停的山道、村民袖口擦了一下又一下的手
+    forbidden:
+      - 不要让 LLM 在此事件直接命名"婴孩"
+      - 不要让村民在此处主动解释什么
+
+  # --------------------------------------------------------------------------
+  - id: tl.d2-morning-kondo-clash
+    title: 第二天上午 · 近藤爱的发难与洋子昏倒
+    fires_when:
+      game_day: 2
+      hour: "10:00"
+    forced: false
+    prerequisites: [{ kind: flag, flag: flag.obi-skeleton-found, value: true }]
+    once: true
+    frame:
+      narrative_seed_md: |
+        妇女会聚在公民馆多功能室。近藤爱忽然站起,直指井川洋子,
+        说"那是我姐"。话没说完,井川洋子脸色发白、整个人向前一倒——
+        失神昏倒在榻榻米上。村长出现得很快,把场面"温和地"控制住。
+      effects:
+        set_flags: [{ flag: flag.yoko-collapsed, value: true }]
+        npc_relocate:
+          - { npc: npc.igawa-yoko, to: scene.igawa-house-1f }
+        san_check:
+          loss: { success: 0, fail: 1 }
+          reason: 目睹温柔的洋子被指控并昏倒
+    freedom:
+      atmosphere_md: 茶杯倾倒的轻响、爱攥紧手机的指节、村长一句"先扶她回家"
+    forbidden:
+      - 不要让村长当众否认近藤的指控
+      - 不要让洋子在此处醒来并辩解
+
+  # --------------------------------------------------------------------------
+  - id: tl.d2-night-yoko-anomaly
+    title: 第二天夜 · 洋子的异变
+    fires_when:
+      game_day: 2
+      hour: "20:00"
+    forced: false
+    prerequisites: [{ kind: flag, flag: flag.yoko-collapsed, value: true }]
+    once: true
+    frame:
+      narrative_seed_md: |
+        晚饭过后,井川洋子从屋里出来时,神情与白天判若两人——眼神空洞、
+        嘴角微微上翘,像是被什么从底下托着。她绕过围观的村民,径直
+        往后院的方向走,被博巳追上拦回屋内。空气里浮着一线极细的虹光。
+      effects:
+        san_check:
+          loss: { success: 0, fail: 1D3 }
+          reason: 目睹洋子的"异变"
+    freedom:
+      atmosphere_md: 屋檐下风铃静止、远处一只虫停在叫到一半、洋子赤脚踏在石板上的节奏
+    forbidden:
+      - 不要直呼"星之彩"
+      - 不要让洋子在此处直接攻击 PC
+
+  # --------------------------------------------------------------------------
+  - id: tl.d2-late-final-branch
+    title: 第二天深夜 · 最终路线分歧
+    fires_when:
+      game_day: 2
+      hour: "22:00"
+    forced: false
+    prerequisites: [{ kind: flag, flag: flag.yoko-collapsed, value: true }]
+    once: true
+    frame:
+      narrative_seed_md: |
+        村中开始安静下来。这是最后一个能选择的夜晚——你可以悄悄前往
+        井川家后院,直面井底的"那个东西";可以选择揭发杀婴习俗,
+        让村子在司法之下崩解;也可以选择回避一切,等待黎明的直升机。
+        每一种选择都对应不同的代价。这一刻,行动权在 PC 手里。
+    freedom:
+      atmosphere_md: 屋外几乎没风、远处偶尔一声夜枭、空气黏到呼吸都带涩
+    forbidden:
+      - 不要由 LLM 替玩家做决定
+      - 不要在此 timeline 自动写入任何分支 flag,分支由 scenarioActions 写
+
+  # --------------------------------------------------------------------------
+  - id: tl.climax-starcolour
+    title: 高潮 · 与井底之物的对峙
+    fires_when:
+      game_day: 3
+      hour: "02:00"
+    forced: false
+    prerequisites: [{ kind: flag, flag: flag.knew-starcolour, value: true }]
+    once: true
+    frame:
+      narrative_seed_md: |
+        井川家后院,木板被拆开,井口涌出来的不是水,而是一团颜色
+        不属于任何已知颜色的微光。它没有形状、没有声音,但每一秒都在
+        重塑你视网膜里的色彩。这一刻你才明白:1945 年那位护士留下的
+        镜子与阳光,并不是迷信。
+    freedom:
+      atmosphere_md: 后院藤蔓如帘、空气黏稠到吸气都迟疑、虹色微光在井口缓慢呼吸
+    forbidden:
+      - 不要直呼"星之彩"
+      - 不要让 LLM 主动报伤害,SAN check 走前端 sanityCheck 通道
+      - 不要让此事件自动判定胜负,胜负由 PC 行动决定
+
+  # --------------------------------------------------------------------------
+  - id: tl.d3-dawn-helicopter
+    title: 第三天黎明 · 直升机降落
+    fires_when:
+      game_day: 3
+      hour: "06:00"
+    forced: true
+    once: true
+    frame:
+      narrative_seed_md: |
+        天还没完全亮,直升机的轰鸣从山的另一侧逼近,降落在足塚展望台。
+        无论昨夜你做了什么,现在都到了离开的时候。村子在你身后变小、
+        缩成一片不起眼的瓦顶——但有些东西,会跟着你回去。
+    freedom:
+      atmosphere_md: 高空冷风、机身的金属反光、村庄在视野里慢慢退后
+    forbidden:
+      - 不要在此事件让 PC 必须 SAN check
+      - 不要让 LLM 替玩家描写"我们获救了"的胜利感
+
+# ============================================================================
+# flags
+# ============================================================================
+
+flags:
+  # ----- 由 clue.unlocks 写入 ---------------------------------------------
+  - id: flag.knew-three-pillar-meaning
+    title: 已了解三柱鸟居的暗喻
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-yousenjo-event
+    title: 已知山上村疗养所事件
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-distorted-bio
+    title: 已注意到村中畸形动植物
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-anonymous-call
+    title: 已了解三县警方的匿名举报
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-movie-grandma
+    title: 已知监督祖母的传言
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-place-name-rumor
+    title: 已知"八咫乌+倒挂人体"地名传闻
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-reverse-human-map
+    title: 已亲手画出"倒挂人体"地名图
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-mirror-sunlight-strategy
+    title: 已知镜面+阳光对策
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-mirror-replaced
+    title: 已注意到公民馆镜子被换过
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-old-well-filled
+    title: 已注意到公民馆后院旧井残迹
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-208-locked
+    title: 已注意到 208 号房间的封闭异常
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-208-blood
+    title: 已亲见 208 号房间地板旧血迹
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-208-warped
+    title: 已亲见 208 号房间扭曲床脚
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-obi-bones
+    title: 已亲见带乃壁的人骨
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-kondo-rina-truth
+    title: 已查证近藤理奈被杀真相
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-hiromi-coverup
+    title: 已查证井川博巳的包庇
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-starcolour
+    title: 已查证井底虹光潜伏物
+    initial: false
+    writable_by: [clue-unlocks]
+  - id: flag.knew-kill-baby
+    title: 已知村中杀婴习俗
+    initial: false
+    writable_by: [clue-unlocks]
+
+  # ----- 由 timeline.effects 写入 -----------------------------------------
+  - id: flag.arrived-in-village
+    title: 已抵达褄列村
+    initial: false
+    writable_by: [timeline-effects]
+  - id: flag.bridge-destroyed
+    title: 旧青丝桥已断
+    initial: false
+    writable_by: [timeline-effects]
+  - id: flag.helicopter-promised
+    title: 村长已承诺直升机救援
+    initial: false
+    writable_by: [timeline-effects]
+  - id: flag.kondo-yoko-tension
+    title: 近藤爱与洋子的对立已显
+    initial: false
+    writable_by: [timeline-effects]
+  - id: flag.obi-skeleton-found
+    title: 带乃壁人骨已发现
+    initial: false
+    writable_by: [timeline-effects]
+  - id: flag.yoko-collapsed
+    title: 井川洋子已昏倒
+    initial: false
+    writable_by: [timeline-effects]
+
+  # ----- 由 LLM 通过 scenarioActions.flagSet 写入 -------------------------
+  - id: flag.entered-208
+    title: 已撬开并进入 208 号房间
+    initial: false
+    description_md: 玩家撬锁或破坏门进入 208 后由 LLM 通过 scenarioActions.flagSet 设置
+    writable_by: [scenario-actions]
+  - id: flag.goda-trusts-pc
+    title: 乡田悠树已对 PC 建立信赖
+    initial: false
+    description_md: 当 PC 表现出与村民立场不同时,由 LLM 通过 scenarioActions.flagSet 设置
+    writable_by: [scenario-actions]
+  - id: flag.pc-revealed-police-id
+    title: PC 已公开警察身份
+    initial: false
+    writable_by: [scenario-actions]
+  - id: flag.pc-made-villagers-aware-of-kill-baby
+    title: 村民已察觉 PC 知晓杀婴习俗
+    initial: false
+    writable_by: [scenario-actions]
+  - id: flag.branch-a-chosen
+    title: 选择了 A 路线(隐忍待援)
+    initial: false
+    description_md: 第二天深夜 PC 选择回避对峙、等待直升机
+    writable_by: [scenario-actions]
+  - id: flag.branch-b-chosen
+    title: 选择了 B 路线(对峙星之彩)
+    initial: false
+    description_md: 第二天深夜 PC 直接潜入井川家后院与井底之物对峙
+    writable_by: [scenario-actions]
+  - id: flag.branch-c-chosen
+    title: 选择了 C 路线(揭发杀婴)
+    initial: false
+    description_md: PC 选择把杀婴习俗公开,引发村民集体反弹
+    writable_by: [scenario-actions]
+  - id: flag.starcolour-repelled
+    title: 井底之物已被击退
+    initial: false
+    description_md: 用镜面+阳光对策成功击退后由 LLM 设置
+    writable_by: [scenario-actions]
+  - id: flag.kill-baby-exposed
+    title: 杀婴习俗已被对外揭发
+    initial: false
+    writable_by: [scenario-actions]
+  - id: flag.avoided-combat
+    title: 已回避与村民的肢体冲突
+    initial: false
+    writable_by: [scenario-actions]
+  - id: flag.npc-goda-died
+    title: 乡田悠树阵亡
+    initial: false
+    writable_by: [scenario-actions]
+  - id: flag.npc-yoko-died
+    title: 井川洋子死亡
+    initial: false
+    writable_by: [scenario-actions]
+  - id: flag.pc-betrayed-goda
+    title: PC 向村民出卖了乡田
+    initial: false
+    writable_by: [scenario-actions]
+
+# ============================================================================
+# endings
+# ============================================================================
+
+endings:
+  # --------------------------------------------------------------------------
+  - id: ending.best
+    title: 真相大白 · 一切村民被救赎
+    triggers:
+      - { flag: flag.starcolour-repelled, value: true }
+      - { flag: flag.kill-baby-exposed, value: true }
+      - { flag: flag.avoided-combat, value: true }
+      - { flag: flag.npc-goda-died, value: false }
+    priority: 100
+    frame:
+      epilogue_md: |
+        几个月后,褄列村的村民被分别安置到县外的小镇。井川洋子在治疗
+        机构里没能再开口,但每月都会收到一束新的彼岸花——是博巳送的。
+        乡田悠树回到大学,毕业那年留学英国。带乃壁底下的事被司法
+        立案处理,村中那口井被填埋,这一次没有再渗出虹光。
+      scenario_end_kind: victory
+      rewards:
+        skill_growth: true
+        san_reward_formula: 2D6
+        san_reward_conditions:
+          - label: 全程不动用暴力
+            flag: flag.avoided-combat
+            formula: 1D4
+          - label: 揭发杀婴习俗
+            flag: flag.kill-baby-exposed
+            formula: 1D4
+        cash_reward: 200000
+    freedom:
+      tone_md: 慢节奏的释怀,不喧闹的胜利
+    forbidden:
+      - 不要把村民写得罪有应得
+      - 不要让 LLM 替乡田或博巳描述"获救后的幸福"
+
+  # --------------------------------------------------------------------------
+  - id: ending.good-quiet
+    title: 击退灾厄 · 习俗依旧
+    triggers:
+      - { flag: flag.starcolour-repelled, value: true }
+      - { flag: flag.avoided-combat, value: true }
+      - { flag: flag.kill-baby-exposed, value: false }
+    priority: 80
+    frame:
+      epilogue_md: |
+        井底之物被你与那面新换的镜子赶走,直升机如约抵达足塚。村子
+        从噩梦中脱身,重新回到了那种看似平静的"日常"。你没有把
+        杀婴的事告诉外面——也许是太累,也许是觉得告诉了也没人听。
+        几个月后,那座村依旧每天升起炊烟。
+      scenario_end_kind: ambiguous
+      rewards:
+        skill_growth: true
+        san_reward_formula: 1D6
+        cash_reward: 100000
+    freedom:
+      tone_md: 沉默的妥协,带一点说不清的负罪感
+    forbidden:
+      - 不要让 PC 替自己辩解
+
+  # --------------------------------------------------------------------------
+  - id: ending.ambiguous-combat
+    title: 战斗后正当防卫 · 村子留在 PC 心里
+    triggers:
+      - { flag: flag.starcolour-repelled, value: true }
+      - { flag: flag.branch-b-chosen, value: true }
+    priority: 60
+    frame:
+      epilogue_md: |
+        井底之物被击退了,但代价是与几位村民正面冲突——也许有人受伤,
+        也许有人没能再站起来。直升机抵达时,你抱着仍然温热的镜子
+        坐进机舱。回到县城,警方按"村民集体证词"以正当防卫立案,
+        但这件事会跟着你很久。
+      scenario_end_kind: ambiguous
+      rewards:
+        skill_growth: true
+        san_reward_formula: 1D4
+        cash_reward: 50000
+    freedom:
+      tone_md: 胜利与亏欠并存,刻意压低音量
+    forbidden:
+      - 不要美化战斗
+      - 不要让 LLM 替 PC 描述"我们做对了"
+
+  # --------------------------------------------------------------------------
+  - id: ending.bad-yoko-lost
+    title: 井川洋子坠崖 · 司法介入但代价沉重
+    triggers:
+      - { flag: flag.branch-c-chosen, value: true }
+      - { flag: flag.kill-baby-exposed, value: true }
+      - { flag: flag.npc-yoko-died, value: true }
+    priority: 50
+    frame:
+      epilogue_md: |
+        你选择把杀婴习俗在村中公开揭发。村民没有动手——他们只是
+        围在井川家门外站着,直到第二天清晨,井川洋子被发现坠落在
+        带乃壁底下,死状与"失足"完全一致。直升机抵达时,你和博巳
+        坐进同一架机舱,谁也没说话。司法立案,村子从此不复存在。
+      scenario_end_kind: ambiguous
+      rewards:
+        skill_growth: true
+        san_reward_formula: 1D2
+        cash_reward: 30000
+    freedom:
+      tone_md: 沉重的"做对了"——但代价是一个本可以被救的人
+    forbidden:
+      - 不要让 LLM 替 PC 描述"我们没有错"
+
+  # --------------------------------------------------------------------------
+  - id: ending.worst-burnt-village
+    title: 几个月后 · 村子焦土化
+    triggers:
+      - { flag: flag.starcolour-repelled, value: false }
+      - { flag: flag.bridge-destroyed, value: true }
+    priority: 30
+    frame:
+      epilogue_md: |
+        直升机带你离开了褄列村,但你没有带走井底的那道虹光。
+        几个月后,新闻里报道"和歌山山区某村发生大规模火灾,
+        村民全数罹难"。报道没有说火源是什么,也没有人想再去查。
+        你认得那张地图——那个倒挂的人形,被火烧得焦黑一片。
+        只有乡田悠树回大学之后,没有再回去。
+      scenario_end_kind: ambiguous
+      rewards:
+        skill_growth: true
+        san_reward_formula: 0
+        cash_reward: 0
+    freedom:
+      tone_md: 失败的克制叙述,不带评判,只描事实
+    forbidden:
+      - 不要让 LLM 替 PC 抒情
+      - 不要描写超自然实体本身
+
+  # --------------------------------------------------------------------------
+  - id: ending.pc-lost
+    title: 探索者被伪装成坠崖死亡
+    triggers:
+      - { flag: flag.pc-made-villagers-aware-of-kill-baby, value: true }
+      - { flag: flag.bridge-destroyed, value: true }
+      - { flag: flag.kill-baby-exposed, value: false }
+    priority: 20
+    frame:
+      epilogue_md: |
+        你越过了那条线。村民没有动手,但当夜你独自走在村中小路上时,
+        没有看见任何人——直到一阵风从背后推了一下。带乃壁底下的
+        松动土层,会再多一具骨骸。直升机抵达时,村长会摘下帽子,
+        说一句"很遗憾"。这件事不会有人去查。
+      scenario_end_kind: dead
+      rewards:
+        skill_growth: false
+        cash_reward: 0
+    freedom:
+      tone_md: 极冷,不超过两个形容词
+    forbidden:
+      - 不要描写 PC 临死前的心理活动
+      - 不要让 LLM 主动报伤害,致死走前端规则
+
+# ============================================================================
+# global_freedom / global_forbidden
+# ============================================================================
+
+global_freedom:
+  era_atmosphere_md: |
+    2015 年现代日本,三县交界的山间小村。手机一过吊桥就没信号,
+    村中只有一台老式有线电话(在公民馆前台)。村民着工装、和服或
+    简单的现代便服,生活节奏停在三十年前。煤油灯、风铃、木地板、
+    井——这些是这本模组的基本物件库,可挑用。
+  language_register: |
+    简体中文叙述,村民对话偶夹礼貌敬语;尽量短句、留白多;雷雨段允许
+    长句铺陈。避免现代网络用语,避免好莱坞式夸张副词。
+  npc_default_dialect: |
+    村民统一一种说不上口音、但每句话都比标准语低半度的腔调;
+    井川博巳带和歌山口音;乡田悠树受过城市教育,口音更接近东京。
+
+global_forbidden:
+  - 不要直呼"星之彩"或任何克苏鲁神话名词,用"虹色的什么""油膜般的微光"代替
+  - 不要描写明显的鬼魂、怨灵、显形怪物——本模组的恐怖来自"暗示"
+  - 不要让 LLM 在 narrative 里替玩家做选择
+  - 不要让 LLM 主动报伤害或 SAN 数值,SAN 走前端 sanityCheck 通道,伤害走 *Formula
+  - 不要把村长描写为独裁者或最终 BOSS,他是"村民集体意志的执行者"
+  - 不要英雄叙事,KP 应隐性推荐 PC 回避杀人
+  - 不要在第一天就让 PC 接触星之彩本体或 208 房间内部
+  - 不要描写 NPC 立绘 / 头像
+  - 不要写出本模组未声明的额外结局
+
+# ============================================================================
+# narrative_style(§14)
+# ============================================================================
+
+narrative_style:
+  frame:
+    pov: 第二人称
+    tense: 现在时
+    forbidden_phrasings:
+      - 不要写"调查员投出了 Spot Hidden 检定"或任何检定术语
+      - 不要使用第四面墙之外的全知评论
+      - 不要好莱坞式夸张副词("骇人地"/"令人窒息地"/"难以置信地")
+      - 不要直白的超自然词("鬼魂"/"怨灵"/"邪神"),要用具象与比喻替代
+      - 不要直接说出"星之彩"或克苏鲁神话名词,改写为"虹色的什么"或"油膜般的微光"
+      - 不要替玩家做出选择或下决心式心理独白("你下定决心要……")
+
+  freedom:
+    sentence_pacing_md: |
+      探索段落用 25~50 字短句,逗号断句多,留白多,
+      让物件和湿气慢慢压过来;雷雨与闯入的瞬间允许长句铺陈,
+      但不超过两句;受惊或袭击切到 6~12 字的瞬时短句。
+    vocabulary_register: |
+      现代日本山村的克制、低敬度的简体中文叙事。
+      允许"寂静"、"湿气"、"霉味"、"藤蔓"、"油膜"、"扭曲"、"陈旧"、
+      "土味"、"青苔"、"风化"、"低温的金属"、"风停"、"袖口"等具象词。
+      避免网络用语、避免成语堆叠、避免现代心理学术语。
+    metaphor_palette:
+      - 旧衣物的褶皱与汗渍——藏起一种不肯散去的气味
+      - 油膜在水面上漂出的虹色——美得不像活物
+      - 木地板上的旧水渍——干了又湿,湿了又干
+      - 倒吊的人形或物件——像在用错误的方向重力
+      - 风铃在没有风的时候自己响——节奏不像风的节奏
+      - 苍蝇盯着空气中某一点——你看不见的那一点
+      - 老照片里多出来的一只手——指向画框之外
+    reference_works:
+      - 三津田信三《厌魅》系列
+      - 中川翔子编年体的乡土怪谈
+      - 黑泽清《回路》的低温电子噪声
+    sample_paragraph_md: |
+      你睁开眼,眼前是陌生的天花板。
+      玻璃支离破碎,被风吹动的窗帘也残破不堪。
+      顺着视线望去,在窗沿上有什么白色的东西,紧紧抓着窗户的边缘。
+      那是,一只脚的脚尖。
+

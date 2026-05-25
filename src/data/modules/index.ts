@@ -11,10 +11,12 @@
  */
 
 import oneNestOfTrouble from "./one-nest-of-trouble/module";
+import tsumasakiKidan from "./tsumasaki-kidan/module";
 import type { Scenario } from "./_schema/scenario";
 
 export const MODULE_REGISTRY: Record<string, Scenario> = {
   [oneNestOfTrouble.meta.id]: oneNestOfTrouble,
+  [tsumasakiKidan.meta.id]: tsumasakiKidan,
 };
 
 export function getModuleById(id: string): Scenario | undefined {
