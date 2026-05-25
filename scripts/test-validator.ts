@@ -750,6 +750,83 @@ test("preset_investigators id 重复报错", () => {
   expectFail(validateScenario(raw), "preset_investigators");
 });
 
+test("preset_investigators.items 解析为 string[] 并随 PC 落地", () => {
+  const raw = cloneMinimal();
+  raw["preset_investigators"] = [
+    {
+      id: "pc.with-items",
+      name: "带道具",
+      age: 32,
+      gender: "女",
+      nationality: "日本",
+      identity: "京都独立持牌侦探",
+      occupation: "私家侦探",
+      attributes: {
+        str: 50, con: 60, siz: 55, dex: 65, app: 55,
+        int: 75, pow: 60, edu: 70,
+      },
+      sanity: 60, luck: 55, credit_rating: 40,
+      skills: {},
+      overview_md: "测试 items 落地。",
+      items: ["袖珍录音笔", "护身符", "笔记本与圆珠笔"],
+    },
+  ];
+  const result = validateScenario(raw);
+  expectOk(result);
+  const pc = result.scenario.presetInvestigators![0];
+  assert(Array.isArray(pc.items) && pc.items!.length === 3, "items 应解析为长度 3 的 string[]");
+  assert(pc.items![0] === "袖珍录音笔", "items 第一条应原样保留");
+});
+
+test("preset_investigators.items + weapons 总数超 8 报错", () => {
+  const raw = cloneMinimal();
+  raw["preset_investigators"] = [
+    {
+      id: "pc.too-much-gear",
+      name: "贪心装载",
+      age: 30,
+      gender: "男",
+      nationality: "美国",
+      identity: "测试用",
+      occupation: "私家侦探",
+      attributes: {
+        str: 50, con: 60, siz: 55, dex: 65, app: 55,
+        int: 75, pow: 60, edu: 70,
+      },
+      sanity: 60, luck: 55, credit_rating: 40,
+      skills: {},
+      overview_md: "8 槽超限测试。",
+      weapons: ["pistol-9mm", "knife-small", "pistol-9mm"],
+      items: ["a", "b", "c", "d", "e", "f"],
+    },
+  ];
+  expectFail(validateScenario(raw), "preset_investigators[0].items");
+});
+
+test("preset_investigators.items 含空字符串报错", () => {
+  const raw = cloneMinimal();
+  raw["preset_investigators"] = [
+    {
+      id: "pc.bad-items",
+      name: "空 item",
+      age: 30,
+      gender: "男",
+      nationality: "美国",
+      identity: "测试用",
+      occupation: "私家侦探",
+      attributes: {
+        str: 50, con: 60, siz: 55, dex: 65, app: 55,
+        int: 75, pow: 60, edu: 70,
+      },
+      sanity: 60, luck: 55, credit_rating: 40,
+      skills: {},
+      overview_md: "空字符串测试。",
+      items: ["袖珍录音笔", "   ", "护身符"],
+    },
+  ];
+  expectFail(validateScenario(raw), "preset_investigators[0].items[1]");
+});
+
 // ---------------------------------------------------------------------------
 // hook.occupation_variants(per-occupation 卷入动机分叉)
 // ---------------------------------------------------------------------------

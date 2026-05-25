@@ -711,6 +711,18 @@ export interface PresetInvestigator {
    */
   weapons?: string[];
   /**
+   * 预置非武器道具列表(自由文本)。每条会在创角期落到 CharacterSheet.inventory
+   * 的 `{ kind: "item", text }` 槽,排在 weapons 展开之后、空槽之前。
+   * 用途:相机 / 录音笔 / 护身符 / 古书 / 警察证 / 急救包 等"职业身份道具"。
+   *
+   * 约束(由 validator 强制):
+   *   - 单条 text 长度 ∈ [1, 40](40 是角色卡 inventory UI 的视觉容量);
+   *   - weapons.length + items.length ≤ 8(inventory 总槽数);
+   *   - 不允许空字符串/纯空白(空槽前端会自动补,作者无需手填);
+   *   - 不强制去重(允许"急救包 ×2"两条等)。
+   */
+  items?: string[];
+  /**
    * 起始现金,选填。不填则由 startingCashOf(creditRating, era) 在创角期派生。
    */
   cashBalance?: number;

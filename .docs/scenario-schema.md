@@ -95,6 +95,16 @@ meta:
 - 序幕 scene 的 `npcs_present` 列出**所有"开场就在场"的 NPC**,即使他们的常驻 `initial_location` 在序幕之后的场景。`npc.initial_location` 是 NPC 大部分时间的 anchor,不要求与序幕一致——validator 也不强制
 - 与序幕收尾对应的 `timeline` tick(到站广播 / 船靠岸 / 列车进站)的 `narrative_seed_md` 写明"由系统报站",作为序幕跳到下一幕的合法锚点;时点设置要给足玩家互动空间(模组 `meta.start_time` 与 timeline tick 之间留 90~150 分钟的"叙事预算",让 LLM 有空间累加 `elapsedMinutes`)
 
+**交通工具到站类 timeline tick:5 次互动门槛(硬约束)**:
+
+仅有"叙事预算"还不够——LLM 看到 `fires_when.hour` 满足就可能直接吐出"减速 / 报站 / 熄火"叙事,把序幕一回合干掉。所以**所有"交通工具到站 / 序幕收尾"型 timeline tick** 都必须额外加一道"互动门槛":
+
+- 序幕 scene 的 `forbidden` 必须明文写出:**"在 PC 与车厢内 NPC(包括司机/船长本人)之间累计完成至少 5 次有意义的对白 / 行为互动之前,禁止任何'到站 / 终点 / 停下 / 请下车 / 引擎熄火 / 报站'语义"**;并定义清楚什么算"有意义"(一来一回的对白 / PC 主动观察试探后被 NPC 用动作或表情回应——PC 自己一句独白 / 翻手机 / 看风景**不算**)
+- 对应的 timeline tick(本模组里是 `tl.d1-noon-arrival`)的 `forbidden` 必须明文写出:**"互动门槛优先——即使 `elapsedMinutes` 已到触发时点,只要 5 次互动门槛尚未达成,就按 5 分钟一档继续顺延 tick,班车维持在路上,直到门槛达成那一回合才允许进入本 tick 的到站叙事"**
+- 序幕场景 `freedom` 里给司机 / 船长之类的"门槛达成前允许行为"做白名单:哼小调、轻微变线、看后视镜、按一下换气扇 等"非到站语义"的动作;**禁止**任何会让玩家以为"该到了"的动作
+
+这条规则同样覆盖:列车进站、轮船靠岸、电梯到楼层、的士抵达目的地——任何"运输完成 = 序幕结束"的硬切都必须加门槛。
+
 **NPC 姓名披露铁律(硬约束)**:
 
 NPC 在 `npcs.frame.public_persona_md` / `npcs.name` 写的真实姓名是给 LLM 看的,**不是开场就泄露给玩家的**。规则:
@@ -805,7 +815,21 @@ preset_investigators:
     residence: 本市                     # 选填
     weapons:                            # 选填,武器 id 列表
       - revolver-38
+    items:                              # 选填,非武器道具(自由文本数组)
+      - 袖珍录音笔(顶针大小,胸袋内)
+      - 笔记本与圆珠笔
+      - 委托人预付金信封(现金)
     cash_balance: 120                   # 选填,起始现金;不填则按 CR 派生
+```
+
+`items` 字段语义:
+
+- 类型:`string[]`,每条是落到 CharacterSheet inventory `{ kind: "item", text }` 槽的**最终显示文本**;不做模板查表、不做引用解析,作者写什么槽里就显示什么
+- 用途:相机 / 录音笔 / 笔记本 / 护身符 / 委托资料 / 警徽 / 急救包 / 弹匣 等"职业身份道具"或"剧情切入道具"
+- 校验:单条 `text` 长度 ∈ [1, 40](40 是角色卡 inventory UI 的视觉容量),不允许空字符串/纯空白
+- 槽位:`weapons.length + items.length ≤ 8`(CharacterSheet.inventory 总槽数);超出报错。剩余空槽前端会自动补 `{ kind: "item", text: "" }`
+- 落地顺序:weapons 占前几个槽 → items 紧随其后 → 空槽兜底
+- **铁律**:剧本预设调查员**禁止全员空背包**——文职职业也至少要带 4~7 件能体现身份与剧情切入点的非武器道具
 ```
 
 ### 15.2 校验规则(对齐 CoC 7e 创角硬规则)
@@ -820,6 +844,8 @@ preset_investigators:
 - `luck` ∈ `[0, 99]`
 - `credit_rating` ∈ `[0, 99]`
 - `weapons[i]` 必须能在 `src/data/cocWeapons.ts WEAPON_REGISTRY_ALL` 命中,且 `era === "any"` 或匹配 `meta.era`
+- `items[i]` 必须是非空字符串(trim 后),长度 ∈ [1, 40];不做注册表命中校验
+- `weapons.length + items.length ≤ 8`(CharacterSheet.inventory 槽位上限)
 - `portrait` 文件必须存在(若声明)
 
 ### 15.3 转写硬规则:外部模组导入时必须落卡
@@ -838,6 +864,8 @@ preset_investigators:
 - 原作什么都没说 → 转写者按模组开局钩子(委托人 / 案件性质 / 时代背景)推断 3~8 个合理职业,写进 `recommended_occupations`;`preset_investigators` 留空
 
 `recommended_occupations` 的兜底取舍:宁少勿杂。委托型开局优先调查/执法/媒体线;校园背景允许辅以教授/医师/神秘学家。
+
+**`preset_investigators[i].items` 必填铁律**:剧本预设调查员的背包**严禁全员空载**。每张卡按职业身份至少补 4~7 件非武器道具(警徽 / 录音笔 / 相机 / 笔记本 / 委托资料 / 护身符 / 急救包 / 备用弹匣 等)——这些道具是 LLM 在叙事中调用的"身份切入点"与"剧情勾连物",空背包会让前几回合的调查动作失去根。武器槽允许为空(文职 PC 不带枪是合理的),但**道具槽不允许全空**。校验在跨表阶段不强制(避免兼容旧模组),但转写新模组时若发现 `items` 缺失或为空数组,prebuild 会输出**软警告**提醒补齐。
 
 ---
 

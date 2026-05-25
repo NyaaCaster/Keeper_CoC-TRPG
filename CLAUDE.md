@@ -49,6 +49,31 @@
 - 透明通道才用 PNG,否则一律 JPEG;新增模组前先压缩再 `git add`,提交时核对体积。
 - 这条规范与"画图统一规范"互不冲突:**模组静态资产**走仓库 + 镜像内静态路由 `/modules/<id>/<path>`;**LLM 运行时画图**走 `generateImageAndPublish` + `/cache/images/*`。
 
+## 外部模组导入工作流(把外部 PDF / docx / 翻译稿落进 `src/data/modules/<id>/`)
+
+**任何"导入外部模组文档建立本游戏模组数据"的工作必须按 `.docs/module-import-guide.md` 走,以 `src/data/modules/tsumasaki-kidan` 作为金标准范例**。完整字段定义见 `.docs/scenario-schema.md`(SSOT);本节只钉死铁律。
+
+### 必填铁律(违反则 prebuild 拒绝构建 / 演出会崩)
+
+1. **`meta.recommended_occupations` 必填(≥ 1 项)** —— 原作没明写则按 hook 推断 3~8 个合理职业,宁少勿杂
+2. **原作有 pre-gens → `preset_investigators` 逐张落卡;原作没有 → 留空** —— 判定原则见 `.docs/scenario-schema.md` §15.3
+3. **每张 `preset_investigators[i]` 必须有 `items`(4~7 件职业身份道具),严禁全员空背包** —— 武器槽允许空(文职 PC 不带枪合理),但**道具槽不允许全空**;单条 text 长度 ∈ [1, 40],`weapons.length + items.length ≤ 8`
+4. **`name / age / gender / nationality / identity / occupation` 在剧本模式下完全锁定 LLM 不允许覆盖** —— 必须在转写期完整定稿,日本模组 `nationality` 写"日本",身份写完整职业名 + 单位
+5. **序幕场景必须在 `scene.frame.forbidden` 里钉死"互动门槛 + timeline 前置条件 + 自报姓名禁令 + 超自然禁令"** —— 参照 `tsumasaki-kidan` 的 `scene.bus-onboard`(5 次互动到站门槛)
+6. **单人补偿 NPC(若有)必须写齐"视野盲区 / 第一次现身触发 / 姓名披露 / 道德底线消失"四条铁规则** —— 参照 `tsumasaki-kidan` 的 `npc.kuze-mei`;若该 NPC 设计上有性别反差,把"披露门槛"按层钉死(声音 → 自报姓名 → 公开身份)
+
+### 工作流
+
+1. 通读外部原作,按 `.docs/module-import-guide.md` §2 事实采集清单逐项落到笔记
+2. 写 `src/data/modules/<id>/scenario.yaml`(三槽分离 frame/freedom/forbidden;ID 强类型前缀;Markdown 用 `|` 块字符串,**禁用** HTML)
+3. 写 `src/data/modules/<id>/module.ts`(用 `tsumasaki-kidan/module.ts` 的 7~10 行模板,**不要**加自定义初始化逻辑)
+4. 压图入 `assets/`(封面 ≤ 120 KB,场景图 ≤ 200 KB)
+5. `npm run validate:modules` 全绿(49 用例 + 模组扫描)
+6. `rebuild` skill 起容器,进游戏走一遍 hook → 序幕 → 第一幕,确认铁律生效
+7. 拿不准的写法 → **先看 `tsumasaki-kidan` 怎么写**;原作明确写了 → 按原作落;原作没写但 tsumasaki 有同位结构 → 照抄骨架只换文本
+
+详细流程、判断标准、自检清单与常见坑见 `.docs/module-import-guide.md`。
+
 ## Docker 部署约定
 
 - 镜像采用**多阶段构建**保证体积最小：`node:20-alpine` 作为 builder 跑 `npm ci` + `npm run build`，再 copy 到一个干净的 `node:20-alpine` runtime，运行时只装生产依赖。

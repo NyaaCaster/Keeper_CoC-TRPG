@@ -1761,6 +1761,42 @@ function parsePresetInvestigator(
     ? undefined
     : parseStringArray(value["weapons"], `${path}.weapons`, push, /*optional*/ true);
 
+  let items: string[] | undefined;
+  if (value["items"] !== undefined) {
+    if (!Array.isArray(value["items"])) {
+      push(`${path}.items`, `必须是字符串数组(已声明则不能为 ${typeof value["items"]})。`);
+    } else {
+      const parsed: string[] = [];
+      (value["items"] as unknown[]).forEach((entry, idx) => {
+        if (typeof entry !== "string") {
+          push(`${path}.items[${idx}]`, `必须是字符串,得到 ${typeof entry}。`);
+          return;
+        }
+        const trimmed = entry.trim();
+        if (trimmed.length === 0) {
+          push(`${path}.items[${idx}]`, `不允许空字符串/纯空白(空槽前端会自动补)。`);
+          return;
+        }
+        if (trimmed.length > 40) {
+          push(`${path}.items[${idx}]`, `单条 text 长度 ≤ 40,得到 ${trimmed.length}。`);
+          return;
+        }
+        parsed.push(trimmed);
+      });
+      items = parsed;
+    }
+  }
+
+  // weapons + items 总数 ≤ 8 (CharacterSheet.inventory 槽位上限)
+  const weaponsLen = Array.isArray(weapons) ? weapons.length : 0;
+  const itemsLen = Array.isArray(items) ? items.length : 0;
+  if (weaponsLen + itemsLen > 8) {
+    push(
+      `${path}.items`,
+      `weapons.length(${weaponsLen}) + items.length(${itemsLen}) = ${weaponsLen + itemsLen} 超出 inventory 8 槽上限。`,
+    );
+  }
+
   let cashBalance: number | undefined;
   if (value["cash_balance"] !== undefined && value["cash_balance"] !== null) {
     cashBalance = parseInteger(value["cash_balance"], `${path}.cash_balance`, push, { min: 0 });
@@ -1785,6 +1821,7 @@ function parsePresetInvestigator(
     birthplace,
     residence,
     weapons,
+    items,
     cashBalance,
   };
 }

@@ -156,14 +156,14 @@ src/data/
   ├─ cocOccupations.ts         ← 职业模板 + coreSkills 五种 kind 表达
   ├─ cocWeapons.ts             ← 武器结构化条目
   ├─ presets.ts                ← 18 张预设调查员
-  └─ modules/                  ← 「基于剧本游戏模式」模组数据基座。已落:`one-nest-of-trouble`(首模组) / `tsumasaki-kidan`(褄列奇谈,封闭乡村·星之彩,6 张 preset_investigators 对应 A-F 路线,含 §14 narrative_style 与单人补偿 NPC `npc.kuze-mei`)
+  └─ modules/                  ← 「基于剧本游戏模式」模组数据基座。已落:`one-nest-of-trouble`(首模组) / **`tsumasaki-kidan`**(褄列奇谈,封闭乡村·星之彩,**当前金标准范例**——6 张 preset_investigators 对应 A-F 路线,含 §14 narrative_style + 单人补偿 NPC `npc.kuze-mei` + 序幕 5 次互动门槛)
       ├─ _schema/
       │   ├─ scenario.ts       ← Scenario TS SSOT(camelCase；含 §12 PresetInvestigator + §14 narrative_style；详见 .docs/scenario-schema.md）
       │   └─ validator.ts      ← yaml(snake_case)→TS(camelCase) + 引用完整性 + BFS + 结局可达性 + recommendedOccupations/presetInvestigators 跨表校验
       └─ <module-id>/          ← 各模组目录（meta.id 必须等于目录名;已落 `one-nest-of-trouble` / `tsumasaki-kidan`)
 scripts/
   ├─ validate-modules.ts       ← 扫描模组、调 validator、检查资产存在性；prebuild 钩子
-  └─ test-validator.ts         ← validator 46 用例自测（最小样例 + 故意失败 + narrative_style + recommended_occupations + recommended 布尔三连 + preset_investigators 必填字段三连 + ending.rewards 三连）
+  └─ test-validator.ts         ← validator 49 用例自测（最小样例 + 故意失败 + narrative_style + recommended_occupations + recommended 布尔三连 + preset_investigators 必填字段三连 + preset_investigators.items 三连 + ending.rewards 三连）
 .docs/                         ← 项目内规范与决策文档(下面单列重要的几篇)
 .docs/.work/                   ← 给 Claude Code 看的工作简报(本文所在地)
 ```
@@ -187,6 +187,7 @@ scripts/
 | 模组 schema | `.docs/scenario-schema.md` —— 「基于剧本游戏模式」frame/freedom/forbidden 三槽 + 全字段语义；schema_version=1；§15 是预设调查员 |
 | 模组图像资产 | `.docs/scenario-schema.md` 第 11.1 节 —— 封面 ≤ 120 KB / 800 px,场景 ≤ 200 KB / 1024 px,JPEG q82,单模组累计 ≤ 3 MB |
 | 模组转写硬规则 | `.docs/scenario-schema.md` §15.3 —— 外部导入模组时,`meta.recommended_occupations` 必填、`meta.recommended` 必填布尔、`preset_investigators` 在原作有 pre-gens 时必须落卡 |
+| 外部模组导入工作流 | `.docs/module-import-guide.md` —— 把外部 PDF/docx/翻译稿落进 `src/data/modules/<id>/` 的完整流程,**金标准范例 = `tsumasaki-kidan`**;后续模组转写必须按它的标准走(序幕互动门槛 / 单人补偿 NPC 视野盲区+姓名+性别+道德底线 / preset_investigators.items 必填 / hook.occupation_variants 多路线联锁) |
 
 ## 常见坑（容易踩、踩了贵）
 
@@ -201,7 +202,7 @@ scripts/
 9. **滚动条统一用 `custom-scrollbar` class**，禁止自写 `::-webkit-scrollbar` 覆写。
 10. **`.docs/keeper-*.json` 是玩家私有模组配置**，被 `.dockerignore` 排除，**不会进镜像**。改完不要 commit 它。
 11. **不要把未压缩的模组图像直接进仓库**。`src/data/modules/<id>/assets/` 里所有图必须按 `.docs/scenario-schema.md` 11.1 节压到上限以内(封面 1.25 MB → 71 KB 是已验证基线)，否则镜像与仓库会被一张图拖肥。
-12. **从外部 PDF/docx 转写模组时,`meta.recommended_occupations` 必填、`preset_investigators` 在原作有 pre-gens 时必须落卡**。判定原则与字段语义见 `.docs/scenario-schema.md` §15.3——不允许"先填一半,后面补"，prebuild 时 schema 校验会拒绝构建。
+12. **从外部 PDF/docx 转写模组时,统一走 `.docs/module-import-guide.md`,以 `src/data/modules/tsumasaki-kidan` 为金标准范例**。`meta.recommended_occupations` 必填、原作有 pre-gens 时 `preset_investigators` 必须落卡、每张预设卡的 `items` 必须按职业身份补 4~7 件(严禁全员空背包)、序幕场景必须钉死"互动门槛 + timeline 前置条件 + 自报姓名禁令"、单人补偿 NPC 必须写齐"视野盲区 + 第一次现身触发 + 姓名披露 + 道德底线消失"四条铁规则。**不允许"先填一半,后面补"**——prebuild 时 schema 校验会拒绝构建。判定原则与字段语义详见 `.docs/scenario-schema.md` §15.3 + `.docs/module-import-guide.md` §3。
 13. **剧本预设调查员的卡槽优先级 + 字段锁**:`preset_investigators[i]` 在 Phase 3 创角阶段按数组下标占据卡槽 0..N-1(从左到右越靠前越优先);若 N < 3,用同 era 系统模板兜底补到 3 张。`name / age / gender / nationality / identity / background_story_md / occupation` 在剧本模式下完全锁定,**LLM 不允许覆盖**——这些字段必须在模组转写期就完整定稿,否则 schema 校验会拒。
 14. **`triggerKeeperNarration` 在剧本模式首轮必须带 `scenarioOverride`**。`setGameMode / setScenarioState` 是异步的,如果触发函数紧跟着读组件 state 拼 `scenarioBlock`,闭包里仍是旧值(`gameMode === "llm-generated"` / `scenarioState === null`),hook 块永远进不去 prompt——首轮 LLM 就会脱模组飞。`App.tsx` 的解法是给 `triggerKeeperNarration` 加 `scenarioOverride?: { gameMode, scenario, scenarioState }` 参数,创建期入口必须显式传新值;后续玩家回合 state 已落地,可省略。**任何会"setState 后立刻读 state"的路径都要走 override 而不是闭包**——同一个坑在投骰收尾路径再次出现:`handleRollComplete` 在 `setMessages` 里清掉 `rollRequest` 后立刻 `handleSendPlayerMessage(...)`,后者闭包读到的 `messages` 仍是旧值(rollRequest 还在队尾),`findPendingTailRollRequest` 误判为"放弃声明"并把旧 rollRequest 重新写回 → 下一回合 keeper 卡渲染成"已错过"。修复方式同样是给 `handleSendPlayerMessage` 加 `messagesOverride?: ChatMessage[]` 参数,投骰收尾路径显式传"清空后"的快照。
 15. **控制台日志面板是可下载/可单条复制的诊断窗口**(`ConsoleLogPanel.tsx`)。请求 / 响应 / 错误 meta 已扩到包括完整 systemInstruction、userText、keeperData、errorBody/Stack、provider/model/gameMode/scenarioId 等。调试 LLM 注入失误时**先开这个面板**复制 request 看 systemInstruction 末尾是不是真带了 scenarioBlock,再决定改 prompt 还是改注入条件——不要凭直觉猜。
@@ -218,7 +219,7 @@ scripts/
 | 提交 + 推送 | `commit-push` skill —— Conventional Commits（英文小写起首），`git add <file>` 显式指定，**不**附 `Co-Authored-By` |
 | 验证改动 | `verify` skill / `run` skill |
 | 代码审查 | `code-review` skill |
-| 模组校验 | `npm run validate:modules` —— 跑 43 用例自测 + 扫 `src/data/modules/*/scenario.yaml`。`prebuild` 钩子已挂,任一模组校验失败 → 拒绝构建 |
+| 模组校验 | `npm run validate:modules` —— 跑 49 用例自测 + 扫 `src/data/modules/*/scenario.yaml`。`prebuild` 钩子已挂,任一模组校验失败 → 拒绝构建 |
 
 Windows 特有坑：
 

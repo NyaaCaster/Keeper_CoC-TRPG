@@ -97,7 +97,8 @@ interface CharacterCreatorProps {
  *   叠加任何随机化 / 兴趣点 / 模板兜底,1B 全锁原则。
  * - HP / MP / maxSan 由公式现算,但若 schema 已给 sanity 我们直接用作 san。
  * - cashBalance 优先用作者写死的值,没写则按 startingCashOf 派生。
- * - weapons 列表展开成 inventory 头几个槽,剩余补空 item 槽到 8 槽。
+ * - weapons 列表展开成 inventory 头几个槽,items 列表紧随其后展开为 `{ kind: "item", text }`,
+ *   再补空 item 槽到 8 槽;weapons + items 总数已由 schema validator 约束 ≤ 8。
  */
 function presetInvestigatorToSheet(
   pc: PresetInvestigator,
@@ -121,12 +122,17 @@ function presetInvestigatorToSheet(
   const skills: CharacterSkills = { ...pc.skills };
   if (!("克苏鲁神话" in skills)) skills["克苏鲁神话"] = 0;
 
-  // weapons → inventory 前几个槽
+  // weapons → inventory 前几个槽,items 紧随其后(已由 schema validator 约束总数 ≤ 8)
   const inventory: InventoryEntry[] = [];
   if (Array.isArray(pc.weapons)) {
     for (const wid of pc.weapons) {
       const def = findWeapon(wid);
       inventory.push({ kind: "weapon", weaponId: wid, ammo: def?.maxAmmo ?? 0 });
+    }
+  }
+  if (Array.isArray(pc.items)) {
+    for (const text of pc.items) {
+      inventory.push({ kind: "item", text });
     }
   }
   while (inventory.length < 8) inventory.push({ kind: "item", text: "" });
