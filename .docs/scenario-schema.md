@@ -63,6 +63,7 @@ meta:
     - 私家侦探
     - 警探
     - 记者
+  recommended: false                     # ★ 必填布尔。卷宗目录是否渲染金色"推荐"徽标
 ```
 
 **校验**:
@@ -71,6 +72,7 @@ meta:
 - `era` ∈ 枚举或 `other`+`era_note`
 - `start_time.game_day >= 1`,`hour` 必须 `^\d{2}:\d{2}$` 格式且 24h 合法
 - `recommended_occupations` 必填且 ≥ 1 项;每项必须是中文职业名或 occupation id,且能在 `src/data/cocOccupations.ts` 对应 `meta.era` 的表里命中(`era="other"` 时跳过命中校验)
+- `recommended` 必填布尔(`true` | `false`),不允许省略;`true` 时卷宗目录卡片右上角渲染金色"推荐"徽标。这是项目方对模组品质/代表性的展示位标记,与 difficulty/tags 不同维度——`false` 不代表质量差,只代表不在首选展示位上
 
 ---
 

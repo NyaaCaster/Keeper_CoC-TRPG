@@ -70,6 +70,7 @@ meta:
   start_time: { game_day: 1, hour: "12:00" }
   synopsis_md: 用于校验器测试的最小模组。
   recommended_occupations: [私家侦探]
+  recommended: false
 
 hook:
   start_scene: scene.room
@@ -493,6 +494,29 @@ test("meta.recommended_occupations 用 occupation id 也能命中", () => {
   ];
   const result = validateScenario(raw);
   expectOk(result);
+});
+
+test("meta.recommended=true 解析为 boolean 落到 camelCase", () => {
+  const raw = cloneMinimal();
+  (raw["meta"] as Record<string, unknown>)["recommended"] = true;
+  const result = validateScenario(raw);
+  expectOk(result);
+  assert(
+    result.scenario.meta.recommended === true,
+    "recommended 应原样保留为 true",
+  );
+});
+
+test("meta.recommended 缺失必报错", () => {
+  const raw = cloneMinimal();
+  delete (raw["meta"] as Record<string, unknown>)["recommended"];
+  expectFail(validateScenario(raw), "recommended");
+});
+
+test("meta.recommended 非布尔值必报错", () => {
+  const raw = cloneMinimal();
+  (raw["meta"] as Record<string, unknown>)["recommended"] = "yes";
+  expectFail(validateScenario(raw), "recommended");
 });
 
 test("preset_investigators 缺省时通过", () => {

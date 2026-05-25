@@ -328,6 +328,17 @@ function parseMeta(value: unknown, path: string, push: Issue): ScenarioMeta | nu
     );
   }
 
+  const recommendedRaw = value["recommended"];
+  let recommended = false;
+  if (typeof recommendedRaw === "boolean") {
+    recommended = recommendedRaw;
+  } else {
+    push(
+      `${path}.recommended`,
+      `必填布尔字段(true | false),用于卷宗目录是否渲染推荐徽标。`,
+    );
+  }
+
   return {
     id,
     title,
@@ -341,6 +352,7 @@ function parseMeta(value: unknown, path: string, push: Issue): ScenarioMeta | nu
     synopsisMd,
     authorCreditsMd,
     recommendedOccupations,
+    recommended,
   };
 }
 

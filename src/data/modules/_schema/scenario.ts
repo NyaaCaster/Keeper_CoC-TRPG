@@ -86,6 +86,15 @@ export interface ScenarioMeta {
    * (中文名或 id 任一即可,validator 会验证)。
    */
   recommendedOccupations: string[];
+  /**
+   * 是否为推荐模组。必填(布尔)。
+   *
+   * 设计意图:卷宗目录(模组选择)界面会在 `recommended === true` 的卡片上
+   * 渲染金色"推荐"徽标,作为转写者/项目方对该模组品质或代表性的背书。
+   * 与 difficulty/tags 是不同维度——非推荐不代表质量差,只代表当前不在
+   * 首选展示位上。每个模组转写时必须显式给出 true/false,不允许省略。
+   */
+  recommended: boolean;
 }
 
 // ============================================================================
