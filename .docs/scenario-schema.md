@@ -86,6 +86,23 @@ meta:
 
 ## 3 · `hook`:楔子与起点
 
+**序幕场景与"前 5 轮不下车"规则(硬约束,转写期必须遵守)**:
+
+`hook.start_scene` 必须落在玩家**真正可以做选择的起点**,而不是模组背景"已经发生完"的位置。原则:
+
+- 如果原作开场是"主角到达某处下车",项目把这一段拆成两个 scene:**车上(车厢/船舱/车站候车室)** 与 **下车点**;`start_scene` 指向**车上**那一幕
+- 序幕 scene 的 `forbidden` 必须显式写明:在司机/船长广播报站之前**禁止** PC 下车、禁止描述交通工具停下、禁止 NPC 自报姓名(玩家未问之前 NPC 没理由报名字)。理由:LLM 默认会跳过过程直接演到达,序幕节奏完全没了
+- 序幕 scene 的 `npcs_present` 列出**所有"开场就在场"的 NPC**,即使他们的常驻 `initial_location` 在序幕之后的场景。`npc.initial_location` 是 NPC 大部分时间的 anchor,不要求与序幕一致——validator 也不强制
+- 与序幕收尾对应的 `timeline` tick(到站广播 / 船靠岸 / 列车进站)的 `narrative_seed_md` 写明"由系统报站",作为序幕跳到下一幕的合法锚点;时点设置要给足玩家互动空间(模组 `meta.start_time` 与 timeline tick 之间留 90~150 分钟的"叙事预算",让 LLM 有空间累加 `elapsedMinutes`)
+
+**NPC 姓名披露铁律(硬约束)**:
+
+NPC 在 `npcs.frame.public_persona_md` / `npcs.name` 写的真实姓名是给 LLM 看的,**不是开场就泄露给玩家的**。规则:
+
+- 玩家在直接询问 NPC 姓名 / 听到 NPC 自报家门 / 看到名牌徽章名片之前,叙事 / 旁白 / 对白 / 系统提示中**禁止使用 NPC 真实姓名**;只能用外貌行为代称("身后递糖的人"、"温柔的少妇"、"穿白衬衣的青年")
+- 在 scene `freedom.npc_action_hints[npc.xxx]` 与 NPC `forbidden` 中各写一份这条规则——前者覆盖该 scene,后者覆盖整个模组。两边一致,避免 LLM 跨场景丢上下文
+- 同一规则适用于"NPC 在 PC 视野盲区"的开场设计(PC 主动注意到 / 该 NPC 主动现身之前,**任何形式**的存在暗示都禁止——不写"身后传来呼吸"、"背后有视线"等暗示;序幕开局 PC 应当感觉对方不存在)
+
 ```yaml
 hook:
   start_scene: scene.opening           # 必须是 scenes 里某个 id
