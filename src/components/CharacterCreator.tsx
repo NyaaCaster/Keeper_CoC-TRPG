@@ -358,14 +358,19 @@ export default function CharacterCreator({ onComplete, onBackToStart, apiSetting
     setPresetPageStart(0);
   }, [activePresets.length]);
 
-  // 选中卡跨页时,把当前页同步到选中卡所在的"3 张窗口"。
+  // 选中卡跨出当前页时,把页拉到选中卡所在的"3 张窗口"。
+  // 注意:依赖只放 selectedPresetIndex —— 否则用户手动点翻页箭头时,
+  // 这个 effect 会因 presetPageStart 变化重新触发,把页对齐回 selectedPresetIndex
+  // 所在窗口(通常是 0),翻页就被立刻拽回去了。
   React.useEffect(() => {
     const PAGE_SIZE = 3;
-    if (selectedPresetIndex < presetPageStart || selectedPresetIndex >= presetPageStart + PAGE_SIZE) {
-      const aligned = Math.floor(selectedPresetIndex / PAGE_SIZE) * PAGE_SIZE;
-      setPresetPageStart(aligned);
-    }
-  }, [selectedPresetIndex, presetPageStart]);
+    setPresetPageStart((cur) => {
+      if (selectedPresetIndex < cur || selectedPresetIndex >= cur + PAGE_SIZE) {
+        return Math.floor(selectedPresetIndex / PAGE_SIZE) * PAGE_SIZE;
+      }
+      return cur;
+    });
+  }, [selectedPresetIndex]);
 
   // 创建期 「深渊复核 → 下载调查员角色卡」 入口。运行期入口在 CharacterDossierPanel 里直接
   // 调 downloadCharacterCard(sheet.creationSnapshot ?? sheet)；两者共享同一渲染模块。
