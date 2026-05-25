@@ -727,6 +727,133 @@ test("preset_investigators id 重复报错", () => {
 });
 
 // ---------------------------------------------------------------------------
+// hook.occupation_variants(per-occupation 卷入动机分叉)
+// ---------------------------------------------------------------------------
+
+test("hook.occupation_variants 解析正常路径并落到 camelCase", () => {
+  const raw = cloneMinimal();
+  (raw["meta"] as Record<string, unknown>)["recommended_occupations"] = ["私家侦探", "记者"];
+  (raw["hook"] as Record<string, unknown>)["occupation_variants"] = {
+    "私家侦探": {
+      call_to_action_md: "受老妇人之托追查家系。",
+      initial_clues: ["clue.key"],
+    },
+    "记者": {
+      call_to_action_md: "受社方派遣调查风评被害特辑。",
+    },
+  };
+  const result = validateScenario(raw);
+  expectOk(result);
+  const variants = result.scenario.hook.occupationVariants;
+  assert(!!variants, "occupationVariants 未出现在结果中");
+  assert(variants!["私家侦探"].callToActionMd.includes("老妇人"), "私家侦探 callToActionMd 转换错");
+  assert(
+    Array.isArray(variants!["私家侦探"].initialClues) &&
+      variants!["私家侦探"].initialClues!.includes("clue.key"),
+    "私家侦探 initialClues 转换错",
+  );
+  assert(variants!["记者"].initialClues === undefined, "记者 initialClues 应当 undefined");
+});
+
+test("hook.occupation_variants key 不在 recommended_occupations 仅警告(不报错)", () => {
+  const raw = cloneMinimal();
+  (raw["hook"] as Record<string, unknown>)["occupation_variants"] = {
+    "考古学家": {
+      call_to_action_md: "测试 key 未在 recommended_occupations 中。",
+    },
+  };
+  const result = validateScenario(raw);
+  expectOk(result);
+  const hit = result.warnings.find((w) =>
+    w.path.includes("occupation_variants") && w.message.includes("recommended_occupations"),
+  );
+  assert(!!hit, `期望出现关于 recommended_occupations 的软警告,实际:\n${result.warnings.map((w) => `  - ${w.path}: ${w.message}`).join("\n")}`);
+});
+
+test("hook.occupation_variants.initial_clues 引用未知 clue 报错", () => {
+  const raw = cloneMinimal();
+  (raw["hook"] as Record<string, unknown>)["occupation_variants"] = {
+    "私家侦探": {
+      call_to_action_md: "测试 initial_clues 引用错误。",
+      initial_clues: ["clue.does-not-exist"],
+    },
+  };
+  expectFail(validateScenario(raw), "initial_clues");
+});
+
+// ---------------------------------------------------------------------------
+// endings[*].frame.rewards(结构化结局奖励)
+// ---------------------------------------------------------------------------
+
+test("ending.rewards 解析正常路径并落到 camelCase", () => {
+  const raw = cloneMinimal();
+  const ending = (raw["endings"] as Array<Record<string, unknown>>)[0];
+  const frame = ending["frame"] as Record<string, unknown>;
+  frame["rewards"] = {
+    skill_growth: true,
+    san_reward_formula: "1d10",
+    san_reward_conditions: [
+      { label: "持有钥匙完成逃脱", flag: "flag.has-key", formula: "1d6" },
+      { label: "无条件加成", formula: 3 },
+    ],
+    cash_reward: 500,
+  };
+  const result = validateScenario(raw);
+  expectOk(result);
+  const rewards = result.scenario.endings[0].frame.rewards;
+  assert(!!rewards, "rewards 未落到 frame 上");
+  assert(rewards!.skillGrowth === true, "skillGrowth 转换错");
+  assert(rewards!.sanRewardFormula === "1d10", "sanRewardFormula 转换错");
+  assert(rewards!.sanRewardConditions?.length === 2, "sanRewardConditions 数量错");
+  assert(rewards!.sanRewardConditions![0].flag === "flag.has-key", "sanRewardConditions[0].flag 转换错");
+  assert(rewards!.sanRewardConditions![1].formula === 3, "sanRewardConditions[1].formula 数值错");
+  assert(rewards!.cashReward === 500, "cashReward 转换错");
+});
+
+test("ending.rewards 与已废弃的 san_reward / experience_phase 共存报错", () => {
+  const raw = cloneMinimal();
+  const ending = (raw["endings"] as Array<Record<string, unknown>>)[0];
+  const frame = ending["frame"] as Record<string, unknown>;
+  frame["san_reward"] = "1d6";
+  frame["experience_phase"] = true;
+  frame["rewards"] = { skill_growth: true };
+  const result = validateScenario(raw);
+  if (result.ok !== false) {
+    throw new Error("expected ok=false but got ok=true");
+  }
+  const hit = result.issues.find((i) =>
+    i.path.startsWith("endings[") &&
+    i.path.endsWith(".frame") &&
+    i.message.includes("rewards"),
+  );
+  assert(
+    !!hit,
+    `期望命中 rewards 与旧字段共存的错误,实际:\n${result.issues.map((i) => `  - ${i.path}: ${i.message}`).join("\n")}`,
+  );
+});
+
+test("ending.rewards.skill_growth 缺失报错", () => {
+  const raw = cloneMinimal();
+  const ending = (raw["endings"] as Array<Record<string, unknown>>)[0];
+  const frame = ending["frame"] as Record<string, unknown>;
+  frame["rewards"] = { san_reward_formula: "1d10" };
+  expectFail(validateScenario(raw), "skill_growth");
+});
+
+test("ending.rewards.san_reward_conditions[*].flag 引用未知 flag 报错", () => {
+  const raw = cloneMinimal();
+  const ending = (raw["endings"] as Array<Record<string, unknown>>)[0];
+  const frame = ending["frame"] as Record<string, unknown>;
+  frame["rewards"] = {
+    skill_growth: false,
+    san_reward_conditions: [
+      { label: "无效 flag", flag: "flag.does-not-exist", formula: "1d6" },
+    ],
+  };
+  expectFail(validateScenario(raw), "san_reward_conditions");
+});
+
+// ---------------------------------------------------------------------------
 // 跑
 // ---------------------------------------------------------------------------
 

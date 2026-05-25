@@ -190,6 +190,18 @@ export const KEEPER_RESPONSE_SCHEMA = {
           required: ["minutes"],
           description: "推进游戏内日历。前端会把 minutes 累加到 scenarioState.elapsedMinutes;Phase 2 不接日历驱动效应(timeline 触发 / 跨日疯狂 / HP 恢复留 V2)。无时间推进时设为 null。",
         },
+        skillTick: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              skillId: { type: "string", description: "技能 id(SKILL_REGISTRY_ALL 的 key,与 cocSkills.ts 同口径)。" },
+              reason: { type: "string", description: "一句话写为什么补打勾。前端日志用。" },
+            },
+            required: ["skillId"],
+          },
+          description: "**仅作兜底通道**。前端硬规则在玩家投骰成功(普通/困难/极难)后已会自动给该技能打勾(同技能一场冒险只打一次)。本通道仅在 KP 用'剧情成功代替投骰'等罕见场景下使用——例如玩家提出长时间监视,KP 直接判定<聆听>成功而不掷骰。落账时与硬规则路径走同一个去重表。绝大多数回合应为 null 或省略。",
+        },
       },
       description: "**剧本模式专用**。仅当上下文里有 [剧本模式] 标记时才会出现本通道;LLM 生成模式下**禁止**填,必须为 null。详见系统提示规则 12。",
     },

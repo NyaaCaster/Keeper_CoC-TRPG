@@ -92,12 +92,36 @@ export interface ScenarioMeta {
 // §3 · hook:楔子与起点
 // ============================================================================
 
+/**
+ * per-occupation hook 变体。
+ *
+ * 设计意图:外部模组(如「褄列奇谈」)常常按职业切入路线提供独立的卷入动机
+ * 与开局线索(警察 / 侦探 / 记者 / 摄影师 / 神秘学家 / 教授 各异)。
+ * `prologueMd`(同场景情景描写)保持单一,所有 PC 共享;只有"动机"与"开局
+ * 线索"按职业分叉。
+ *
+ * key 是 occupation id 或 occupation 中文名(与 cocOccupations.ts 对齐),
+ * 与 PresetInvestigator.occupation / meta.recommendedOccupations 同口径。
+ * 玩家选定职业后,运行时优先读 occupationVariants[选定职业],未命中回落到
+ * 顶层 callToActionMd 与 defaultInitialClues。
+ */
+export interface ScenarioHookOccupationVariant {
+  callToActionMd: Markdown;
+  /** 该职业独享的开局线索;未填写则回落到 hook.defaultInitialClues */
+  initialClues?: ClueId[];
+}
+
 export interface ScenarioHook {
   startScene: SceneId;
   prologueMd: Markdown;
   callToActionMd: Markdown;
   /** 选填,开局即入册的线索 id 列表 */
   defaultInitialClues?: ClueId[];
+  /**
+   * 选填。按职业分叉的卷入动机与开局线索。
+   * 命中规则:玩家创角时选定的 occupation(id 或中文名)与 key 任一匹配即生效。
+   */
+  occupationVariants?: Record<string, ScenarioHookOccupationVariant>;
 }
 
 // ============================================================================
@@ -465,13 +489,64 @@ export interface EndingTrigger {
   value: boolean;
 }
 
+/**
+ * 条件 SAN 奖励(模组通关后按 flag 命中情况发放的额外 SAN)。
+ *
+ * 例:
+ *   { label: "击退神话生物", flag: "flag_starcolour_repelled", formula: "1d6" }
+ * 当 ScenarioState.flags["flag_starcolour_repelled"] === true 时,
+ * 在经验阶段额外结算 +1d6 SAN。
+ */
+export interface EndingSanRewardCondition {
+  /** 显示给玩家的奖励名称,如 "击退神话生物" / "保护重要 NPC" */
+  label: string;
+  /**
+   * 触发条件 flag(选填)。未填则视为无条件加成(慎用)。
+   * 必须引用已声明的 flag id。
+   */
+  flag?: FlagId;
+  /** 骰子公式,如 "1d6" / "1d10";支持纯整数 */
+  formula: DiceFormula | number;
+}
+
+/**
+ * 结局奖励的结构化声明,供运行时经验阶段(ExperiencePhaseModal)结算。
+ *
+ * 设计意图:
+ * - skillGrowth=true 启用 7e 经验阶段(技能成长检定)
+ * - sanRewardFormula 是"主线 SAN 奖励"(无条件,例:打通主线 +1d10)
+ * - sanRewardConditions 是按 flag 命中情况发放的"附加 SAN"
+ * - cashReward 直接加到 sheet.cashBalance
+ *
+ * 旧字段 EndingFrame.sanReward / experiencePhase 被本结构覆盖;若 rewards 存在,
+ * 旧字段被忽略(validator 会对同时存在两套字段发软警告)。
+ */
+export interface EndingRewards {
+  /** 是否进入 7e 经验阶段(技能成长 + 首次破 90 +2d6 SAN) */
+  skillGrowth: boolean;
+  /** 主线 SAN 奖励公式,如 "1d10" / 5。无条件发放,仅在 victory/ambiguous 时触发 */
+  sanRewardFormula?: DiceFormula | number;
+  /** 条件 SAN 奖励列表,按 flag 命中情况追加 */
+  sanRewardConditions?: EndingSanRewardCondition[];
+  /** 现金奖励,直接加到 sheet.cashBalance(0 起步) */
+  cashReward?: number;
+}
+
 export interface EndingFrame {
   /** 固定结局文本,LLM 必须按精神写出 narrative,允许文风改写 */
   epilogueMd: Markdown;
-  /** 选填,scenarioEnd 时前端结算 */
+  /**
+   * 选填,scenarioEnd 时前端结算。
+   * @deprecated 请改用 rewards.sanRewardFormula;两者并存时以 rewards 为准。
+   */
   sanReward?: DiceFormula | number;
-  /** 是否进入经验阶段 */
+  /**
+   * 是否进入经验阶段。
+   * @deprecated 请改用 rewards.skillGrowth;两者并存时以 rewards 为准。
+   */
   experiencePhase?: boolean;
+  /** 结构化奖励声明,供 ExperiencePhaseModal 结算(选填) */
+  rewards?: EndingRewards;
   scenarioEndKind: ScenarioEndKind;
 }
 

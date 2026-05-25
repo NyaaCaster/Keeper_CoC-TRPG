@@ -405,6 +405,12 @@ export interface ScenarioActions {
   flagSet?: ScenarioFlagSet[] | null;
   endingProposed?: ScenarioEndingProposed | null;
   timeAdvance?: ScenarioTimeAdvance | null;
+  /**
+   * 兜底通道。前端硬规则在玩家投骰成功后会自动给该技能打勾(同技能一场冒险只打一次),
+   * 但当 KP 用"剧情成功代替投骰"等方式让某技能算作成功使用时,LLM 可在此声明。
+   * 主路径仍是前端硬规则;此通道仅作兜底,落账时与硬规则路径走同一个去重表。
+   */
+  skillTick?: ScenarioSkillTick[] | null;
 }
 
 export interface ScenarioSceneTransition {
@@ -433,6 +439,18 @@ export interface ScenarioEndingProposed {
 export interface ScenarioTimeAdvance {
   /** 推进的游戏内分钟数,整数,≥ 0 */
   minutes: number;
+  reason?: string;
+}
+
+/**
+ * 经验阶段打勾事件(LLM 兜底通道)。
+ *
+ * 前端硬规则在玩家投骰成功后已会自动给该技能打勾,这里供 LLM 在
+ * "剧情成功代替投骰"等场景下补打;落账时与硬规则路径走同一个去重表。
+ */
+export interface ScenarioSkillTick {
+  /** 技能 id(SKILL_REGISTRY_ALL 的 key,与 cocSkills.ts 同口径) */
+  skillId: string;
   reason?: string;
 }
 
@@ -490,6 +508,18 @@ export interface ScenarioState {
   elapsedMinutes: number;
   /** 已触发的 timeline event id 列表(once: true 的归档用;Phase 2 timeline 驱动留 V2) */
   triggeredTimelineIds: string[];
+  /**
+   * 经验阶段打勾档案。键 = SKILL_REGISTRY_ALL 的 skill id;值恒为 true(用 Record 而非 Set 是 localStorage 友好)。
+   * 同一个技能一场冒险只打一次钩,多次成功不叠加。
+   * 缺省视为 {}。冒险结束后用于 ExperiencePhase 结算,结算后清空。
+   */
+  skillTicks?: Record<string, true>;
+  /**
+   * "技能首次破 90 时 +2d6 SAN" 的去重档案。键 = skill id,值恒为 true。
+   * 经验阶段为该技能成功打勾且检定后值跨过 90 时入册;之后再涨不再触发奖励。
+   * 缺省视为 {}。
+   */
+  grantedSan90Skills?: Record<string, true>;
 }
 
 /**

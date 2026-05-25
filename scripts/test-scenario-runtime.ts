@@ -24,6 +24,8 @@ import { validateScenario } from "../src/data/modules/_schema/validator.ts";
 import {
   applyScenarioActions,
   initialScenarioState,
+  resolveHookVariant,
+  rollSkillGrowth,
   type RollContext,
 } from "../src/lib/scenarioRuntime.ts";
 import type { Scenario } from "../src/data/modules/_schema/scenario.ts";
@@ -66,6 +68,14 @@ function assertHasMarker(markers: string[], substring: string) {
 function assertNoMarker(markers: string[], substring: string) {
   const hit = markers.find((m) => m.includes(substring));
   if (hit) throw new Error(`unexpected marker:\n  - ${hit}`);
+}
+
+/**
+ * 测试用确定性 RNG —— 按给定序列 yield;耗尽后回落到 0.5。
+ */
+function stubRandom(values: number[]): () => number {
+  let i = 0;
+  return () => (i < values.length ? values[i++] : 0.5);
 }
 
 const scenario = loadScenario();
@@ -499,6 +509,80 @@ test("rollContext = null:method=skill 的 clue 必拒(无可信投骰)", () => {
     null,
   );
   assertHasMarker(r.systemMarkers, "[线索条件未满足·拒绝]");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 13:resolveHookVariant + initialScenarioState 的职业变体路径
+// ---------------------------------------------------------------------------
+
+test("resolveHookVariant: occupation 缺失或不命中 → undefined", () => {
+  const v1 = resolveHookVariant(scenario.hook, undefined);
+  assert(v1 === undefined, "occupation=undefined 应回 undefined");
+  const v2 = resolveHookVariant(scenario.hook, "");
+  assert(v2 === undefined, "occupation 空串应回 undefined");
+  const v3 = resolveHookVariant(scenario.hook, "不存在的职业");
+  assert(v3 === undefined, "occupation 未在 variants 注册应回 undefined");
+});
+
+test("initialScenarioState: 命中职业变体时使用其 initialClues", () => {
+  // 在内存里给 hook 注入一个职业变体,不修改 yaml
+  const cloned: Scenario = JSON.parse(JSON.stringify(scenario));
+  cloned.hook.occupationVariants = {
+    "侦探": {
+      callToActionMd: "侦探专属:跟随线索去找 GPS 笔记本。",
+      initialClues: ["clue.gps-notebook"],
+    },
+  };
+
+  // 命中:用"侦探"开局,initialClues 应取自 variant
+  const sHit = initialScenarioState(cloned, "侦探");
+  assert(
+    sHit.discoveredClueIds.includes("clue.gps-notebook"),
+    "命中职业变体后 discoveredClueIds 应包含 variant.initialClues",
+  );
+
+  // 未命中:用别的职业开局,应回落到 hook.defaultInitialClues
+  const sMiss = initialScenarioState(cloned, "记者");
+  const fallback = cloned.hook.defaultInitialClues ?? [];
+  assert(
+    sMiss.discoveredClueIds.length === fallback.length &&
+      fallback.every((id) => sMiss.discoveredClueIds.includes(id)),
+    "未命中职业变体应使用 hook.defaultInitialClues",
+  );
+
+  // resolveHookVariant 同步通过
+  const v = resolveHookVariant(cloned.hook, "侦探");
+  assert(v?.initialClues?.[0] === "clue.gps-notebook", "resolveHookVariant 应返回 variant 对象");
+});
+
+// ---------------------------------------------------------------------------
+// 用例 14:rollSkillGrowth 90 上限钳制(确保 PNG 角色卡跨实例可导入)
+// ---------------------------------------------------------------------------
+
+test("rollSkillGrowth: before<90 时,after 钳到 90", () => {
+  // 注入 rng:第一次 → roll=99(必涨,因 >= 96);第二次 → growthDie=10
+  const rng = stubRandom([0.99, 0.99]); // roll=Math.floor(0.99*100)+1=100
+  const r = rollSkillGrowth("library-use", 88, rng);
+  assert(r.passed, "before<90 且骰 >= 96 必通过");
+  assert(r.after === 90, `after 应钳到 90,实测 ${r.after}`);
+  assert(r.crossedNinety === true, "before<90 且 after>=90 → crossedNinety=true");
+});
+
+test("rollSkillGrowth: before>=90 时,after 不退回(保持原值)", () => {
+  // 即使 roll 通过,after 也不应低于原值;before=92,growthDie=10 应保留 92
+  const rng = stubRandom([0.99, 0.99]);
+  const r = rollSkillGrowth("listen", 92, rng);
+  assert(r.after === 92, `before>=90 时 after 应保持原值,实测 ${r.after}`);
+  assert(r.crossedNinety === false, "before 已 >=90,本次不再触发首次破 90");
+});
+
+test("rollSkillGrowth: before<90 + 小骰子 时,after 不超过 before+growthDie", () => {
+  // before=50, growthDie=3 → after=53,远低于 90 上限
+  // rng[0]=0.50 → roll=51(>50 通过);rng[1]=0.20 → growthDie=3
+  const rng = stubRandom([0.50, 0.20]);
+  const r = rollSkillGrowth("psychology", 50, rng);
+  assert(r.passed, "roll=51 > before=50 必通过");
+  assert(r.after === 53, `after 应为 53,实测 ${r.after}`);
 });
 
 // ---------------------------------------------------------------------------

@@ -22,10 +22,12 @@ import type {
   Npc,
   Scenario,
   ScenarioEndKind,
+  ScenarioHookOccupationVariant,
   Scene,
   SceneExit,
 } from "../data/modules/_schema/scenario";
 import type { ScenarioActions, ScenarioState } from "../types";
+import { SKILL_REGISTRY_ALL } from "../data/cocSkills";
 
 // ============================================================================
 // Public API
@@ -48,6 +50,7 @@ import type { ScenarioActions, ScenarioState } from "../types";
 export function buildScenarioContextBlock(
   scenario: Scenario,
   state: ScenarioState,
+  occupation?: string,
 ): string {
   const sceneById = new Map(scenario.scenes.map((s) => [s.id, s]));
   const npcById = new Map(scenario.npcs.map((n) => [n.id, n]));
@@ -73,10 +76,13 @@ export function buildScenarioContextBlock(
   // 第一回合 narrative 必须以本块为起点(配合 SYSTEM_INSTRUCTION 节 12.11);
   // 中后期回合也保留可见,作为 NPC 动机/玩家委托关系的不变参照。
   const hook = scenario.hook;
+  const variant = resolveHookVariant(hook, occupation);
+  const callToAction = variant?.callToActionMd?.trim() || hook.callToActionMd?.trim();
+  const initialClues = variant?.initialClues ?? hook.defaultInitialClues;
   const isFirstTurn =
     state.visitedSceneIds.length <= 1 &&
     state.elapsedMinutes === 0 &&
-    state.discoveredClueIds.length <= (scenario.hook.defaultInitialClues?.length ?? 0);
+    state.discoveredClueIds.length <= (initialClues?.length ?? 0);
   lines.push(
     `\n--- [剧本模式·开局勾子] ${isFirstTurn ? "**第一回合必须以此为起点**" : "(供后续场景引用,不得改写)"} ---`,
   );
@@ -84,11 +90,16 @@ export function buildScenarioContextBlock(
   if (hook.prologueMd?.trim()) {
     lines.push(`【hook.prologue 调查员是怎么被卷进来的】\n${hook.prologueMd.trim()}`);
   }
-  if (hook.callToActionMd?.trim()) {
-    lines.push(`【hook.call_to_action 第一回合开场时玩家此刻的物理位置 / 手中物件】\n${hook.callToActionMd.trim()}`);
+  if (callToAction) {
+    const variantTag = variant ? `(职业变体:${occupation})` : "";
+    lines.push(
+      `【hook.call_to_action 第一回合开场时玩家此刻的物理位置 / 手中物件】${variantTag}\n${callToAction}`,
+    );
   }
-  if (hook.defaultInitialClues?.length) {
-    lines.push(`【hook.default_initial_clues 开局即拥有的线索】 ${hook.defaultInitialClues.join(", ")}`);
+  if (initialClues?.length) {
+    lines.push(
+      `【hook.${variant ? "occupation_variants[" + occupation + "].initial_clues" : "default_initial_clues"} 开局即拥有的线索】 ${initialClues.join(", ")}`,
+    );
   }
 
   // -------- 当前场景:frame 全暴露 + freedom 全暴露 + forbidden 全暴露 --------
@@ -315,8 +326,14 @@ export function buildNarrativeStyleBlock(narrativeStyle: NarrativeStyle | undefi
 /**
  * 给 ScenarioState 一个干净的初始值,基于模组 hook + flags。
  * 切到 scenario-based 模式时由前端调一次。
+ *
+ * occupation:玩家所选职业(id 或中文名)。命中 hook.occupationVariants[occupation]
+ * 时使用该变体的 initialClues 作为开局线索;否则回落到 hook.defaultInitialClues。
  */
-export function initialScenarioState(scenario: Scenario): ScenarioState {
+export function initialScenarioState(
+  scenario: Scenario,
+  occupation?: string,
+): ScenarioState {
   const endingFlags: Record<string, boolean> = {};
   for (const flag of scenario.flags) {
     endingFlags[flag.id] = flag.initial;
@@ -325,17 +342,38 @@ export function initialScenarioState(scenario: Scenario): ScenarioState {
   for (const npc of scenario.npcs) {
     npcAttitude[npc.id] = npc.initialAttitude;
   }
+  const variant = resolveHookVariant(scenario.hook, occupation);
+  const initialClues = variant?.initialClues ?? scenario.hook.defaultInitialClues;
   return {
     moduleId: scenario.meta.id,
     currentSceneId: scenario.hook.startScene,
     visitedSceneIds: [scenario.hook.startScene],
-    discoveredClueIds: [...(scenario.hook.defaultInitialClues ?? [])],
+    discoveredClueIds: [...(initialClues ?? [])],
     unlockedSecretIds: [],
     npcAttitude,
     endingFlags,
     elapsedMinutes: 0,
     triggeredTimelineIds: [],
+    skillTicks: {},
+    grantedSan90Skills: {},
   };
+}
+
+/**
+ * 在 hook.occupationVariants 中按 id 或中文名查找命中的职业变体。
+ * 未配置 occupationVariants / occupation 缺失 / 都不命中 → 返回 undefined。
+ *
+ * 命中规则:
+ *   1. occupation 为 undefined 或空串 → undefined
+ *   2. occupation 与某个 key 完全相等 → 命中
+ *   3. 否则 → undefined(不做模糊匹配,保持模组作者控制权)
+ */
+export function resolveHookVariant(
+  hook: Scenario["hook"],
+  occupation?: string,
+): ScenarioHookOccupationVariant | undefined {
+  if (!occupation || !hook.occupationVariants) return undefined;
+  return hook.occupationVariants[occupation];
 }
 
 // ============================================================================
@@ -457,7 +495,7 @@ export interface ApplyScenarioActionsResult {
    * App.tsx 收到后合并到 finalScenarioEnd 链路(优先级低于 dead/insane/dying 闸,但
    * 高于 LLM 自行下发的 scenarioEnd)。
    */
-  autoEnding: { kind: ScenarioEndKind; epilogue?: string } | null;
+  autoEnding: { endingId: string; kind: ScenarioEndKind; epilogue?: string } | null;
 }
 
 /**
@@ -633,6 +671,7 @@ export function applyScenarioActions(
         );
       } else {
         result.autoEnding = {
+          endingId,
           kind: ending.frame.scenarioEndKind,
           epilogue: ending.frame.epilogueMd,
         };
@@ -662,9 +701,268 @@ export function applyScenarioActions(
     }
   }
 
+  // ------- 6. skillTick[] -------(经验阶段兜底通道)
+  if (actions.skillTick && actions.skillTick.length > 0) {
+    const skillIds = new Set(SKILL_REGISTRY_ALL.map((s) => s.id));
+    const nextTicks: Record<string, true> = { ...(working.skillTicks ?? {}) };
+    let mutated = false;
+    for (const entry of actions.skillTick) {
+      if (!entry || typeof entry.skillId !== "string") {
+        result.systemMarkers.push(
+          `[技能打勾非法·拒绝] skillTick 条目缺 skillId 字段或类型不对,跳过。`,
+        );
+        continue;
+      }
+      if (!skillIds.has(entry.skillId)) {
+        result.systemMarkers.push(
+          `[技能打勾非法·拒绝] 技能 id "${entry.skillId}" 不在 SKILL_REGISTRY_ALL,跳过。下一回合 skillTick 必须用合法 skill id。`,
+        );
+        continue;
+      }
+      if (nextTicks[entry.skillId]) {
+        // 已打过勾,静默跳过(同技能一场冒险只算一次)
+        continue;
+      }
+      nextTicks[entry.skillId] = true;
+      mutated = true;
+      result.systemMarkers.push(
+        `[技能打勾] ${entry.skillId}${entry.reason ? `(${entry.reason})` : ""}。本场冒险此技能已记录成功使用,经验阶段将参与成长检定。`,
+      );
+    }
+    if (mutated) {
+      working = { ...working, skillTicks: nextTicks };
+    }
+  }
+
   result.nextState = working;
   return result;
 }
+
+// ============================================================================
+// 经验阶段(Experience Phase)前端硬规则辅助
+// ============================================================================
+
+/**
+ * 玩家技能投骰成功后给该技能打勾(主路径)。
+ *
+ * - 同一个技能一场冒险只算一次,Record 自带去重(O(1))
+ * - 失败不打勾;大失败 / 普通失败都不算成功
+ * - 接受 skill id 或 nameZh:App.tsx 的 activeRoll.skillName 是中文名,直接传入即可
+ * - 未注册的(例如自由文本)直接不入册
+ *
+ * 调用方:App.tsx 在解析 KeeperResponse.rollRequest 的 outcome 后,若 outcome ∈
+ * {regular, hard, extreme} 则调一次。**克苏鲁神话**经验阶段不能成长,本函数也
+ * 会过滤(experience-phase.md §1 例外)。
+ */
+export function applySkillSuccessTick(
+  state: ScenarioState,
+  skillIdOrNameZh: string,
+): ScenarioState {
+  const def =
+    SKILL_REGISTRY_ALL.find((s) => s.id === skillIdOrNameZh) ??
+    SKILL_REGISTRY_ALL.find((s) => s.nameZh === skillIdOrNameZh);
+  if (!def) return state;
+  // 克苏鲁神话不参与经验阶段(experience-phase.md §1 例外)
+  if (def.id === "cthulhu-mythos") return state;
+  const prev = state.skillTicks ?? {};
+  if (prev[def.id]) return state;
+  return {
+    ...state,
+    skillTicks: { ...prev, [def.id]: true },
+  };
+}
+
+/**
+ * 经验阶段单技能成长检定结果。
+ *
+ * 规则(experience-phase.md §1):
+ *   - roll = 1d100,若 roll > current 或 roll ∈ [96,100] → 涨 1d10
+ *   - 否则不变
+ *   - 检定后该技能的勾去掉(由 finalizeExperiencePhase 一次性清空)
+ */
+export interface SkillGrowthRollResult {
+  skillId: string;
+  before: number;
+  after: number;
+  roll: number;
+  growthDie?: number;
+  passed: boolean;
+  /** 此次涨幅让该技能首次跨过 90,前端在 san90 模块结算时会读这个标志 */
+  crossedNinety: boolean;
+}
+
+/**
+ * 单技能跑一次经验检定。纯函数,需要外部喂随机数(便于测试 / 复盘)。
+ * 默认 random 用 Math.random,但测试时可注入固定 RNG。
+ */
+export function rollSkillGrowth(
+  skillId: string,
+  currentValue: number,
+  random: () => number = Math.random,
+): SkillGrowthRollResult {
+  const roll = Math.floor(random() * 100) + 1; // 1..100
+  const passed = roll > currentValue || roll >= 96;
+  if (!passed) {
+    return {
+      skillId,
+      before: currentValue,
+      after: currentValue,
+      roll,
+      passed: false,
+      crossedNinety: false,
+    };
+  }
+  const growthDie = Math.floor(random() * 10) + 1; // 1..10
+  // 项目硬规则:经验阶段加点后的技能值钳到 90,确保 PNG 角色卡跨实例可导入
+  // (CoC 7e RAW 创角阶段技能 ≤90)。若旧存档技能本就 >90,保持原值不退。
+  const after =
+    currentValue >= 90 ? currentValue : Math.min(90, currentValue + growthDie);
+  return {
+    skillId,
+    before: currentValue,
+    after,
+    roll,
+    growthDie,
+    passed: true,
+    crossedNinety: currentValue < 90 && after >= 90,
+  };
+}
+
+/**
+ * 经验阶段总结算的输入与输出。
+ *
+ * 输入:已 ticked 的技能 + 当前 sheet skills 数值表 + ending.frame.rewards 声明 +
+ *      grantedSan90Skills(避免重复发首次破 90 奖励)。
+ * 输出:每个技能的成长检定结果 + SAN 奖励明细 + 现金奖励 + 应写回的下一份
+ *      grantedSan90Skills,App.tsx 拿去更新 sheet。
+ */
+export interface ExperiencePhaseInput {
+  /** 已 ticked 的 skillId 列表(从 ScenarioState.skillTicks 转来) */
+  tickedSkillIds: string[];
+  /** 当前角色技能值表(键 = skillId,值 = 0~99 整数);克苏鲁神话不传也行(本函数会过滤) */
+  currentSkillValues: Record<string, number>;
+  /** ending.frame.rewards 解析结果(没有 rewards 则传 null) */
+  rewards: import("../data/modules/_schema/scenario").EndingRewards | null;
+  /** scenarioEnd kind,只在 victory / ambiguous 时发主线 SAN 奖励 */
+  endKind: ScenarioEndKind;
+  /** 已发放过的"首次破 90 +2d6 SAN"的 skill id 集合(从 ScenarioState.grantedSan90Skills 转来) */
+  alreadyGrantedSan90: Record<string, true>;
+  /** 当前模组 flag 状态;sanRewardConditions 据此判断要不要发 */
+  flags: Record<string, boolean>;
+  /** 注入随机源,便于测试;默认 Math.random */
+  random?: () => number;
+}
+
+export interface ExperiencePhaseOutcome {
+  /** 每个 ticked 技能的成长检定结果(失败也算) */
+  skillRolls: SkillGrowthRollResult[];
+  /** 经验阶段总 SAN 增益:主线 + 条件加成 + 首次破 90 奖励 */
+  sanGain: number;
+  /** SAN 增益明细,供 UI 展示 */
+  sanBreakdown: { source: string; amount: number; detail?: string }[];
+  /** 现金奖励(直接加到 sheet.cashBalance) */
+  cashGain: number;
+  /** 经验阶段后应写回 ScenarioState 的"已发首次破 90"档案 */
+  nextGrantedSan90: Record<string, true>;
+}
+
+/**
+ * 解析骰子公式或数字,返回该次的整数结果。
+ * 骰子公式("1d6", "2d4+1" 等)走项目 diceFormula.ts;纯整数直接返回。
+ */
+function rollDiceOrNumber(
+  formula: string | number,
+  random: () => number,
+): number {
+  if (typeof formula === "number") return Math.floor(formula);
+  // 内联简化的 diceFormula 解析,避免循环依赖。仅支持 "AdB" / "AdB+C" / "AdB-C" / 整数。
+  const trimmed = formula.trim().toLowerCase();
+  if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+  const match = trimmed.match(/^(\d+)d(\d+)([+-]\d+)?$/);
+  if (!match) return 0;
+  const count = parseInt(match[1], 10);
+  const faces = parseInt(match[2], 10);
+  const modifier = match[3] ? parseInt(match[3], 10) : 0;
+  let total = 0;
+  for (let i = 0; i < count; i++) {
+    total += Math.floor(random() * faces) + 1;
+  }
+  return total + modifier;
+}
+
+/**
+ * 跑完整经验阶段,返回 UI 可直接展示 + sheet 可直接写回的结算结果。
+ *
+ * 注意:本函数纯函数,不修改入参;App.tsx 拿到结果再 setState。
+ */
+export function runExperiencePhase(input: ExperiencePhaseInput): ExperiencePhaseOutcome {
+  const random = input.random ?? Math.random;
+  const skillRolls: SkillGrowthRollResult[] = [];
+  const sanBreakdown: { source: string; amount: number; detail?: string }[] = [];
+  const nextGrantedSan90: Record<string, true> = { ...input.alreadyGrantedSan90 };
+  let sanGain = 0;
+  let cashGain = 0;
+
+  // 1. 技能成长检定(跳过克苏鲁神话)
+  for (const skillId of input.tickedSkillIds) {
+    if (skillId === "cthulhu-mythos") continue;
+    const before = input.currentSkillValues[skillId] ?? 0;
+    const result = rollSkillGrowth(skillId, before, random);
+    skillRolls.push(result);
+    if (result.crossedNinety && !nextGrantedSan90[skillId]) {
+      // experience-phase.md §2:首次破 90 → +2d6 SAN
+      const bonus = rollDiceOrNumber("2d6", random);
+      sanGain += bonus;
+      sanBreakdown.push({
+        source: `「${skillId}」首次突破 90`,
+        amount: bonus,
+        detail: "+2d6 SAN(经验阶段精通奖励)",
+      });
+      nextGrantedSan90[skillId] = true;
+    }
+  }
+
+  // 2. ending rewards.skillGrowth=false 时跳过(rewards 缺失时也跳过技能与 SAN 奖励)
+  //    但技能勾本身的检定已在上面跑完——是否进入 UI 由调用方判断
+  if (input.rewards) {
+    // 3. 主线 SAN 奖励:仅 victory / ambiguous 触发
+    if (input.rewards.sanRewardFormula !== undefined &&
+        (input.endKind === "victory" || input.endKind === "ambiguous")) {
+      const baseSan = rollDiceOrNumber(input.rewards.sanRewardFormula, random);
+      sanGain += baseSan;
+      sanBreakdown.push({
+        source: "完成模组主线",
+        amount: baseSan,
+        detail: typeof input.rewards.sanRewardFormula === "number"
+          ? undefined
+          : `骰 ${input.rewards.sanRewardFormula}`,
+      });
+    }
+
+    // 4. 条件 SAN 奖励
+    if (input.rewards.sanRewardConditions) {
+      for (const cond of input.rewards.sanRewardConditions) {
+        // 无 flag → 无条件加成;有 flag → 命中才发
+        if (cond.flag !== undefined && !input.flags[cond.flag]) continue;
+        const amount = rollDiceOrNumber(cond.formula, random);
+        sanGain += amount;
+        sanBreakdown.push({
+          source: cond.label,
+          amount,
+          detail: typeof cond.formula === "number" ? undefined : `骰 ${cond.formula}`,
+        });
+      }
+    }
+
+    // 5. 现金奖励
+    if (typeof input.rewards.cashReward === "number" && input.rewards.cashReward > 0) {
+      cashGain = Math.floor(input.rewards.cashReward);
+    }
+  }
+
+  return { skillRolls, sanGain, sanBreakdown, cashGain, nextGrantedSan90 };
+}
+
 
 function checkExitGate(
   exit: SceneExit,

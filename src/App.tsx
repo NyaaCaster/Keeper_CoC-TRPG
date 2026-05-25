@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   CharacterSheet,
+  CharacterSkills,
   ChatMessage,
   ClueItem,
   RollRequest,
@@ -22,6 +23,8 @@ import EffectRollModal from "./components/EffectRollModal";
 import MadnessIntCheckModal from "./components/MadnessIntCheckModal";
 import CharacterSheetPanel from "./components/CharacterSheetPanel";
 import CluesNotebook, { ImageViewer } from "./components/CluesNotebook";
+import ExperiencePhaseModal from "./components/ExperiencePhaseModal";
+import { findSkill, SKILL_REGISTRY_ALL } from "./data/cocSkills";
 import {
   Shield,
   MessageSquare,
@@ -79,7 +82,10 @@ import {
   buildScenarioContextBlock,
   buildNarrativeStyleBlock,
   applyScenarioActions,
+  applySkillSuccessTick,
   initialScenarioState,
+  runExperiencePhase,
+  type ExperiencePhaseOutcome,
 } from "./lib/scenarioRuntime";
 import type { RollContext as RollContextForScenario } from "./lib/scenarioRuntime";
 import type { Scenario } from "./data/modules/_schema/scenario";
@@ -341,6 +347,25 @@ export default function App() {
     onResolve: (result: DiceFormulaResult) => void;
   } | null>(null);
 
+  /**
+   * 经验阶段挂起态。剧本模式 victory / ambiguous 触发,且 ending.frame.rewards.skillGrowth=true 时
+   * 由 applyKeeperResponse 算好 outcome 推入;玩家在弹窗里点"确认领取"后写回 sheet 与 scenarioState。
+   */
+  const [pendingExperiencePhase, setPendingExperiencePhase] = useState<{
+    outcome: ExperiencePhaseOutcome;
+    endingTitle: string;
+    endingKind: "victory" | "ambiguous";
+    /** 玩家确认时把这份"应该写到 ScenarioState.grantedSan90Skills"的更新合并回去 */
+    nextGrantedSan90: Record<string, true>;
+    /**
+     * 入口时预先算好的「奖励落账后的最终 sheet」。
+     * 用途:① 玩家在结算页点「下载更新后的角色卡 PNG」时直接走 downloadCharacterCard
+     *       ② onConfirm 写回 character 时直接套用本对象,保证下载到的卡片与最终 sheet 一致
+     * 入口处对 skills 应用 ≤90 钳制,跨实例 PNG 导入安全。
+     */
+    pendingSheet: CharacterSheet;
+  } | null>(null);
+
   // Scenery parameters from keeper
   const [currentLocation, setCurrentLocation] =
     useState<string>("古木教堂的隐秘密道");
@@ -387,7 +412,7 @@ export default function App() {
     if (isScenario) {
       const scenario = context.scenario!;
       setGameMode("scenario-based");
-      const initState = initialScenarioState(scenario);
+      const initState = initialScenarioState(scenario, chosenChar.occupation);
       initialScenarioStateForKeeper = initState;
       setScenarioState(initState);
       const startScene = scenario.scenes.find((s) => s.id === scenario.hook.startScene);
@@ -864,7 +889,7 @@ export default function App() {
       const scenarioBlock =
         effectiveGameMode === "scenario-based" && effectiveScenario && effectiveScenarioState
           ? buildScenarioModeBlock() +
-            buildScenarioContextBlock(effectiveScenario, effectiveScenarioState) +
+            buildScenarioContextBlock(effectiveScenario, effectiveScenarioState, activeChar.occupation) +
             buildNarrativeStyleBlock(effectiveScenario.narrativeStyle)
           : "";
       const systemInstruction =
@@ -1495,7 +1520,7 @@ export default function App() {
     // 仅当 gameMode === "scenario-based" 且持有合法 scenario + scenarioState 时才处理;
     // llm-generated 模式下 LLM 不应下发本字段,即使下了也直接忽略。
     let scenarioAutoEnding:
-      | { kind: "victory" | "ambiguous" | "dead" | "insane"; epilogue?: string }
+      | { endingId: string; kind: "victory" | "ambiguous" | "dead" | "insane"; epilogue?: string }
       | null = null;
     if (
       gameMode === "scenario-based" &&
@@ -1597,6 +1622,70 @@ export default function App() {
     ) {
       setActiveRoll(null);
       setActiveSanity(null);
+      // 剧本模式 victory / ambiguous + ending.frame.rewards.skillGrowth=true → 推经验阶段弹窗
+      if (
+        (finalScenarioEnd.kind === "victory" || finalScenarioEnd.kind === "ambiguous") &&
+        gameMode === "scenario-based" &&
+        activeScenario &&
+        scenarioState &&
+        scenarioAutoEnding?.endingId
+      ) {
+        const ending = activeScenario.endings.find((e) => e.id === scenarioAutoEnding!.endingId);
+        if (ending && ending.frame.rewards?.skillGrowth) {
+          // 把 sheet.skills(键 = nameZh)映射为 skillId 表
+          const currentSkillValues: Record<string, number> = {};
+          for (const def of SKILL_REGISTRY_ALL) {
+            const v = character?.skills?.[def.nameZh];
+            if (typeof v === "number") currentSkillValues[def.id] = v;
+          }
+          const outcome = runExperiencePhase({
+            tickedSkillIds: Object.keys(scenarioState.skillTicks ?? {}),
+            currentSkillValues,
+            rewards: ending.frame.rewards,
+            endKind: finalScenarioEnd.kind,
+            alreadyGrantedSan90: scenarioState.grantedSan90Skills ?? {},
+            flags: scenarioState.endingFlags,
+          });
+          // 预先合成"奖励落账后的 sheet",供 modal 下载按钮与 onConfirm 写回共享。
+          // 双重 90 钳制:rollSkillGrowth 内部已钳到 90,这里再保险地兜底,
+          // 确保下载到的 PNG 在所有实现里都能通过严格 RAW 90 校验导入。
+          const pendingSheet: CharacterSheet | null = character
+            ? (() => {
+                const nextSkills: CharacterSkills = { ...character.skills };
+                for (const r of outcome.skillRolls) {
+                  if (!r.passed || r.after === r.before) continue;
+                  const def = findSkill(r.skillId);
+                  if (!def) continue;
+                  nextSkills[def.nameZh] = Math.min(90, r.after);
+                }
+                const sanLimit = character.maxSanLimit ?? character.maxSan;
+                const nextSan = Math.min(
+                  sanLimit,
+                  Math.max(0, character.san + outcome.sanGain),
+                );
+                const nextCash = Math.max(
+                  0,
+                  (character.cashBalance ?? 0) + outcome.cashGain,
+                );
+                return {
+                  ...character,
+                  skills: nextSkills,
+                  san: nextSan,
+                  cashBalance: nextCash,
+                };
+              })()
+            : null;
+          if (pendingSheet) {
+            setPendingExperiencePhase({
+              outcome,
+              endingTitle: ending.title,
+              endingKind: finalScenarioEnd.kind,
+              nextGrantedSan90: outcome.nextGrantedSan90,
+              pendingSheet,
+            });
+          }
+        }
+      }
       return;
     }
     // 终局态(dying)→ 同样不弹任何 modal,但保留输入框给玩家发送遗言。
@@ -1929,6 +2018,20 @@ export default function App() {
         difficulty: activeRoll.difficulty,
         successType: result.successType,
       };
+      // 经验阶段·硬规则主路径:成功(普通/困难/极难)→ 给该技能打勾,
+      // 同技能一场冒险只算一次。失败/大失败不打勾。仅 scenario-based 模式生效。
+      if (
+        gameMode === "scenario-based" &&
+        scenarioState &&
+        (result.successType === "regular" ||
+          result.successType === "hard" ||
+          result.successType === "extreme")
+      ) {
+        const next = applySkillSuccessTick(scenarioState, activeRoll.skillName);
+        if (next !== scenarioState) {
+          setScenarioState(next);
+        }
+      }
     }
     setActiveRoll(null);
     let messagesAfterClear: ChatMessage[] | null = null;
@@ -3185,6 +3288,69 @@ export default function App() {
                 targetValue={pendingMadnessCheck.targetValue}
                 sanLoss={Math.abs(sanDiff) || 5}
                 onResolve={(passed) => pendingMadnessCheck.onResolve(passed)}
+              />
+            )}
+
+            {/* 剧本模式经验阶段结算弹窗(victory / ambiguous + skillGrowth=true 触发) */}
+            {pendingExperiencePhase && (
+              <ExperiencePhaseModal
+                key="modal_experience_phase"
+                outcome={pendingExperiencePhase.outcome}
+                endingTitle={pendingExperiencePhase.endingTitle}
+                endingKind={pendingExperiencePhase.endingKind}
+                pendingSheet={pendingExperiencePhase.pendingSheet}
+                onConfirm={() => {
+                  const ep = pendingExperiencePhase;
+                  // 1. 写回 character — 直接套用入口处算好的 pendingSheet,
+                  //    保证下载的 PNG 与运行时 sheet 严格一致。
+                  setCharacter(ep.pendingSheet);
+                  // 2. 写回 ScenarioState:更新 grantedSan90Skills + 清空 skillTicks
+                  if (scenarioState) {
+                    setScenarioState({
+                      ...scenarioState,
+                      grantedSan90Skills: ep.nextGrantedSan90,
+                      skillTicks: {},
+                    });
+                  }
+                  // 3. 系统消息记账
+                  const lines: string[] = [];
+                  const passedRolls = ep.outcome.skillRolls.filter(
+                    (r) => r.passed && r.after > r.before,
+                  );
+                  if (passedRolls.length > 0) {
+                    lines.push(
+                      `[经验阶段] 技能成长:${passedRolls
+                        .map((r) => {
+                          const def = findSkill(r.skillId);
+                          // 显示用 pendingSheet 的最终值(已 ≤90 钳制),与下载 PNG 一致
+                          const finalAfter = def
+                            ? ep.pendingSheet.skills[def.nameZh] ?? r.after
+                            : r.after;
+                          return `${def?.nameZh ?? r.skillId} ${r.before}→${finalAfter}`;
+                        })
+                        .join("、")}`,
+                    );
+                  }
+                  if (ep.outcome.sanGain > 0) {
+                    lines.push(`[经验阶段] SAN +${ep.outcome.sanGain}`);
+                  }
+                  if (ep.outcome.cashGain > 0) {
+                    lines.push(`[经验阶段] 现金 +$${ep.outcome.cashGain.toLocaleString()}`);
+                  }
+                  if (lines.length > 0) {
+                    const baseTs = Date.now();
+                    setMessages((prev) => [
+                      ...prev,
+                      ...lines.map((line, i) => ({
+                        id: `sys_exp_${baseTs}_${i}`,
+                        sender: "system" as const,
+                        timestamp: new Date().toLocaleTimeString(),
+                        text: line,
+                      })),
+                    ]);
+                  }
+                }}
+                onDismiss={() => setPendingExperiencePhase(null)}
               />
             )}
 

@@ -32,6 +32,8 @@ import type {
   ClueDiscovery,
   Difficulty,
   Ending,
+  EndingRewards,
+  EndingSanRewardCondition,
   EndingTrigger,
   Era,
   FiresWhen,
@@ -52,6 +54,7 @@ import type {
   ScenarioDifficultyTier,
   ScenarioEndKind,
   ScenarioHook,
+  ScenarioHookOccupationVariant,
   ScenarioMeta,
   Scene,
   SceneExit,
@@ -105,7 +108,7 @@ export function validateScenario(raw: unknown): ValidationResult {
   }
 
   const meta = parseMeta(raw["meta"], "meta", push);
-  const hook = parseHook(raw["hook"], "hook", push);
+  const hook = parseHook(raw["hook"], "hook", push, warn);
   const scenes = parseScenes(raw["scenes"], "scenes", push, warn);
   const npcs = parseNpcs(raw["npcs"], "npcs", push);
   const clues = parseClues(raw["clues"], "clues", push, warn);
@@ -360,7 +363,12 @@ function parseStartTime(
 // §3 hook
 // ============================================================================
 
-function parseHook(value: unknown, path: string, push: Issue): ScenarioHook | null {
+function parseHook(
+  value: unknown,
+  path: string,
+  push: Issue,
+  warn: Issue,
+): ScenarioHook | null {
   if (!isPlainObject(value)) {
     push(path, `必须是对象。`);
     return null;
@@ -381,11 +389,43 @@ function parseHook(value: unknown, path: string, push: Issue): ScenarioHook | nu
       ? undefined
       : parseStringArray(defaultInitialClues, `${path}.default_initial_clues`, push, true);
 
+  // occupation_variants:Record<occupationKey, { call_to_action_md, initial_clues? }>
+  let occupationVariants: Record<string, ScenarioHookOccupationVariant> | undefined;
+  const variantsRaw = value["occupation_variants"];
+  if (variantsRaw !== undefined && variantsRaw !== null) {
+    if (!isPlainObject(variantsRaw)) {
+      push(`${path}.occupation_variants`, `必须是 { occupation: { call_to_action_md, initial_clues? } } 对象。`);
+    } else {
+      occupationVariants = {};
+      for (const [occKey, entry] of Object.entries(variantsRaw)) {
+        const ep = `${path}.occupation_variants.${occKey}`;
+        if (!isPlainObject(entry)) {
+          push(ep, `必须是对象。`);
+          continue;
+        }
+        const cta = isNonEmptyString(entry["call_to_action_md"])
+          ? entry["call_to_action_md"]
+          : (push(`${ep}.call_to_action_md`, `必填且非空。`), "");
+        const initRaw = entry["initial_clues"];
+        const initialClues =
+          initRaw === undefined
+            ? undefined
+            : parseStringArray(initRaw, `${ep}.initial_clues`, push, true);
+        occupationVariants[occKey] = { callToActionMd: cta, initialClues };
+      }
+      if (Object.keys(occupationVariants).length === 0) {
+        warn(`${path}.occupation_variants`, `声明了 occupation_variants 但为空对象,等同于未声明。`);
+        occupationVariants = undefined;
+      }
+    }
+  }
+
   return {
     startScene,
     prologueMd,
     callToActionMd,
     defaultInitialClues: defaultInitialCluesArr,
+    occupationVariants,
   };
 }
 
@@ -1320,6 +1360,13 @@ function parseEnding(value: unknown, path: string, push: Issue): Ending | null {
     }
   }
   const experiencePhase = frameRaw["experience_phase"];
+  const rewards = parseEndingRewards(frameRaw["rewards"], `${path}.frame.rewards`, push);
+  if (rewards && (sanReward !== undefined || experiencePhase !== undefined)) {
+    push(
+      `${path}.frame`,
+      `rewards 与旧字段 san_reward / experience_phase 不能并存——rewards 已是结构化新字段,请只保留一种(推荐 rewards)。`,
+    );
+  }
   const scenarioEndKind = parseScenarioEndKind(
     frameRaw["scenario_end_kind"],
     `${path}.frame.scenario_end_kind`,
@@ -1352,10 +1399,84 @@ function parseEnding(value: unknown, path: string, push: Issue): Ending | null {
       epilogueMd,
       sanReward,
       experiencePhase: experiencePhase === undefined ? undefined : Boolean(experiencePhase),
+      rewards,
       scenarioEndKind,
     },
     freedom,
     forbidden,
+  };
+}
+
+function parseEndingRewards(
+  value: unknown,
+  path: string,
+  push: Issue,
+): EndingRewards | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isPlainObject(value)) {
+    push(path, `必须是对象。`);
+    return undefined;
+  }
+
+  const skillGrowthRaw = value["skill_growth"];
+  if (typeof skillGrowthRaw !== "boolean") {
+    push(`${path}.skill_growth`, `必填,必须是 true | false。`);
+  }
+
+  let sanRewardFormula: string | number | undefined;
+  const sanRaw = value["san_reward_formula"];
+  if (sanRaw !== undefined && sanRaw !== null) {
+    const formula = parseDiceFormula(sanRaw, `${path}.san_reward_formula`, push, true);
+    if (formula !== undefined) {
+      sanRewardFormula = /^\d+$/.test(formula) ? Number(formula) : formula;
+    }
+  }
+
+  let sanRewardConditions: EndingSanRewardCondition[] | undefined;
+  const condsRaw = value["san_reward_conditions"];
+  if (condsRaw !== undefined && condsRaw !== null) {
+    const arr = asArray(condsRaw);
+    if (!arr) {
+      push(`${path}.san_reward_conditions`, `必须是数组。`);
+    } else {
+      sanRewardConditions = [];
+      arr.forEach((entry, idx) => {
+        const ep = `${path}.san_reward_conditions[${idx}]`;
+        if (!isPlainObject(entry)) {
+          push(ep, `必须是对象。`);
+          return;
+        }
+        const label = isNonEmptyString(entry["label"])
+          ? entry["label"]
+          : (push(`${ep}.label`, `必填,玩家可见的奖励名称。`), "");
+        const flag =
+          entry["flag"] === undefined
+            ? undefined
+            : isNonEmptyString(entry["flag"])
+              ? entry["flag"]
+              : (push(`${ep}.flag`, `必须是 flag id 字符串。`), undefined);
+        const formulaParsed = parseDiceFormula(entry["formula"], `${ep}.formula`, push, false);
+        const formula =
+          formulaParsed === undefined
+            ? "0"
+            : /^\d+$/.test(formulaParsed)
+              ? Number(formulaParsed)
+              : formulaParsed;
+        sanRewardConditions!.push({ label, flag, formula });
+      });
+    }
+  }
+
+  let cashReward: number | undefined;
+  if (value["cash_reward"] !== undefined && value["cash_reward"] !== null) {
+    cashReward = parseInteger(value["cash_reward"], `${path}.cash_reward`, push, { min: 0 });
+  }
+
+  return {
+    skillGrowth: skillGrowthRaw === true,
+    sanRewardFormula,
+    sanRewardConditions,
+    cashReward,
   };
 }
 
@@ -1697,6 +1818,27 @@ function validateReferences(s: CollectedScenario, push: Issue, warn: Issue) {
       }
     });
   }
+  if (s.hook.occupationVariants) {
+    // 收集 era 表里允许的 occupation 集(id + 中文名)做命中检查
+    const recommendedSet = new Set<string>(s.meta.recommendedOccupations);
+    for (const [occKey, variant] of Object.entries(s.hook.occupationVariants)) {
+      const vp = `hook.occupation_variants.${occKey}`;
+      // 软警告:variant key 应当出现在 recommended_occupations 中,否则玩家选择
+      // 该职业时无法触发该变体
+      if (!recommendedSet.has(occKey)) {
+        warn(
+          vp,
+          `key "${occKey}" 未出现在 meta.recommended_occupations 中,玩家选择该职业时不会命中此变体。`,
+        );
+      }
+      // initial_clues 引用必须存在
+      variant.initialClues?.forEach((cid, ci) => {
+        if (!clueIds.has(cid)) {
+          push(`${vp}.initial_clues[${ci}]`, `引用未声明的 clue "${cid}"。`);
+        }
+      });
+    }
+  }
 
   // ---- scenes ----
   s.scenes.forEach((scene, i) => {
@@ -1841,6 +1983,15 @@ function validateReferences(s: CollectedScenario, push: Issue, warn: Issue) {
     end.triggers.forEach((t, j) => {
       if (!flagIds.has(t.flag)) {
         push(`endings[${i}].triggers[${j}].flag`, `引用未声明的 flag "${t.flag}"。`);
+      }
+    });
+    // rewards.sanRewardConditions[*].flag 必须引用合法 flag
+    end.frame.rewards?.sanRewardConditions?.forEach((cond, j) => {
+      if (cond.flag && !flagIds.has(cond.flag)) {
+        push(
+          `endings[${i}].frame.rewards.san_reward_conditions[${j}].flag`,
+          `引用未声明的 flag "${cond.flag}"。`,
+        );
       }
     });
   });

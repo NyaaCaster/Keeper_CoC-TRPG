@@ -83,11 +83,34 @@ hook:
     给玩家朗读的楔子(KP 第一回合 narrative 的素材)。
     LLM 必须在第一回合用这段文字的精神开场,允许文风改写。
   call_to_action_md: |
-    调查员被卷入此事的钩子。
+    调查员被卷入此事的钩子(顶层版本,所有职业默认共享)。
   default_initial_clues: []            # 选填,开局即入册的线索 id 列表
+
+  # 选填。按职业分叉的卷入动机与开局线索。
+  # 用于"多路线导入"模组(如警察/侦探/记者/摄影师/神秘学家各异):
+  # - prologue_md 仍由所有 PC 共享(只描场景情景,不写动机)
+  # - 玩家选定 occupation 后,运行时优先取 occupation_variants[选定职业]
+  #   未命中则回落到顶层 call_to_action_md / default_initial_clues
+  # - key 必须与 cocOccupations.ts 对应 era 表里的 occupation id 或中文名一致
+  #   推荐用与 meta.recommended_occupations 完全一致的中文名
+  occupation_variants:
+    "警探":
+      call_to_action_md: |
+        同期警官受到对褄列村"杀害儿童"的匿名举报困扰,委托你以普通游客身份暗访。
+      initial_clues: [clue.kondo_anonymous_call]   # 选填;独享的开局线索
+    "私家侦探":
+      call_to_action_md: |
+        受富裕家庭老妇人之托,调查长子未婚妻在三县交界"乡田家"的家系背景。
+    "记者":
+      call_to_action_md: |
+        报社"风评被害"特辑,前往"自古多畸形作物"的褄列村取材。
 ```
 
-**校验**:`start_scene` 必须存在于 `scenes` 中。
+**校验**:
+- `start_scene` 必须存在于 `scenes` 中。
+- `occupation_variants` 的 key 不在 `meta.recommended_occupations` 里时只做软警告(模组作者可能故意加冷门兜底变体)。
+- `occupation_variants[*].initial_clues` 中的每个 id 必须存在于 `clues` 中(硬错误)。
+- `occupation_variants` 顶层若是空对象 `{}` 视为软警告——无意义声明。
 
 ---
 
@@ -440,9 +463,23 @@ endings:
     frame:
       epilogue_md: |
         固定结局文本,LLM 必须按精神写出 narrative,允许文风改写。
-      san_reward: 1D6                          # 选填,scenarioEnd 时前端结算
-      experience_phase: true                   # 是否进入经验阶段
       scenario_end_kind: victory               # victory | ambiguous | dead | insane
+
+      # 结构化奖励声明(推荐写法)。运行时由 ExperiencePhaseModal 结算。
+      rewards:
+        skill_growth: true                     # 必填。是否进入 7e 经验阶段
+                                               # (技能成长检定 + 首次破 90 +2d6 SAN)
+        san_reward_formula: 1d10               # 选填。主线 SAN 奖励,无条件发放
+                                               # 仅在 victory / ambiguous 时触发
+                                               # 支持骰子公式或纯整数
+        san_reward_conditions:                 # 选填。按 flag 命中追加的条件 SAN
+          - label: 击退神话生物                  # 显示给玩家的奖励名
+            flag: flag.starcolour-repelled     # 选填。命中此 flag 时发放
+            formula: 1d6
+          - label: 救出关键 NPC
+            flag: flag.npc-yoko-survived
+            formula: 3                         # 纯整数也支持
+        cash_reward: 500                       # 选填。直接加到 sheet.cashBalance
 
     freedom:
       atmosphere_md: 黎明、鸟鸣、村民隔窗张望
@@ -456,7 +493,18 @@ endings:
 **校验**:
 - 至少存在一个 `victory`/`ambiguous`
 - 每个 ending 的 triggers 至少有一条**理论可达路径**(校验器从可设置 flag 的来源做可达性分析)
-- `san_reward` 通过 `diceFormula.ts` 解析校验
+- `rewards.san_reward_formula` 与 `rewards.san_reward_conditions[*].formula` 通过 `diceFormula.ts` 解析校验
+- `rewards.san_reward_conditions[*].flag` 必须引用 `flags` 中已声明的 id(硬错误)
+- `rewards.skill_growth` 缺失或非 boolean 视为硬错误
+
+**字段迁移**(v1.0 → 推荐):
+
+| 已废弃字段 | 推荐写法 | 说明 |
+|---|---|---|
+| `frame.san_reward` | `frame.rewards.san_reward_formula` | 主线 SAN 奖励 |
+| `frame.experience_phase` | `frame.rewards.skill_growth` | 是否进入经验阶段 |
+
+`rewards` 与已废弃字段(`san_reward` / `experience_phase`)**不能并存**——并存时 validator 直接报错。
 
 ---
 
