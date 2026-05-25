@@ -163,7 +163,7 @@ src/data/
       └─ <module-id>/          ← 各模组目录（meta.id 必须等于目录名;已落 `one-nest-of-trouble` / `tsumasaki-kidan`)
 scripts/
   ├─ validate-modules.ts       ← 扫描模组、调 validator、检查资产存在性；prebuild 钩子
-  └─ test-validator.ts         ← validator 43 用例自测（最小样例 + 故意失败 + narrative_style + recommended_occupations + preset_investigators 必填字段三连 + ending.rewards 三连）
+  └─ test-validator.ts         ← validator 46 用例自测（最小样例 + 故意失败 + narrative_style + recommended_occupations + recommended 布尔三连 + preset_investigators 必填字段三连 + ending.rewards 三连）
 .docs/                         ← 项目内规范与决策文档(下面单列重要的几篇)
 .docs/.work/                   ← 给 Claude Code 看的工作简报(本文所在地)
 ```
@@ -186,7 +186,7 @@ scripts/
 | 测试命令 | `.docs/testing-commands.md` —— `[sys_test]` sentinel 注入投骰/效果骰演练 |
 | 模组 schema | `.docs/scenario-schema.md` —— 「基于剧本游戏模式」frame/freedom/forbidden 三槽 + 全字段语义；schema_version=1；§15 是预设调查员 |
 | 模组图像资产 | `.docs/scenario-schema.md` 第 11.1 节 —— 封面 ≤ 120 KB / 800 px,场景 ≤ 200 KB / 1024 px,JPEG q82,单模组累计 ≤ 3 MB |
-| 模组转写硬规则 | `.docs/scenario-schema.md` §15.3 —— 外部导入模组时,`meta.recommended_occupations` 必填、`preset_investigators` 在原作有 pre-gens 时必须落卡 |
+| 模组转写硬规则 | `.docs/scenario-schema.md` §15.3 —— 外部导入模组时,`meta.recommended_occupations` 必填、`meta.recommended` 必填布尔、`preset_investigators` 在原作有 pre-gens 时必须落卡 |
 
 ## 常见坑（容易踩、踩了贵）
 
