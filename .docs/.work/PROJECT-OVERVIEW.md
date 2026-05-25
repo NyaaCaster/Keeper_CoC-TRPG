@@ -143,7 +143,7 @@ src/lib/
   └─ rollCancellation.ts       ← 投骰取消机制
 src/components/
   ├─ StartScreen.tsx           ← 起始页 + 存档列表
-  ├─ CharacterCreator.tsx      ← 角色创建(预设 / 自动 / Custom PC 槽位制)
+  ├─ CharacterCreator.tsx      ← 角色创建(预设 / 自动 / Custom PC 槽位制;剧本模式 preset_investigators >3 张时按 3 张/页 翻页)
   ├─ CharacterSheetPanel.tsx   ← 跑团时的角色卡侧栏
   ├─ CluesNotebook.tsx         ← 线索本
   ├─ RollDiceModal.tsx         ← 双十面骰动画(含命运博弈唤起)
@@ -156,7 +156,7 @@ src/data/
   ├─ cocOccupations.ts         ← 职业模板 + coreSkills 五种 kind 表达
   ├─ cocWeapons.ts             ← 武器结构化条目
   ├─ presets.ts                ← 18 张预设调查员
-  └─ modules/                  ← 「基于剧本游戏模式」模组数据基座。已落:`one-nest-of-trouble`(首模组) / `tsumasaki-kidan`(褄列奇谈,封闭乡村·星之彩,含 §14 narrative_style 与单人补偿 NPC `npc.kuze-mei`)
+  └─ modules/                  ← 「基于剧本游戏模式」模组数据基座。已落:`one-nest-of-trouble`(首模组) / `tsumasaki-kidan`(褄列奇谈,封闭乡村·星之彩,6 张 preset_investigators 对应 A-F 路线,含 §14 narrative_style 与单人补偿 NPC `npc.kuze-mei`)
       ├─ _schema/
       │   ├─ scenario.ts       ← Scenario TS SSOT(camelCase；含 §12 PresetInvestigator + §14 narrative_style；详见 .docs/scenario-schema.md）
       │   └─ validator.ts      ← yaml(snake_case)→TS(camelCase) + 引用完整性 + BFS + 结局可达性 + recommendedOccupations/presetInvestigators 跨表校验
