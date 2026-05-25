@@ -70,13 +70,24 @@ docker rebuild + 进游戏走一遍 hook → 序幕 → 第一幕
 
 ## 3 · Step 1:必填铁律(违反则 prebuild 拒绝构建 / 演出会崩)
 
-以下 6 条是**金标准范例 `tsumasaki-kidan` 都已落实**的最小要求。任何后续模组转写都必须满足——若原作没明写,转写者**自行补**;不允许"先填一半,等以后补"。
+以下 7 条是**金标准范例 `tsumasaki-kidan` 都已落实**的最小要求。任何后续模组转写都必须满足——若原作没明写,转写者**自行补**;不允许"先填一半,等以后补"。
 
 ### 3.1 `meta.recommended_occupations` 必填(≥ 1 项)
 
 schema 强制校验。原作有"建议职业列表" → 原样落;只有几段口头描述 → 按"委托型 / 学术型 / 媒体型 / 执法型"分类推断 3~8 个合理职业。**宁少勿杂**——委托型开局优先调查/执法/媒体线;校园背景允许辅以教授/医师/神秘学家。
 
-### 3.2 `preset_investigators` 在原作有 pre-gens 时必须落卡
+### 3.2 `meta.recommended` 默认写 `false`(主推位由项目维护者人工开)
+
+`meta.recommended` 是模组在选模界面是否进入"推荐"位的开关——**与"是否完成转写""模组质量是否达标"无关**,纯粹是项目维护者的主推决策。
+
+转写规则:
+
+- 新导入的模组,`meta.recommended` 一律写 **`false`**(包括从 PDF / docx / 翻译稿落进项目的所有模组)
+- 不要因为"我觉得这个模组很精彩"就自行写 `true` —— 主推位的开关由用户/项目维护者在合并前后人工切换
+- 当前金标准 `tsumasaki-kidan` 与首发模组 `one-nest-of-trouble` 写 `true`,是因为它们由维护者明确指定为主推;**新模组没有得到同等指定前一律 false**
+- 字段必填(schema 强制),不允许省略——只是默认值是 `false`,不是空
+
+### 3.3 `preset_investigators` 在原作有 pre-gens 时必须落卡
 
 判定原则(见 `.docs/scenario-schema.md` §15.3):
 
@@ -86,7 +97,7 @@ schema 强制校验。原作有"建议职业列表" → 原样落;只有几段�
 
 **`tsumasaki-kidan` 的做法**:6 张日本身份预设调查员,与 `hook.occupation_variants` 的 A–F 路线一一对应(警探/警员同卡 → 私家侦探 → 记者 → 摄影师 → 神秘学家 → 教授兜底)。**这种"卡 ↔ 路线 ↔ 卷入动机"三层联锁是金标准**——后续模组若有 pre-gens,优先按这种结构落;若卡数 ≠ 职业数,允许 1 张卡覆盖 2 个相邻职业(如警探/警员)。
 
-### 3.3 `preset_investigators[i].items` 必填(剧本预设调查员严禁全员空背包)
+### 3.4 `preset_investigators[i].items` 必填(剧本预设调查员严禁全员空背包)
 
 每张预设调查员卡按职业身份至少补 **4~7 件非武器道具**(警徽 / 录音笔 / 相机 / 笔记本 / 委托资料 / 护身符 / 急救包 / 备用弹匣 等)。这些道具是 LLM 在叙事中调用的"身份切入点"与"剧情勾连物"——空背包会让前几回合的调查动作失去根。
 
@@ -98,7 +109,7 @@ schema 强制校验。原作有"建议职业列表" → 原样落;只有几段�
 
 参照 `tsumasaki-kidan/scenario.yaml` 6 张卡(警探带警徽 + 录音笔 + 弹匣;摄影师带胶片相机 + 备用胶卷 + 三脚架;教授带田野笔记 + 录音笔 + 教员证;等等)。
 
-### 3.4 `name / age / gender / nationality / identity / background_story_md / occupation` 字段锁
+### 3.5 `name / age / gender / nationality / identity / background_story_md / occupation` 字段锁
 
 剧本模式下这 7 项**完全锁定,LLM 不允许覆盖**。必须在模组转写期就**完整定稿**,否则 schema 校验会拒。
 
@@ -107,7 +118,7 @@ schema 强制校验。原作有"建议职业列表" → 原样落;只有几段�
 - `gender` / `nationality` / `identity` 都是必填非空——日本模组的 PC 国籍写"日本",身份写完整职业名 + 单位
 - `background_story_md` 选填但**强烈建议**写完整——这是 LLM 拼 PC 内心独白的语料源,缺它叙事会扁平
 
-### 3.5 单人补偿 NPC 的"视野盲区 / 介入边界 / 道德底线"三层规则
+### 3.6 单人补偿 NPC 的"视野盲区 / 介入边界 / 道德底线"三层规则
 
 若模组属于"原设计为多人团但允许单人开跑"的类型(`tsumasaki-kidan` 即如此),需在某位关键 NPC 上落"单人补偿"机制——参照 `npc.kuze-mei`:
 
@@ -120,7 +131,7 @@ schema 强制校验。原作有"建议职业列表" → 原样落;只有几段�
 
 这五条 / 六条**作为 `npc.frame.public_persona_md` + `npc.frame.voice_guidelines` 的明文铁规则**写进数据,LLM 必读。
 
-### 3.6 序幕场景的"互动门槛 + 时间锁"
+### 3.7 序幕场景的"互动门槛 + 时间锁"
 
 若模组开局是"班车 / 火车 / 邮船 / 旅店大堂"这类**封闭强叙事场景**(`tsumasaki-kidan` 的 `scene.bus-onboard` 即如此),要在 `scene.frame.forbidden` 里钉死:
 
@@ -257,6 +268,7 @@ bash ./rebuild.sh
 
 - [ ] `npm run validate:modules` 全绿(49 用例 + 模组扫描)
 - [ ] `meta.recommended_occupations` ≥ 1 项,且与 `hook.occupation_variants` keys 对齐
+- [ ] `meta.recommended` 写 `false`(新模组默认不上主推位,主推位由项目维护者人工切换)
 - [ ] 原作有 pre-gens → `preset_investigators` 逐张落卡;原作没有 → `preset_investigators` 省略
 - [ ] 每张 `preset_investigators[i]` 都有 `items`(4~7 件,职业身份道具)
 - [ ] 每张 `preset_investigators[i]` 的 `name / age / gender / nationality / identity / occupation` 全部非空

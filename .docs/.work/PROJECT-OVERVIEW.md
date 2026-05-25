@@ -156,11 +156,11 @@ src/data/
   ├─ cocOccupations.ts         ← 职业模板 + coreSkills 五种 kind 表达
   ├─ cocWeapons.ts             ← 武器结构化条目
   ├─ presets.ts                ← 18 张预设调查员
-  └─ modules/                  ← 「基于剧本游戏模式」模组数据基座。已落:`one-nest-of-trouble`(首模组) / **`tsumasaki-kidan`**(褄列奇谈,封闭乡村·星之彩,**当前金标准范例**——6 张 preset_investigators 对应 A-F 路线,含 §14 narrative_style + 单人补偿 NPC `npc.kuze-mei` + 序幕 5 次互动门槛)
+  └─ modules/                  ← 「基于剧本游戏模式」模组数据基座。已落:`one-nest-of-trouble`(首模组) / **`tsumasaki-kidan`**(褄列奇谈,封闭乡村·星之彩,**当前金标准范例**——6 张 preset_investigators 对应 A-F 路线,含 §14 narrative_style + 单人补偿 NPC `npc.kuze-mei` + 序幕 5 次互动门槛) / `manteia-daughters`(曼提亚的女儿们,1920s 希腊海岛·阿布霍斯之种,3 张 HO 卡 + 13 场景 + 47 线索)
       ├─ _schema/
       │   ├─ scenario.ts       ← Scenario TS SSOT(camelCase；含 §12 PresetInvestigator + §14 narrative_style；详见 .docs/scenario-schema.md）
       │   └─ validator.ts      ← yaml(snake_case)→TS(camelCase) + 引用完整性 + BFS + 结局可达性 + recommendedOccupations/presetInvestigators 跨表校验
-      └─ <module-id>/          ← 各模组目录（meta.id 必须等于目录名;已落 `one-nest-of-trouble` / `tsumasaki-kidan`)
+      └─ <module-id>/          ← 各模组目录（meta.id 必须等于目录名;已落 `one-nest-of-trouble` / `tsumasaki-kidan` / `manteia-daughters`)
 scripts/
   ├─ validate-modules.ts       ← 扫描模组、调 validator、检查资产存在性；prebuild 钩子
   └─ test-validator.ts         ← validator 49 用例自测（最小样例 + 故意失败 + narrative_style + recommended_occupations + recommended 布尔三连 + preset_investigators 必填字段三连 + preset_investigators.items 三连 + ending.rewards 三连）

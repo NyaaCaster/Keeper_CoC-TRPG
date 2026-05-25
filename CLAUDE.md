@@ -56,11 +56,12 @@
 ### 必填铁律(违反则 prebuild 拒绝构建 / 演出会崩)
 
 1. **`meta.recommended_occupations` 必填(≥ 1 项)** —— 原作没明写则按 hook 推断 3~8 个合理职业,宁少勿杂
-2. **原作有 pre-gens → `preset_investigators` 逐张落卡;原作没有 → 留空** —— 判定原则见 `.docs/scenario-schema.md` §15.3
-3. **每张 `preset_investigators[i]` 必须有 `items`(4~7 件职业身份道具),严禁全员空背包** —— 武器槽允许空(文职 PC 不带枪合理),但**道具槽不允许全空**;单条 text 长度 ∈ [1, 40],`weapons.length + items.length ≤ 8`
-4. **`name / age / gender / nationality / identity / occupation` 在剧本模式下完全锁定 LLM 不允许覆盖** —— 必须在转写期完整定稿,日本模组 `nationality` 写"日本",身份写完整职业名 + 单位
-5. **序幕场景必须在 `scene.frame.forbidden` 里钉死"互动门槛 + timeline 前置条件 + 自报姓名禁令 + 超自然禁令"** —— 参照 `tsumasaki-kidan` 的 `scene.bus-onboard`(5 次互动到站门槛)
-6. **单人补偿 NPC(若有)必须写齐"视野盲区 / 第一次现身触发 / 姓名披露 / 道德底线消失"四条铁规则** —— 参照 `tsumasaki-kidan` 的 `npc.kuze-mei`;若该 NPC 设计上有性别反差,把"披露门槛"按层钉死(声音 → 自报姓名 → 公开身份)
+2. **`meta.recommended` 默认写 `false`** —— 新导入的模组一律 `false`(不上主推位);主推位的开关由项目维护者在合并前后人工切换,**不要**因为"我觉得这个模组很精彩"自行写 `true`
+3. **原作有 pre-gens → `preset_investigators` 逐张落卡;原作没有 → 留空** —— 判定原则见 `.docs/scenario-schema.md` §15.3
+4. **每张 `preset_investigators[i]` 必须有 `items`(4~7 件职业身份道具),严禁全员空背包** —— 武器槽允许空(文职 PC 不带枪合理),但**道具槽不允许全空**;单条 text 长度 ∈ [1, 40],`weapons.length + items.length ≤ 8`
+5. **`name / age / gender / nationality / identity / occupation` 在剧本模式下完全锁定 LLM 不允许覆盖** —— 必须在转写期完整定稿,日本模组 `nationality` 写"日本",身份写完整职业名 + 单位
+6. **序幕场景必须在 `scene.frame.forbidden` 里钉死"互动门槛 + timeline 前置条件 + 自报姓名禁令 + 超自然禁令"** —— 参照 `tsumasaki-kidan` 的 `scene.bus-onboard`(5 次互动到站门槛)
+7. **单人补偿 NPC(若有)必须写齐"视野盲区 / 第一次现身触发 / 姓名披露 / 道德底线消失"四条铁规则** —— 参照 `tsumasaki-kidan` 的 `npc.kuze-mei`;若该 NPC 设计上有性别反差,把"披露门槛"按层钉死(声音 → 自报姓名 → 公开身份)
 
 ### 工作流
 
