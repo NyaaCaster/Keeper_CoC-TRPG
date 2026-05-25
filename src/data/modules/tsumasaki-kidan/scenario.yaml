@@ -10,7 +10,7 @@ meta:
   era: modern
   language: zh-CN
   difficulty: 高强度
-  tags: [日式恐怖, 闭幕村庄, 心理战, 杀婴习俗, 星之彩]
+  tags: [日式恐怖, 闭幕村庄, 心理战]
   cover: assets/cover.jpg
   start_time: { game_day: 1, hour: "09:00" }
   synopsis_md: |

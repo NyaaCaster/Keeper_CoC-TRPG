@@ -10,7 +10,7 @@ meta:
   era: modern
   language: zh-CN
   difficulty: 标准
-  tags: [都市, 调查, 食尸鬼, 精神病院]
+  tags: [都市, 调查, 精神病院]
   cover: assets/cover.jpg
   start_time: { game_day: 1, hour: "10:00" }
   synopsis_md: |
