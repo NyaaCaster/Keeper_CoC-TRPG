@@ -22,6 +22,11 @@ services:
       # required if you want generated images to remain reachable from
       # other devices/networks.
       IMAGE_PUBLIC_BASE_URL: "${IMAGE_PUBLIC_BASE_URL:-}"
+      # Reverse-proxy trust setting passed to Express's `trust proxy`. Default
+      # ("loopback, linklocal, uniquelocal") covers nginx on the same host and
+      # Docker bridge networks. Override only when the proxy hops sit on a
+      # public range — see .docs/nginx-reverse-proxy.md.
+      TRUST_PROXY: "${TRUST_PROXY:-loopback, linklocal, uniquelocal}"
     ports:
       # host:container — host port 3093 was selected by the user from the
       # free slots in 3090-3099. Container always listens on 3000.

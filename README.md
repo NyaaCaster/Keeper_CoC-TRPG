@@ -137,6 +137,11 @@ docker compose up -d --build
 |---|---|
 | `NYAACHAT_MCP_TOKEN` | 配上后掷骰走 NyaaChat-MCP 真随机；留空则回落到本地骰子实现 |
 | `IMAGE_PUBLIC_BASE_URL` | 公网根，决定 `cache/images/*` URL 的前缀；不配会回落到请求 origin（仅适合 localhost） |
+| `TRUST_PROXY` | Express `trust proxy` 设置；默认 `loopback, linklocal, uniquelocal`，覆盖同机 nginx 与 docker bridge。**仅在反代位于其它网段时才需要覆盖**，详见 [`.docs/nginx-reverse-proxy.md`](.docs/nginx-reverse-proxy.md) |
+
+### nginx 反向代理
+
+想把本项目挂到自有域名（如 `https://keeper.example.com`），完整步骤、site 配置样例、验证清单与常见坑见 [`.docs/nginx-reverse-proxy.md`](.docs/nginx-reverse-proxy.md)。最简版本：在 `.env` 写 `IMAGE_PUBLIC_BASE_URL=https://keeper.example.com` → `rebuild` → 在 nginx 里 `proxy_pass http://127.0.0.1:3093` 并透传 `X-Forwarded-*` 头。
 
 ### 快速重建脚本
 

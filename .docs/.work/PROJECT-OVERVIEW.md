@@ -230,7 +230,8 @@ Windows 特有坑：
 - 默认沟通语言：**简体中文**（代码 / 标识符 / commit message 仍用英文）
 - 容器内 Express 监听 `0.0.0.0:3000`，对外 `3093:3000`
 - 镜像缓存 volume：`keeper_image_cache`
-- 可选环境变量：`NYAACHAT_MCP_TOKEN`（MCP 真随机骰）、`IMAGE_PUBLIC_BASE_URL`（图像公网根）
+- 可选环境变量：`NYAACHAT_MCP_TOKEN`（MCP 真随机骰）、`IMAGE_PUBLIC_BASE_URL`（图像公网根，反代必填）、`TRUST_PROXY`（Express `trust proxy`，默认 `loopback, linklocal, uniquelocal`）
+- 反代部署见 [`.docs/nginx-reverse-proxy.md`](../nginx-reverse-proxy.md)
 
 ## 自检：开新会话前 30 秒清单
 

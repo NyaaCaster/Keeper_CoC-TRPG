@@ -19,6 +19,23 @@ app.use(express.json({ limit: "10mb" }));
 const DEV_MODE = process.env.NODE_ENV !== "production";
 const PORT = 3000;
 
+// Trust X-Forwarded-* headers when the request comes through a reverse proxy
+// (nginx / Cloudflare / Docker host network). Without this, req.protocol,
+// req.hostname and req.ip see the proxy hop instead of the original client.
+//
+// Defaults to "loopback, linklocal, uniquelocal" — covers nginx on the same
+// host (127.0.0.1, ::1), Docker bridge networks (172.16/12, 10/8) and IPv6
+// link-local. Override via TRUST_PROXY when the proxy is somewhere else:
+//   TRUST_PROXY=1                -> trust the first hop (single-proxy setup)
+//   TRUST_PROXY=true             -> trust every hop (only behind a fully trusted edge)
+//   TRUST_PROXY=10.0.0.0/8,1.2.3.4 -> explicit CIDR / IP list
+// See https://expressjs.com/en/guide/behind-proxies.html for the full spec.
+const trustProxyRaw = (process.env.TRUST_PROXY ?? "loopback, linklocal, uniquelocal").trim();
+if (trustProxyRaw === "true") app.set("trust proxy", true);
+else if (trustProxyRaw === "false" || trustProxyRaw === "") app.set("trust proxy", false);
+else if (/^\d+$/.test(trustProxyRaw)) app.set("trust proxy", Number(trustProxyRaw));
+else app.set("trust proxy", trustProxyRaw);
+
 const QINY_BASE_URLS = {
   com: "https://openai.chatnewai.com/v1",
   icu: "https://love.qinyan.icu/v1",
@@ -38,15 +55,20 @@ const IMAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 // Resolve the public base URL used to mint cache image URLs.
 //   1. If IMAGE_PUBLIC_BASE_URL is set, use it as-is. Recommended for any
 //      deployment that wants generated clue images to remain reachable from
-//      other devices/networks.
+//      other devices/networks (and required for any reverse-proxy setup so
+//      the localStorage allowlist matches the public origin exactly).
 //   2. Otherwise, derive it from the incoming request's origin so a community
 //      user can still run the project on localhost without any configuration.
 //      Trade-off: those URLs only work from the same machine.
+//
+//   When fronted by a reverse proxy, req.protocol / req.hostname / req.get('host')
+//   already follow X-Forwarded-* once `app.set('trust proxy', ...)` is on
+//   (configured at the top of this file via TRUST_PROXY).
 function resolveImagePublicBaseUrl(req: express.Request): string {
   const fromEnv = (process.env.IMAGE_PUBLIC_BASE_URL || "").trim();
   if (fromEnv) return fromEnv.replace(/\/+$/, "");
-  const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "http";
-  const host = (req.headers["x-forwarded-host"] as string) || req.get("host") || `127.0.0.1:${PORT}`;
+  const proto = req.protocol || "http";
+  const host = req.get("host") || `127.0.0.1:${PORT}`;
   return `${proto}://${host}`;
 }
 
