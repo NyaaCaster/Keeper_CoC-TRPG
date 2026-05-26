@@ -15,6 +15,7 @@ import tsumasakiKidan from "./tsumasaki-kidan/module";
 import manteiaDaughters from "./manteia-daughters/module";
 import falseBuddha from "./false-buddha/module";
 import doNotWakeSleepingCat from "./do-not-wake-sleeping-cat/module";
+import shepherdsLegacy from "./shepherds-legacy/module";
 import type { Scenario } from "./_schema/scenario";
 
 export const MODULE_REGISTRY: Record<string, Scenario> = {
@@ -23,6 +24,7 @@ export const MODULE_REGISTRY: Record<string, Scenario> = {
   [manteiaDaughters.meta.id]: manteiaDaughters,
   [falseBuddha.meta.id]: falseBuddha,
   [doNotWakeSleepingCat.meta.id]: doNotWakeSleepingCat,
+  [shepherdsLegacy.meta.id]: shepherdsLegacy,
 };
 
 export function getModuleById(id: string): Scenario | undefined {
