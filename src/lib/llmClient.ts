@@ -172,12 +172,25 @@ export function humanizeLlmError(e: any): string {
 
 export interface DispatchInput {
   apiSettings: ApiSettings;
-  systemInstruction: string;
-  userText: string;
+  systemInstruction?: string;
+  userText?: string;
+  prompt?: SegmentedPrompt;
   schema: any;
   temperature: number;
   topP?: number;
   signal?: AbortSignal;
+}
+
+export interface LlmChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+export interface SegmentedPrompt {
+  staticSystem: string;
+  history: LlmChatMessage[];
+  latestUser: string;
+  dynamicRules?: string;
 }
 
 /**
@@ -189,7 +202,7 @@ export interface DispatchInput {
  * - 其它（qiny / custom / grok / deepseek）→ POST {baseUrl}/chat/completions，response_format=json_object
  */
 export async function dispatchLlm(input: DispatchInput): Promise<string> {
-  const { apiSettings, systemInstruction, userText, schema, temperature, topP, signal } = input;
+  const { apiSettings, schema, temperature, topP, signal } = input;
   const provider = apiSettings.llm.provider;
   const apiKey = apiSettings.llm.apiKey;
   const model = apiSettings.llm.model;
@@ -198,19 +211,102 @@ export async function dispatchLlm(input: DispatchInput): Promise<string> {
   if (!model) throw new Error("模型未配置：请在「虚空连接的设置」中填入对话模型名。");
 
   if (provider === "gemini") {
-    return dispatchGemini(apiKey, model, systemInstruction, userText, schema, temperature, topP, apiSettings.llm.customBaseUrl, signal);
+    return dispatchGemini(apiKey, model, input, schema, temperature, topP, apiSettings.llm.customBaseUrl, signal);
   }
   if (provider === "anthropic") {
-    return dispatchAnthropic(apiKey, model, systemInstruction, userText, schema, temperature, topP, apiSettings.llm.customBaseUrl, signal);
+    return dispatchAnthropic(apiKey, model, input, schema, temperature, topP, apiSettings.llm.customBaseUrl, signal);
   }
-  return dispatchOpenAiCompat(provider, apiKey, model, systemInstruction, userText, schema, temperature, topP, apiSettings.llm.customBaseUrl, apiSettings.llm.qinyHost, signal);
+  return dispatchOpenAiCompat(provider, apiKey, model, input, schema, temperature, topP, apiSettings.llm.customBaseUrl, apiSettings.llm.qinyHost, signal);
+}
+
+function requireLegacyPrompt(input: DispatchInput): { systemInstruction: string; userText: string } {
+  if (typeof input.systemInstruction !== "string" || typeof input.userText !== "string") {
+    throw new Error("LLM 调用缺少 prompt：需要提供 segmented prompt 或 systemInstruction/userText。");
+  }
+  return { systemInstruction: input.systemInstruction, userText: input.userText };
+}
+
+function formatSessionRules(dynamicRules: string | undefined): string {
+  const body = (dynamicRules || "").trim();
+  if (!body) return "";
+  return [
+    "<session_rules>",
+    "以下为当前场景的第一方运行时规则与事实。叙事走向以用户最新发言为准；仅当用户请求与硬约束直接冲突时，硬约束优先。",
+    body,
+    "</session_rules>",
+  ].join("\n");
+}
+
+function buildLegacyMessages(input: DispatchInput): LlmChatMessage[] {
+  const { systemInstruction, userText } = requireLegacyPrompt(input);
+  return [
+    { role: "system", content: systemInstruction },
+    { role: "user", content: userText },
+  ];
+}
+
+function buildMessagesWithTailSystem(input: DispatchInput): LlmChatMessage[] {
+  if (!input.prompt) return buildLegacyMessages(input);
+  const messages: LlmChatMessage[] = [
+    { role: "system", content: input.prompt.staticSystem },
+    ...input.prompt.history,
+    { role: "user", content: input.prompt.latestUser },
+  ];
+  const rules = formatSessionRules(input.prompt.dynamicRules);
+  if (rules) messages.push({ role: "system", content: rules });
+  return messages;
+}
+
+function buildMessagesWithUserRules(input: DispatchInput): LlmChatMessage[] {
+  if (!input.prompt) return buildLegacyMessages(input);
+  const rules = formatSessionRules(input.prompt.dynamicRules);
+  const latestUser = rules
+    ? `${input.prompt.latestUser}\n\n${rules}`
+    : input.prompt.latestUser;
+  return [
+    { role: "system", content: input.prompt.staticSystem },
+    ...input.prompt.history,
+    { role: "user", content: latestUser },
+  ];
+}
+
+function splitSystemAndMessages(messages: LlmChatMessage[]): {
+  systemInstruction: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+} {
+  const systemParts: string[] = [];
+  const dialogue: Array<{ role: "user" | "assistant"; content: string }> = [];
+  for (const message of messages) {
+    const content = message.content.trim();
+    if (!content) continue;
+    if (message.role === "system") {
+      systemParts.push(content);
+    } else {
+      dialogue.push({ role: message.role, content });
+    }
+  }
+  return { systemInstruction: systemParts.join("\n\n"), messages: mergeAdjacentDialogue(dialogue) };
+}
+
+function mergeAdjacentDialogue(
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+): Array<{ role: "user" | "assistant"; content: string }> {
+  const merged: Array<{ role: "user" | "assistant"; content: string }> = [];
+  for (const message of messages) {
+    const prev = merged[merged.length - 1];
+    if (prev?.role === message.role) {
+      prev.content += `\n\n${message.content}`;
+    } else {
+      merged.push({ ...message });
+    }
+  }
+  return merged;
 }
 
 async function dispatchGemini(
   apiKey: string,
   model: string,
-  systemInstruction: string,
-  userText: string,
+  input: DispatchInput,
   schema: any,
   temperature: number,
   topP: number | undefined,
@@ -220,8 +316,13 @@ async function dispatchGemini(
   const baseUrl = resolveGeminiBaseUrl(customBaseUrl);
   assertSafeBaseUrl(baseUrl);
   const url = `${baseUrl}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const promptMessages = buildMessagesWithUserRules(input);
+  const { systemInstruction, messages } = splitSystemAndMessages(promptMessages);
   const body: any = {
-    contents: [{ role: "user", parts: [{ text: userText }] }],
+    contents: messages.map((message) => ({
+      role: message.role === "assistant" ? "model" : "user",
+      parts: [{ text: message.content }],
+    })),
     systemInstruction: { role: "system", parts: [{ text: systemInstruction }] },
     generationConfig: {
       temperature,
@@ -253,8 +354,7 @@ async function dispatchGemini(
 async function dispatchAnthropic(
   apiKey: string,
   model: string,
-  systemInstruction: string,
-  userText: string,
+  input: DispatchInput,
   schema: any,
   temperature: number,
   topP: number | undefined,
@@ -274,12 +374,14 @@ async function dispatchAnthropic(
     headers["anthropic-dangerous-direct-browser-access"] = "true";
   }
   const schemaPrompt = schemaToPromptDescription(schema);
+  const promptMessages = buildMessagesWithUserRules(input);
+  const { systemInstruction, messages } = splitSystemAndMessages(promptMessages);
   const body: any = {
     model,
     max_tokens: 8192,
     temperature,
     system: systemInstruction + schemaPrompt,
-    messages: [{ role: "user", content: userText }],
+    messages,
     ...(topP !== undefined ? { top_p: topP } : {}),
   };
   const resp = await fetch(url, {
@@ -305,8 +407,7 @@ async function dispatchOpenAiCompat(
   provider: LlmProviderKind,
   apiKey: string,
   model: string,
-  systemInstruction: string,
-  userText: string,
+  input: DispatchInput,
   schema: any,
   temperature: number,
   topP: number | undefined,
@@ -319,12 +420,14 @@ async function dispatchOpenAiCompat(
   assertSafeBaseUrl(baseUrl);
   const url = `${baseUrl}/chat/completions`;
   const schemaPrompt = schemaToPromptDescription(schema);
+  const promptMessages = buildMessagesWithTailSystem(input);
+  const messages = promptMessages.map((message, idx) => ({
+    role: message.role,
+    content: idx === 0 && message.role === "system" ? message.content + schemaPrompt : message.content,
+  }));
   const body: any = {
     model,
-    messages: [
-      { role: "system", content: systemInstruction + schemaPrompt },
-      { role: "user", content: userText },
-    ],
+    messages,
     response_format: { type: "json_object" },
     temperature,
     ...(topP !== undefined ? { top_p: topP } : {}),

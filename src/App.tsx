@@ -64,13 +64,13 @@ import { dispatchLlm, humanizeLlmError } from "./lib/llmClient";
 import {
   SYSTEM_INSTRUCTION,
   loadDynamicInstructions,
-  buildKeeperContext,
   buildElementSandboxLimiter,
   buildCombatDerivedBlock,
   buildInventoryBlock,
   buildScenarioModeBlock,
   sanitizeKeeperResponse,
 } from "./lib/keeperPrompt";
+import { buildKeeperSegmentedPrompt } from "./lib/keeperPromptBuilder";
 import { KEEPER_RESPONSE_SCHEMA } from "./lib/llmSchemas";
 import SettingsPanel from "./components/SettingsPanel";
 import { WebGameSave, ApiSettings } from "./types";
@@ -523,7 +523,7 @@ export default function App() {
 
     // 终局闸:dying 状态下,玩家本次发言即"遗言/挣扎"窗口结束,
     // 接下来 LLM 必须二选一(救起 / 死亡)。在玩家消息后追加一条系统提示,
-    // 由 buildKeeperContext 透传给 LLM。规则 9 已经在 SYSTEM_INSTRUCTION 里展开,
+    // 由 Keeper prompt builder 透传给 LLM。规则 9 已经在 SYSTEM_INSTRUCTION 里展开,
     // 这里只放精简提示,触发 LLM 进入二选一模式。
     const dyingGateMsgs: ChatMessage[] = [];
     if (currentStatus === "dying") {
@@ -881,8 +881,10 @@ export default function App() {
     const effectiveGameMode = scenarioOverride?.gameMode ?? gameMode;
     const effectiveScenario = scenarioOverride?.scenario ?? activeScenario;
     const effectiveScenarioState = scenarioOverride?.scenarioState ?? scenarioState;
-    let lastUserText: string | undefined;
-    let lastSystemInstructionLength: number | undefined;
+    let lastLatestUserText: string | undefined;
+    let lastStaticSystemLength: number | undefined;
+    let lastDynamicRulesLength: number | undefined;
+    let lastHistoryMessageCount: number | undefined;
 
     try {
       const dynamicInstructions = await loadDynamicInstructions();
@@ -892,16 +894,21 @@ export default function App() {
             buildScenarioContextBlock(effectiveScenario, effectiveScenarioState, activeChar.occupation) +
             buildNarrativeStyleBlock(effectiveScenario.narrativeStyle)
           : "";
-      const systemInstruction =
-        SYSTEM_INSTRUCTION +
+      const dynamicRules =
         dynamicInstructions +
         buildElementSandboxLimiter(tmEnabled, scpEnabled) +
         buildCombatDerivedBlock(activeChar) +
         buildInventoryBlock(activeChar) +
         scenarioBlock;
-      const userText = buildKeeperContext(currentHistory);
-      lastUserText = userText;
-      lastSystemInstructionLength = systemInstruction.length;
+      const keeperPrompt = buildKeeperSegmentedPrompt({
+        staticSystemInstruction: SYSTEM_INSTRUCTION,
+        dynamicRules,
+        history: currentHistory,
+      });
+      lastLatestUserText = keeperPrompt.latestUser;
+      lastStaticSystemLength = keeperPrompt.staticSystem.length;
+      lastDynamicRulesLength = dynamicRules.length;
+      lastHistoryMessageCount = keeperPrompt.history.length;
 
       addLog({
         direction: "request",
@@ -913,20 +920,21 @@ export default function App() {
           features: { typemoon: tmEnabled, scp: scpEnabled },
           gameMode: effectiveGameMode,
           scenarioId: effectiveScenario?.meta.id,
-          systemInstructionLength: systemInstruction.length,
-          userTextLength: userText.length,
+          staticSystemLength: keeperPrompt.staticSystem.length,
+          dynamicRulesLength: dynamicRules.length,
+          historyMessageCount: keeperPrompt.history.length,
+          historyTextLength: keeperPrompt.history.reduce((sum, msg) => sum + msg.content.length, 0),
+          latestUserLength: keeperPrompt.latestUser.length,
           temperature: 0.85,
           topP: 0.95,
           schemaPresent: true,
-          systemInstruction,
-          userText,
+          prompt: keeperPrompt,
         },
       });
 
       const textOutput = await dispatchLlm({
         apiSettings,
-        systemInstruction,
-        userText,
+        prompt: keeperPrompt,
         schema: KEEPER_RESPONSE_SCHEMA,
         temperature: 0.85,
         topP: 0.95,
@@ -996,9 +1004,11 @@ export default function App() {
           errorStatus: httpStatus,
           errorBody: httpBody,
           errorStack: stackPreview,
-          systemInstructionLength: lastSystemInstructionLength,
-          userTextLength: lastUserText?.length,
-          userTextPreview: lastUserText?.slice(0, 1200),
+          staticSystemLength: lastStaticSystemLength,
+          dynamicRulesLength: lastDynamicRulesLength,
+          historyMessageCount: lastHistoryMessageCount,
+          latestUserLength: lastLatestUserText?.length,
+          latestUserPreview: lastLatestUserText?.slice(0, 1200),
           msgCount: currentHistory.length,
           features: { typemoon: tmEnabled, scp: scpEnabled },
         },
