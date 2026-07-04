@@ -1,7 +1,66 @@
 import { WebGameSave } from "../types";
 import { getImagePublicPrefix } from "./publicConfig";
+import { getItem, setItem } from "./idbStorage";
 
 const SAVES_KEY = "keeper_game_saves";
+
+/**
+ * 内存缓存 —— IndexedDB 是异步的，而 App 初始化 / StartScreen 渲染是同步读，
+ * 所以在 bootstrap 时 hydrateSaves() 从 IDB 填充此缓存，之后 getAllSaves() 同步
+ * 读缓存、saveGame()/deleteSave() 先改缓存再异步落盘（fire-and-forget）。
+ * 未 hydrate 时（cache === null）退化为一次同步 localStorage 读，保证极端时序下不空。
+ */
+let cache: WebGameSave[] | null = null;
+
+function parseSaves(raw: string | null): WebGameSave[] {
+  if (!raw) return [];
+  try {
+    const saves: WebGameSave[] = JSON.parse(raw);
+    if (!Array.isArray(saves)) return [];
+    return saves.map(migrateLegacySave);
+  } catch (e) {
+    console.error("Failed to parse saves", e);
+    return [];
+  }
+}
+
+/** bootstrap 时调用一次：从 IDB 读入缓存。IDB 无数据时回退读 localStorage（迁移前的兜底）。 */
+export async function hydrateSaves(): Promise<void> {
+  try {
+    let raw = await getItem(SAVES_KEY);
+    if (raw == null) {
+      try {
+        raw = localStorage.getItem(SAVES_KEY);
+      } catch {
+        raw = null;
+      }
+    }
+    cache = parseSaves(raw);
+  } catch (e) {
+    console.error("Failed to hydrate saves", e);
+    cache = [];
+  }
+}
+
+function ensureCache(): WebGameSave[] {
+  if (cache !== null) return cache;
+  // 未 hydrate 的兜底：同步读 localStorage（仅在极端时序或 IDB 不可用时命中）。
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(SAVES_KEY);
+  } catch {
+    raw = null;
+  }
+  cache = parseSaves(raw);
+  return cache;
+}
+
+function persist(saves: WebGameSave[]): void {
+  // fire-and-forget 异步落盘；失败仅记录，不阻塞 UI。
+  void setItem(SAVES_KEY, JSON.stringify(saves)).catch((e) =>
+    console.error("Failed to persist saves to IDB", e),
+  );
+}
 
 /**
  * 读时迁移:老存档没有 gameMode,统一视为 llm-generated。
@@ -40,22 +99,13 @@ function sanitizeForStorage(save: WebGameSave): WebGameSave {
 }
 
 export function getAllSaves(): WebGameSave[] {
-  try {
-    const data = localStorage.getItem(SAVES_KEY);
-    if (!data) return [];
-    const saves: WebGameSave[] = JSON.parse(data);
-    return saves
-      .map(migrateLegacySave)
-      .sort((a, b) => b.lastUpdated - a.lastUpdated);
-  } catch (e) {
-    console.error("Failed to load saves", e);
-    return [];
-  }
+  const saves = ensureCache();
+  return [...saves].sort((a, b) => b.lastUpdated - a.lastUpdated);
 }
 
 export function saveGame(save: WebGameSave) {
   const cleaned = sanitizeForStorage(save);
-  const saves = getAllSaves();
+  const saves = ensureCache();
   const existingIdx = saves.findIndex((s) => s.id === cleaned.id);
 
   if (existingIdx >= 0) {
@@ -64,17 +114,13 @@ export function saveGame(save: WebGameSave) {
     saves.push(cleaned);
   }
 
-  try {
-    localStorage.setItem(SAVES_KEY, JSON.stringify(saves));
-  } catch (e) {
-    console.error("Failed to write to local storage", e);
-  }
+  persist(saves);
 }
 
 export function deleteSave(saveId: string) {
-  const saves = getAllSaves();
-  const filtered = saves.filter(s => s.id !== saveId);
-  localStorage.setItem(SAVES_KEY, JSON.stringify(filtered));
+  const filtered = ensureCache().filter((s) => s.id !== saveId);
+  cache = filtered;
+  persist(filtered);
 }
 
 export function generateTimestamp(): string {

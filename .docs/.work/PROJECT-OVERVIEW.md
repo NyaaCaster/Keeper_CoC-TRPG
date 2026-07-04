@@ -45,7 +45,7 @@ LLM **只**承担守密人（Keeper / KP）一个智能体身份：叙事、设�
 
 ```
 浏览器 React App
-  ├─ apiSettings (localStorage 里的 key/model/host/baseUrl)
+  ├─ apiSettings (IndexedDB 中的 key/model/host/baseUrl；bootstrap hydrate 后同步读)
   ├─ src/lib/keeperPrompt.ts → 拼 systemInstruction
   ├─ src/lib/llmSchemas.ts   → 拼 KeeperResponse 的 JSON Schema
   └─ src/lib/llmClient.ts    → 直连上游
@@ -55,7 +55,7 @@ LLM **只**承担守密人（Keeper / KP）一个智能体身份：叙事、设�
                         qiny / custom / grok / deepseek
 ```
 
-**重要**：`server.ts` **不再代理 LLM**。自 commit `547270a refactor: move llm dispatch to browser, drop server-side keys` 起，所有 LLM 凭据只存在浏览器 localStorage，每次请求随 body 一起发。**不要往服务端加任何 API Key 持久化逻辑**。
+**重要**：`server.ts` **不再代理 LLM**。自 commit `547270a refactor: move llm dispatch to browser, drop server-side keys` 起，所有 LLM 凭据只存在浏览器 IndexedDB（`keeper_api_settings`），每次请求随 body 一起发。**不要往服务端加任何 API Key 持久化逻辑**。
 
 服务端只剩三类活：
 
@@ -132,8 +132,9 @@ src/lib/
   ├─ keeperPrompt.ts           ← SYSTEM_INSTRUCTION + 上下文/装备/派生战斗值块
   ├─ llmClient.ts              ← 浏览器侧 LLM 调度器(三类供应商分发)
   ├─ llmSchemas.ts             ← KeeperResponse 的 JSON Schema
-  ├─ apiSettings.ts            ← localStorage 中的 API 配置读写 + 校验
-  ├─ saveManager.ts            ← localStorage 多存档管理
+  ├─ apiSettings.ts            ← IndexedDB 中的 API 配置读写 + 校验（缓存+hydrate+异步落盘）
+  ├─ saveManager.ts            ← IndexedDB 多存档管理（缓存+hydrate+异步落盘）
+  ├─ idbStorage.ts             ← 原生 IndexedDB KV 封装（零依赖，对标 localStorage 接口）
   ├─ cocRules.ts               ← 派生战斗值 / 起始现金 / 突破点 / SAN 上限等规则函数
   ├─ cocSkillSlots.ts          ← Custom PC 槽位展开
   ├─ cocSkillRandomizer.ts     ← 自动流/一键随机点池分配

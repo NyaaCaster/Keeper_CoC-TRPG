@@ -7,8 +7,62 @@ import {
   resolveQinyBaseUrl,
 } from "../types";
 import { generateTimestamp } from "./saveManager";
+import { getItem, setItem } from "./idbStorage";
 
 const STORAGE_KEY = "keeper_api_settings";
+
+/** 内存缓存 —— bootstrap 时 hydrateApiSettings() 从 IDB 填充，之后同步读、异步落盘。 */
+let cache: ApiSettings | null = null;
+
+/** bootstrap 时调用一次：从 IDB 读入缓存。IDB 无数据时回退读 localStorage。 */
+export async function hydrateApiSettings(): Promise<void> {
+  try {
+    let raw = await getItem(STORAGE_KEY);
+    if (raw == null) {
+      try {
+        raw = localStorage.getItem(STORAGE_KEY);
+      } catch {
+        raw = null;
+      }
+    }
+    cache = parseOrDefault(raw);
+  } catch (e) {
+    console.error("Failed to hydrate API settings", e);
+    cache = structuredClone(DEFAULT_API_SETTINGS);
+  }
+}
+
+function parseOrDefault(raw: string | null): ApiSettings {
+  if (!raw) return structuredClone(DEFAULT_API_SETTINGS);
+  try {
+    const parsed = JSON.parse(raw);
+    if (!validateApiSettingsJson(parsed)) {
+      return structuredClone(DEFAULT_API_SETTINGS);
+    }
+    return parsed;
+  } catch {
+    return structuredClone(DEFAULT_API_SETTINGS);
+  }
+}
+
+function ensureCache(): ApiSettings {
+  if (cache !== null) return cache;
+  // 未 hydrate 的兜底：同步读 localStorage。
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    raw = null;
+  }
+  cache = parseOrDefault(raw);
+  return cache;
+}
+
+function persist(s: ApiSettings): void {
+  void setItem(STORAGE_KEY, JSON.stringify(s)).catch((e) =>
+    console.error("Failed to persist API settings to IDB", e),
+  );
+}
 
 const LLM_KINDS: LlmProviderKind[] = [
   "qiny",
@@ -22,25 +76,12 @@ const IMAGE_KINDS: ImageProviderKind[] = ["qiny"];
 const QINY_HOSTS: QinyHostKind[] = ["com", "icu"];
 
 export function loadApiSettings(): ApiSettings {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return structuredClone(DEFAULT_API_SETTINGS);
-    const parsed = JSON.parse(raw);
-    if (!validateApiSettingsJson(parsed)) {
-      return structuredClone(DEFAULT_API_SETTINGS);
-    }
-    return parsed;
-  } catch {
-    return structuredClone(DEFAULT_API_SETTINGS);
-  }
+  return ensureCache();
 }
 
 export function saveApiSettings(s: ApiSettings): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-  } catch (e) {
-    console.error("Failed to persist API settings", e);
-  }
+  cache = s;
+  persist(s);
 }
 
 export function isApiConfigured(s: ApiSettings): boolean {
