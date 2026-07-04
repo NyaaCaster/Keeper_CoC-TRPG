@@ -33,9 +33,13 @@ WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000
 
+# better-sqlite3 requires native compilation even for production install
+RUN apk add --no-cache python3 make g++
+
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund \
- && npm cache clean --force
+ && npm cache clean --force \
+ && apk del python3 make g++
 
 COPY --from=builder /app/dist ./dist
 

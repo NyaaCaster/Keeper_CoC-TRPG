@@ -54,9 +54,7 @@ function getRandomBytes(n: number): Uint8Array {
   if (typeof crypto !== "undefined" && crypto.getRandomValues) {
     return crypto.getRandomValues(new Uint8Array(n));
   }
-  const buf = new Uint8Array(n);
-  for (let i = 0; i < n; i++) buf[i] = (Math.random() * 256) | 0;
-  return buf;
+  throw new Error("Crypto.getRandomValues is required for secure encryption");
 }
 
 function equalBytes(a: Uint8Array, b: Uint8Array): boolean {

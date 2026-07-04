@@ -87,9 +87,8 @@
 
 每当本项目需要重建镜像并重启容器（包括但不限于：用户明确要求 rebuild；改动了 `Dockerfile` / `docker-compose.yml` / `.dockerignore`；改动了 `server.ts` / `src/**` / `vite.config.ts` 等会进入镜像的代码或配置），必须通过 `rebuild` skill 来执行，不要手动拼 `docker compose` 命令。
 
-- Windows 环境：执行 `powershell -ExecutionPolicy Bypass -File .\rebuild.ps1`。
-- Linux / macOS 环境：执行 `bash ./rebuild.sh`。
-- `-ExecutionPolicy Bypass` 参数在 Windows 下**必须**带上，避免本机执行策略拦截。
+- 统一执行 `python rebuild.py`（跨平台，无执行策略问题）。
+- 如需全量重建（跳过层缓存）：`python rebuild.py --no-cache`。
 - 详细规则见 `.claude/skills/rebuild/SKILL.md`。
 
 ## Git 提交与推送
