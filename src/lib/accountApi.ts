@@ -251,3 +251,100 @@ export function buildSettingsExportPayload(settings: any) {
     settings,
   };
 }
+
+// ---------------------------------------------------------------------------
+// 云端调查记录同步（P7）
+// ---------------------------------------------------------------------------
+
+export interface ChatSessionsResponse {
+  ok: boolean;
+  exists: boolean;
+  updated_at?: number;
+  alg?: string;
+  salt?: string;
+  iv?: string;
+  data?: string;
+  tag?: string;
+  count?: number;
+  error?: string;
+}
+
+/** 获取/生成 per-account 加密密钥。密钥由服务端持有，跨设备共享。 */
+export async function fetchChatCryptoKey(
+  token: string,
+): Promise<ApiResult<{ key: string }>> {
+  const { signal, clear } = createAbortSignal();
+  try {
+    const body = await fetchJson<{ ok: boolean; key?: string; error?: string }>(
+      "/api/account/chat-sessions/key",
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+        signal,
+      },
+    );
+    if (body.ok && body.key) {
+      return { ok: true, data: { key: body.key } };
+    }
+    return { ok: false, error: body.error || "unknown_error" };
+  } catch {
+    return { ok: false, error: "network_error" };
+  } finally {
+    clear();
+  }
+}
+
+/** 上传加密的调查记录到云端（覆盖式，原子写入）。 */
+export async function uploadChatSessions(
+  token: string,
+  payload: object,
+): Promise<ApiResult<{ updated_at: number }>> {
+  const { signal, clear } = createAbortSignal();
+  try {
+    const body = await fetchJson<{ ok: boolean; updated_at?: number; error?: string }>(
+      "/api/account/chat-sessions",
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+        signal,
+      },
+    );
+    if (body.ok && body.updated_at) {
+      return { ok: true, data: { updated_at: body.updated_at } };
+    }
+    return { ok: false, error: body.error || "unknown_error" };
+  } catch {
+    return { ok: false, error: "network_error" };
+  } finally {
+    clear();
+  }
+}
+
+/** 下载加密的调查记录。无存档时返回 exists: false。 */
+export async function downloadChatSessions(
+  token: string,
+): Promise<ApiResult<ChatSessionsResponse>> {
+  const { signal, clear } = createAbortSignal();
+  try {
+    const body = await fetchJson<ChatSessionsResponse>(
+      "/api/account/chat-sessions",
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+        signal,
+      },
+    );
+    if (body.ok !== false) {
+      return { ok: true, data: body };
+    }
+    return { ok: false, error: body.error || "unknown_error" };
+  } catch {
+    return { ok: false, error: "network_error" };
+  } finally {
+    clear();
+  }
+}

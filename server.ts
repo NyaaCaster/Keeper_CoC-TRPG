@@ -750,6 +750,102 @@ accountRouter.get("/settings", requireAuth, (req, res) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Chat Sessions Cloud Sync (P7) — /api/account/chat-sessions/*
+// ---------------------------------------------------------------------------
+
+const USER_STORAGE_DIR =
+  process.env.KEEPER_USER_STORAGE_DIR || path.join(process.cwd(), "data", "user-storage");
+
+// GET /api/account/chat-sessions/key — 获取/生成 per-account 加密密钥
+accountRouter.get("/chat-sessions/key", requireAuth, (req, res) => {
+  const account = req.user!.account;
+  const dir = path.join(USER_STORAGE_DIR, account);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* dir exists */ }
+  const keyPath = path.join(dir, "chat-crypto-key.json");
+
+  let keyB64: string;
+  if (fs.existsSync(keyPath)) {
+    try {
+      const raw = fs.readFileSync(keyPath, "utf-8");
+      const obj = JSON.parse(raw);
+      keyB64 = obj.key;
+    } catch {
+      return res.status(500).json({ ok: false, error: "key_read_failed" });
+    }
+  } else {
+    const bytes = crypto.randomBytes(32);
+    keyB64 = Buffer.from(bytes).toString("base64");
+    try {
+      fs.writeFileSync(keyPath, JSON.stringify({ key: keyB64 }), "utf-8");
+    } catch (err) {
+      console.error("[chat-sessions] failed to persist crypto key for", account, err);
+      return res.status(500).json({ ok: false, error: "key_write_failed" });
+    }
+  }
+
+  return res.json({ ok: true, key: keyB64 });
+});
+
+// PUT /api/account/chat-sessions — 上传加密的调查记录（原子写入）
+accountRouter.put("/chat-sessions", requireAuth, (req, res) => {
+  const body = req.body ?? {};
+  const isEncrypted =
+    body.alg === "Nyaa-HMAC-XOR-V1" &&
+    typeof body.salt === "string" &&
+    typeof body.iv === "string" &&
+    typeof body.data === "string" &&
+    typeof body.tag === "string";
+
+  if (!isEncrypted) {
+    return res.status(400).json({ ok: false, error: "bad_payload" });
+  }
+
+  const account = req.user!.account;
+  const dir = path.join(USER_STORAGE_DIR, account);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* dir exists */ }
+  const filePath = path.join(dir, "chat-sessions.json");
+  const tmpPath = filePath + ".tmp." + Date.now();
+  const now = Date.now();
+
+  try {
+    fs.writeFileSync(tmpPath, JSON.stringify({ ...body, updated_at: now }), "utf-8");
+    fs.renameSync(tmpPath, filePath);
+  } catch (err) {
+    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { /* best-effort */ }
+    console.error("[chat-sessions] write failed for", account, err);
+    return res.status(500).json({ ok: false, error: "write_failed" });
+  }
+
+  return res.json({ ok: true, updated_at: now, count: -1 });
+});
+
+// GET /api/account/chat-sessions — 下载加密的调查记录
+accountRouter.get("/chat-sessions", requireAuth, (req, res) => {
+  const account = req.user!.account;
+  const filePath = path.join(USER_STORAGE_DIR, account, "chat-sessions.json");
+  if (!fs.existsSync(filePath)) {
+    return res.json({ ok: true, exists: false });
+  }
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, "utf-8");
+  } catch (err) {
+    console.error("[chat-sessions] read failed for", account, err);
+    return res.status(500).json({ ok: false, error: "read_failed" });
+  }
+
+  let data: any;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return res.status(500).json({ ok: false, error: "parse_failed" });
+  }
+
+  return res.json({ ok: true, exists: true, ...data });
+});
+
 // GET /api/account/health — 数据库健康探针
 accountRouter.get("/health", (_req, res) => {
   try {

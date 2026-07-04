@@ -10,6 +10,8 @@ import {
   Plug,
   Loader2,
   LogIn,
+  CloudUpload,
+  CloudDownload,
 } from "lucide-react";
 import { WebGameSave } from "../types";
 import {
@@ -28,6 +30,13 @@ import keeperImg from "../keeper.png";
 import type { AccountState } from "../lib/idbAccount";
 import { saveAccountState } from "../lib/idbAccount";
 import { login as loginApi } from "../lib/accountApi";
+import {
+  uploadChatSessions,
+  downloadChatSessions,
+} from "../lib/accountApi";
+import { encryptSaves, decryptSaves } from "../lib/chatCrypto";
+import { loadAccountState } from "../lib/idbAccount";
+import ConfirmModal from "./ConfirmModal";
 
 interface StartScreenProps {
   onNewGame: () => void;
@@ -58,11 +67,124 @@ export default function StartScreen({
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
+  // Cloud sync state (P7)
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [pendingCloudOp, setPendingCloudOp] = useState<"upload" | "download" | null>(null);
+  const [cloudMeta, setCloudMeta] = useState<{ updated_at: number; count?: number } | null>(null);
+
   const isLoggedIn = accountState !== null;
+
+  const refreshSaves = () => setSaves(getAllSaves());
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const formatCloudTime = (ts: number) => {
+    const d = new Date(ts);
+    const YY = String(d.getFullYear()).slice(2);
+    const MM = String(d.getMonth() + 1).padStart(2, "0");
+    const DD = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${YY}-${MM}-${DD} ${hh}:${mm}`;
+  };
+
+  // --- Cloud upload ---
+  const handleCloudUpload = async () => {
+    if (!accountState?.token) {
+      showToast("请先登录调查员账户");
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      const existing = await downloadChatSessions(accountState.token);
+      if (existing.ok && existing.data.exists && existing.data.updated_at) {
+        setCloudMeta({ updated_at: existing.data.updated_at });
+      } else {
+        setCloudMeta(null);
+      }
+      setPendingCloudOp("upload");
+    } catch {
+      showToast("网络错误，请重试");
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleConfirmCloudUpload = async () => {
+    if (!accountState?.token) return;
+    setCloudBusy(true);
+    try {
+      const allSaves = getAllSaves();
+      const encrypted = await encryptSaves(allSaves, accountState.token);
+      const r = await uploadChatSessions(accountState.token, encrypted);
+      if (r.ok) {
+        showToast("调查记录已上传到云端");
+        refreshSaves();
+      } else {
+        showToast(r.error === "network_error" ? "网络错误，请重试" : "上传失败");
+      }
+    } catch (e: any) {
+      showToast(e?.message || "加密失败，请重试");
+    } finally {
+      setCloudBusy(false);
+      setPendingCloudOp(null);
+    }
+  };
+
+  // --- Cloud download ---
+  const handleCloudDownload = async () => {
+    if (!accountState?.token) {
+      showToast("请先登录调查员账户");
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      const r = await downloadChatSessions(accountState.token);
+      if (!r.ok) {
+        showToast("网络错误，请重试");
+        return;
+      }
+      if (!r.data.exists) {
+        showToast("云端暂无存档");
+        return;
+      }
+      setCloudMeta({ updated_at: r.data.updated_at ?? 0 });
+      setPendingCloudOp("download");
+    } catch {
+      showToast("网络错误，请重试");
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleConfirmCloudDownload = async () => {
+    if (!accountState?.token) return;
+    setCloudBusy(true);
+    try {
+      const r = await downloadChatSessions(accountState.token);
+      if (!r.ok || !r.data.exists) {
+        showToast("下载失败");
+        return;
+      }
+      const decrypted = await decryptSaves(
+        { alg: "Nyaa-HMAC-XOR-V1", salt: r.data.salt!, iv: r.data.iv!, data: r.data.data!, tag: r.data.tag! },
+        accountState.token,
+      );
+      // Replace local saves
+      const current = getAllSaves();
+      for (const s of current) deleteSave(s.id);
+      for (const s of decrypted) saveGame(s);
+      refreshSaves();
+      showToast("云端记录已下载并替换本地存档");
+    } catch (e: any) {
+      showToast(e?.message || "解密失败，云端数据可能已损坏");
+    } finally {
+      setCloudBusy(false);
+      setPendingCloudOp(null);
+    }
   };
 
   /** 处理登录提交 */
@@ -186,7 +308,8 @@ export default function StartScreen({
   };
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center p-4 z-20 relative">
+    <>
+      <div className="w-full h-full flex flex-col items-center justify-center p-4 z-20 relative">
       <div
         className="absolute inset-0 pointer-events-none opacity-20"
         style={{
@@ -438,24 +561,73 @@ export default function StartScreen({
             </div>
           )}
 
-          <div className="w-full pt-4 mt-2 border-t border-emerald-500/20 flex justify-center relative">
-            <input
-              type="file"
-              accept=".json"
-              id="upload-save"
-              className="hidden"
-              onChange={handleFileUpload}
-              key={Date.now()}
-            />
-            <label
-              htmlFor="upload-save"
-              className="flex items-center gap-2 px-6 py-3 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-100 rounded cursor-pointer transition-colors text-sm font-sans"
-            >
-              <Upload className="w-4 h-4" /> 上传记录文件
-            </label>
+          <div className="w-full pt-4 mt-2 border-t border-emerald-500/20 space-y-3">
+            {/* Cloud sync buttons (P7) */}
+            <div className="flex justify-center gap-3">
+              <button
+                onClick={handleCloudUpload}
+                disabled={cloudBusy}
+                className="flex items-center gap-2 px-4 py-2 bg-black/40 border border-gray-800 hover:border-[#10b981]/40 text-gray-400 hover:text-gray-200 rounded transition-all text-sm font-sans disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <CloudUpload className="w-4 h-4" /> 上传记录
+              </button>
+              <button
+                onClick={handleCloudDownload}
+                disabled={cloudBusy}
+                className="flex items-center gap-2 px-4 py-2 bg-black/40 border border-gray-800 hover:border-[#10b981]/40 text-gray-400 hover:text-gray-200 rounded transition-all text-sm font-sans disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <CloudDownload className="w-4 h-4" /> 下载记录
+              </button>
+            </div>
+
+            <div className="flex justify-center relative">
+              <input
+                type="file"
+                accept=".json"
+                id="upload-save"
+                className="hidden"
+                onChange={handleFileUpload}
+                key={Date.now()}
+              />
+              <label
+                htmlFor="upload-save"
+                className="flex items-center gap-2 px-6 py-3 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-100 rounded cursor-pointer transition-colors text-sm font-sans"
+              >
+                <Upload className="w-4 h-4" /> 上传记录文件
+              </label>
+            </div>
           </div>
         </div>
       )}
     </div>
-  );
+
+    {/* Cloud sync confirm modals */}
+    <ConfirmModal
+      isOpen={pendingCloudOp === "upload"}
+      title="上传记录"
+      message={
+        cloudMeta
+          ? `云端已有存档（最后更新 ${formatCloudTime(cloudMeta.updated_at)}）。上传将覆盖云端存档，是否继续？`
+          : "将创建首个云端存档，上传当前所有调查记录？"
+      }
+      confirmLabel={cloudMeta ? "覆盖云端存档" : "创建云端存档"}
+      variant="default"
+      onConfirm={handleConfirmCloudUpload}
+      onCancel={() => { setPendingCloudOp(null); setCloudMeta(null); }}
+    />
+    <ConfirmModal
+      isOpen={pendingCloudOp === "download"}
+      title="下载记录"
+      message={
+        cloudMeta
+          ? `云端存档最后更新于 ${formatCloudTime(cloudMeta.updated_at)}。下载将覆盖当前所有本地记录，是否继续？`
+          : "下载将覆盖当前所有本地记录，是否继续？"
+      }
+      confirmLabel="替换本地记录"
+      variant="danger"
+      onConfirm={handleConfirmCloudDownload}
+      onCancel={() => { setPendingCloudOp(null); setCloudMeta(null); }}
+    />
+  </>
+);
 }

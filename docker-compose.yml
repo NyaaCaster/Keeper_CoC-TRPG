@@ -38,6 +38,8 @@ services:
       # Host directory for persistent data (DB, user storage).
       # Set in .env to E:\DockerRes\keeper-coc-trpg per workspace policy.
       KEEPER_DATA_DIR: "${KEEPER_DATA_DIR:-.}"
+      # Container path for per-user encrypted chat-session archives (P7).
+      KEEPER_USER_STORAGE_DIR: "${KEEPER_USER_STORAGE_DIR:-/data/user-storage}"
     ports:
       # host:container — host port 3093 was selected by the user from the
       # free slots in 3090-3099. Container always listens on 3000.
@@ -49,6 +51,8 @@ services:
       # SQLite database + user storage (P3+ account system).
       # KEEPER_DATA_DIR is configured in .env; defaults to "." (current dir).
       - ${KEEPER_DATA_DIR:-.}/db:/data/db
+      # Per-user encrypted chat-session archives (P7).
+      - ${KEEPER_DATA_DIR:-.}/user-storage:/data/user-storage
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
