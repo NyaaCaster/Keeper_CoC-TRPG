@@ -11,6 +11,8 @@ import {
   ChevronDown,
   RefreshCw,
   AlertTriangle,
+  CloudUpload,
+  CloudDownload,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -28,6 +30,13 @@ import {
   validateApiSettingsJson,
   normalizeCustomBaseUrl,
 } from "../lib/apiSettings";
+import {
+  uploadCloudSettings,
+  downloadCloudSettings,
+  buildSettingsExportPayload,
+} from "../lib/accountApi";
+import { loadAccountState } from "../lib/idbAccount";
+import ConfirmModal from "./ConfirmModal";
 import {
   LlmProviderIcon,
   ImageProviderIcon,
@@ -62,6 +71,11 @@ export default function ApiSettingsPanel({
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Cloud sync state (P6)
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [pendingCloudOp, setPendingCloudOp] = useState<"upload" | "download" | null>(null);
+  const [cloudMeta, setCloudMeta] = useState<{ updated_at: number } | null>(null);
+
   useEffect(() => {
     if (isOpen) setSettings(initial);
   }, [isOpen, initial]);
@@ -69,6 +83,117 @@ export default function ApiSettingsPanel({
   const showToast = (kind: "ok" | "err", text: string) => {
     setToast({ kind, text });
     setTimeout(() => setToast(null), 2800);
+  };
+
+  const formatCloudTime = (ts: number) => {
+    const d = new Date(ts);
+    const YY = String(d.getFullYear()).slice(2);
+    const MM = String(d.getMonth() + 1).padStart(2, "0");
+    const DD = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${YY}-${MM}-${DD} ${hh}:${mm}`;
+  };
+
+  // --- Cloud upload ---
+  const handleCloudUpload = async () => {
+    const stored = await loadAccountState();
+    if (!stored?.token) {
+      showToast("err", "请先登录调查员账户");
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      const existing = await downloadCloudSettings(stored.token);
+      if (existing.ok && existing.data.exists && existing.data.updated_at) {
+        setCloudMeta({ updated_at: existing.data.updated_at });
+      } else {
+        setCloudMeta(null);
+      }
+      setPendingCloudOp("upload");
+    } catch {
+      showToast("err", "网络错误，请重试");
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleConfirmCloudUpload = async () => {
+    const stored = await loadAccountState();
+    if (!stored?.token) return;
+    setCloudBusy(true);
+    try {
+      const payload = buildSettingsExportPayload(settings);
+      const r = await uploadCloudSettings(stored.token, payload);
+      if (r.ok) {
+        showToast("ok", "设置已上传到云端");
+      } else {
+        showToast("err", r.error === "network_error" ? "网络错误，请重试" : "上传失败");
+      }
+    } catch {
+      showToast("err", "网络错误，请重试");
+    } finally {
+      setCloudBusy(false);
+      setPendingCloudOp(null);
+    }
+  };
+
+  // --- Cloud download ---
+  const handleCloudDownload = async () => {
+    const stored = await loadAccountState();
+    if (!stored?.token) {
+      showToast("err", "请先登录调查员账户");
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      const r = await downloadCloudSettings(stored.token);
+      if (!r.ok) {
+        showToast("err", "网络错误，请重试");
+        return;
+      }
+      if (!r.data.exists) {
+        showToast("err", "云端暂无存档");
+        return;
+      }
+      if (!r.data.payload?.settings) {
+        showToast("err", "云端存档格式无效");
+        return;
+      }
+      // Basic validation of downloaded settings
+      const s = r.data.payload.settings;
+      if (!s?.llm?.provider || !s?.image?.provider) {
+        showToast("err", "云端存档格式无效");
+        return;
+      }
+      setCloudMeta({ updated_at: r.data.updated_at ?? 0 });
+      setPendingCloudOp("download");
+    } catch {
+      showToast("err", "网络错误，请重试");
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const handleConfirmCloudDownload = async () => {
+    const stored = await loadAccountState();
+    if (!stored?.token) return;
+    setCloudBusy(true);
+    try {
+      const r = await downloadCloudSettings(stored.token);
+      if (r.ok && r.data.payload?.settings) {
+        const s = r.data.payload.settings as ApiSettings;
+        setSettings(s);
+        saveApiSettings(s);
+        onSaved(s);
+        showToast("ok", "云端设置已下载并保存");
+      }
+    } catch {
+      showToast("err", "网络错误，请重试");
+    } finally {
+      setCloudBusy(false);
+      setPendingCloudOp(null);
+    }
   };
 
   const handleLlmProviderChange = (p: LlmProviderKind) => {
@@ -137,8 +262,9 @@ export default function ApiSettingsPanel({
   };
 
   return (
-    <AnimatePresence>
-      {isOpen && (
+    <>
+      <AnimatePresence>
+        {isOpen && (
         <motion.div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
           initial={{ opacity: 0 }}
@@ -294,6 +420,28 @@ export default function ApiSettingsPanel({
               />
             </div>
 
+            {/* Footer: cloud sync (P6) — above local import/export */}
+            <div className="px-5 pt-3 pb-1 bg-[#0c1410]">
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={handleCloudUpload}
+                  disabled={cloudBusy}
+                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs bg-black/40 border border-gray-800 hover:border-[#10b981]/40 hover:text-gray-200 text-gray-400 rounded transition-all font-sans disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <CloudUpload className="w-3.5 h-3.5" />
+                  上传设置
+                </button>
+                <button
+                  onClick={handleCloudDownload}
+                  disabled={cloudBusy}
+                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs bg-black/40 border border-gray-800 hover:border-[#10b981]/40 hover:text-gray-200 text-gray-400 rounded transition-all font-sans disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <CloudDownload className="w-3.5 h-3.5" />
+                  下载设置
+                </button>
+              </div>
+            </div>
+
             {/* Footer actions */}
             <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-[#183022] bg-[#0c1410]">
               <input
@@ -353,6 +501,35 @@ export default function ApiSettingsPanel({
         </motion.div>
       )}
     </AnimatePresence>
+
+      {/* Cloud sync confirm modals */}
+      <ConfirmModal
+        isOpen={pendingCloudOp === "upload"}
+        title="上传设置"
+        message={
+          cloudMeta
+            ? `云端已有存档（最后更新 ${formatCloudTime(cloudMeta.updated_at)}）。上传将覆盖云端存档，是否继续？`
+            : "将创建首个云端存档，上传当前设置？"
+        }
+        confirmLabel={cloudMeta ? "覆盖云端存档" : "创建云端存档"}
+        variant="default"
+        onConfirm={handleConfirmCloudUpload}
+        onCancel={() => { setPendingCloudOp(null); setCloudMeta(null); }}
+      />
+      <ConfirmModal
+        isOpen={pendingCloudOp === "download"}
+        title="下载设置"
+        message={
+          cloudMeta
+            ? `云端存档最后更新于 ${formatCloudTime(cloudMeta.updated_at)}。下载将覆盖当前所有本地设置，是否继续？`
+            : "下载将覆盖当前所有本地设置，是否继续？"
+        }
+        confirmLabel="替换本地设置"
+        variant="danger"
+        onConfirm={handleConfirmCloudDownload}
+        onCancel={() => { setPendingCloudOp(null); setCloudMeta(null); }}
+      />
+    </>
   );
 }
 

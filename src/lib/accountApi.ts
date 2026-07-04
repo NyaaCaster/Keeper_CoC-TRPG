@@ -170,3 +170,84 @@ export async function rename(
     clear();
   }
 }
+
+// ---------------------------------------------------------------------------
+// 云端设置同步（P6）
+// ---------------------------------------------------------------------------
+
+export const SETTINGS_EXPORT_KIND = "keeper_settings_export" as const;
+export const SETTINGS_EXPORT_VERSION = 1;
+
+export interface CloudSettingsResponse {
+  ok: boolean;
+  exists: boolean;
+  updated_at?: number;
+  payload?: { _kind: string; _version: number; settings: any };
+  error?: string;
+}
+
+/** 上传设置到云端（覆盖式 upsert）。需要有效 token。 */
+export async function uploadCloudSettings(
+  token: string,
+  payload: object,
+): Promise<ApiResult<{ updated_at: number }>> {
+  const { signal, clear } = createAbortSignal();
+  try {
+    const body = await fetchJson<{ ok: boolean; updated_at?: number; error?: string }>(
+      "/api/account/settings",
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ payload }),
+        signal,
+      },
+    );
+
+    if (body.ok && body.updated_at) {
+      return { ok: true, data: { updated_at: body.updated_at } };
+    }
+    return { ok: false, error: body.error || "unknown_error" };
+  } catch {
+    return { ok: false, error: "network_error" };
+  } finally {
+    clear();
+  }
+}
+
+/** 下载云端设置。无存档时返回 exists: false。需要有效 token。 */
+export async function downloadCloudSettings(
+  token: string,
+): Promise<ApiResult<CloudSettingsResponse>> {
+  const { signal, clear } = createAbortSignal();
+  try {
+    const body = await fetchJson<CloudSettingsResponse>(
+      "/api/account/settings",
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+        signal,
+      },
+    );
+
+    if (body.ok !== false) {
+      return { ok: true, data: body };
+    }
+    return { ok: false, error: body.error || "unknown_error" };
+  } catch {
+    return { ok: false, error: "network_error" };
+  } finally {
+    clear();
+  }
+}
+
+/** 构建设置导出 payload（用于上传到云端）。 */
+export function buildSettingsExportPayload(settings: any) {
+  return {
+    _kind: SETTINGS_EXPORT_KIND,
+    _version: SETTINGS_EXPORT_VERSION,
+    settings,
+  };
+}

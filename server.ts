@@ -615,6 +615,8 @@ import {
   insertUser,
   updateLastActive,
   updateUsername,
+  getUserSettings,
+  upsertUserSettings,
 } from "./src/lib/db";
 import { verifyUser } from "./src/lib/nyaacount-client";
 import { requireAuth, createSession, destroySession } from "./src/lib/auth";
@@ -708,6 +710,44 @@ accountRouter.post("/rename", requireAuth, (req, res) => {
   }
   updateUsername.run(newName, req.user!.account);
   return res.json({ ok: true, username: newName });
+});
+
+// PUT /api/account/settings — 上传云端设置（upsert）
+accountRouter.put("/settings", requireAuth, (req, res) => {
+  const { payload } = req.body ?? {};
+  if (!payload || typeof payload !== "object") {
+    return res.status(400).json({ ok: false, error: "bad_payload" });
+  }
+  if (payload._kind !== "keeper_settings_export" || !payload.settings) {
+    return res.status(400).json({ ok: false, error: "bad_payload" });
+  }
+  const now = Date.now();
+  try {
+    upsertUserSettings.run(req.user!.account, JSON.stringify(payload), now);
+  } catch {
+    return res.status(500).json({ ok: false, error: "db_write_failed" });
+  }
+  return res.json({ ok: true, updated_at: now });
+});
+
+// GET /api/account/settings — 下载云端设置
+accountRouter.get("/settings", requireAuth, (req, res) => {
+  const row = getUserSettings.get(req.user!.account) as any;
+  if (!row) {
+    return res.json({ ok: true, exists: false });
+  }
+  let payload: any;
+  try {
+    payload = JSON.parse(row.payload);
+  } catch {
+    return res.json({ ok: true, exists: false });
+  }
+  return res.json({
+    ok: true,
+    exists: true,
+    updated_at: row.updated_at,
+    payload,
+  });
 });
 
 // GET /api/account/health — 数据库健康探针

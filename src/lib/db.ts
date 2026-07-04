@@ -78,3 +78,19 @@ export const insertSession = db.prepare(
 export const deleteSession = db.prepare("DELETE FROM sessions WHERE token = ?");
 
 export const findSession = db.prepare("SELECT account FROM sessions WHERE token = ?");
+
+// ---------------------------------------------------------------------------
+// Prepared statements — user_settings
+// ---------------------------------------------------------------------------
+
+export const getUserSettings = db.prepare(
+  "SELECT payload, updated_at FROM user_settings WHERE account = ?",
+);
+
+export const upsertUserSettings = db.prepare(`
+  INSERT INTO user_settings (account, payload, updated_at)
+  VALUES (?, ?, ?)
+  ON CONFLICT(account) DO UPDATE SET
+    payload = excluded.payload,
+    updated_at = excluded.updated_at
+`);
