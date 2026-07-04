@@ -4,10 +4,10 @@ import {
   Eye,
   EyeOff,
   Plug,
+  MessageSquare,
   Image as ImageIcon,
   Download,
   Upload,
-  Save,
   ChevronDown,
   RefreshCw,
   AlertTriangle,
@@ -69,6 +69,7 @@ export default function ApiSettingsPanel({
 }: ApiSettingsPanelProps) {
   const [settings, setSettings] = useState<ApiSettings>(initial);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<"chat" | "image">("chat");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Cloud sync state (P6)
@@ -245,7 +246,7 @@ export default function ApiSettingsPanel({
     e.target.value = "";
   };
 
-  const handleSave = () => {
+  const handleClose = () => {
     const final: ApiSettings =
       settings.llm.provider === "custom"
         ? {
@@ -270,7 +271,7 @@ export default function ApiSettingsPanel({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={onClose}
+          onClick={handleClose}
         >
           <motion.div
             className="relative w-full max-w-2xl max-h-[90vh] bg-[#111213]/95 border border-[#c1a067]/35 rounded-lg shadow-2xl shadow-emerald-500/10 flex flex-col overflow-hidden"
@@ -289,7 +290,7 @@ export default function ApiSettingsPanel({
                 </h2>
               </div>
               <button
-                onClick={onClose}
+                onClick={handleClose}
                 className="p-1 text-gray-500 hover:text-gray-200 transition-colors"
                 aria-label="关闭"
               >
@@ -297,132 +298,172 @@ export default function ApiSettingsPanel({
               </button>
             </div>
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-6">
-              <SectionHeader icon={<Plug className="w-3.5 h-3.5" />} title="对话模型" />
-
-              <ProviderDropdown<LlmProviderKind>
-                label="对话模型供应商"
-                value={settings.llm.provider}
-                options={LLM_PROVIDERS}
-                renderIcon={(k) => <LlmProviderIcon kind={k} size={18} />}
-                renderLabel={(k) => LLM_PROVIDER_LABELS[k]}
-                onChange={handleLlmProviderChange}
-              />
-
-              {settings.llm.provider === "qiny" && (
-                <QinyHostRadio
-                  value={settings.llm.qinyHost ?? "com"}
-                  onChange={(host) =>
-                    setSettings((s) => ({ ...s, llm: { ...s.llm, qinyHost: host } }))
-                  }
-                />
-              )}
-
-              {settings.llm.provider === "custom" && (
-                <Field label="Base URL" hint="OpenAI 兼容路径，会自动归一为 .../v1 形式">
-                  <input
-                    type="text"
-                    value={settings.llm.customBaseUrl ?? ""}
-                    onChange={(e) =>
-                      setSettings((s) => ({
-                        ...s,
-                        llm: { ...s.llm, customBaseUrl: e.target.value },
-                      }))
-                    }
-                    onBlur={(e) =>
-                      setSettings((s) => ({
-                        ...s,
-                        llm: {
-                          ...s.llm,
-                          customBaseUrl: normalizeCustomBaseUrl(e.target.value),
-                        },
-                      }))
-                    }
-                    placeholder="https://your-endpoint.com"
-                    className="w-full bg-black/40 border border-[#183022] focus:border-[#10b981] outline-none rounded px-3 py-2 text-xs text-gray-200 font-mono"
-                  />
-                </Field>
-              )}
-
-              <ApiKeyField
-                label="对话 API Key"
-                value={settings.llm.apiKey}
-                onChange={(v) =>
-                  setSettings((s) => ({ ...s, llm: { ...s.llm, apiKey: v } }))
-                }
-                helpUrl={
-                  settings.llm.provider === "qiny"
-                    ? resolveQinyRegisterUrl(settings.llm.qinyHost)
-                    : undefined
-                }
-              />
-
-              <ModelField
-                label="对话模型"
-                value={settings.llm.model}
-                onChange={(v) =>
-                  setSettings((s) => ({ ...s, llm: { ...s.llm, model: v } }))
-                }
-                provider={settings.llm.provider}
-                apiKey={settings.llm.apiKey}
-                customBaseUrl={settings.llm.customBaseUrl}
-                qinyHost={settings.llm.qinyHost}
-              />
-
-              <div className="border-t border-[#183022] pt-5">
-                <SectionHeader
-                  icon={<ImageIcon className="w-3.5 h-3.5" />}
-                  title="画图模型"
-                />
-              </div>
-
-              <ProviderDropdown<ImageProviderKind>
-                label="画图模型供应商"
-                value={settings.image.provider}
-                options={IMAGE_PROVIDERS}
-                renderIcon={(k) => <ImageProviderIcon kind={k} size={18} />}
-                renderLabel={(k) => IMAGE_PROVIDER_LABELS[k]}
-                onChange={handleImageProviderChange}
-              />
-
-              {settings.image.provider === "qiny" && (
-                <QinyHostRadio
-                  value={settings.image.qinyHost ?? "com"}
-                  onChange={(host) =>
-                    setSettings((s) => ({ ...s, image: { ...s.image, qinyHost: host } }))
-                  }
-                />
-              )}
-
-              <ApiKeyField
-                label="画图 API Key"
-                value={settings.image.apiKey}
-                onChange={(v) =>
-                  setSettings((s) => ({ ...s, image: { ...s.image, apiKey: v } }))
-                }
-                helpUrl={
-                  settings.image.provider === "qiny"
-                    ? resolveQinyRegisterUrl(settings.image.qinyHost)
-                    : undefined
-                }
-              />
-
-              <ModelField
-                label="画图模型"
-                value={settings.image.model}
-                onChange={(v) =>
-                  setSettings((s) => ({ ...s, image: { ...s.image, model: v } }))
-                }
-                provider="qiny-image"
-                apiKey={settings.image.apiKey}
-                qinyHost={settings.image.qinyHost}
-              />
+            {/* Tabs */}
+            <div className="flex border-b border-[#183022] bg-[#0c1410]">
+              <button
+                type="button"
+                onClick={() => setActiveTab("chat")}
+                className={`flex items-center justify-center gap-2 flex-1 py-2.5 transition font-medium text-xs tracking-wider font-mono ${
+                  activeTab === "chat"
+                    ? "border-b border-[#c1a067] text-[#c1a067] bg-black/20"
+                    : "border-transparent text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                对话模型
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("image")}
+                className={`flex items-center justify-center gap-2 flex-1 py-2.5 transition font-medium text-xs tracking-wider font-mono ${
+                  activeTab === "image"
+                    ? "border-b border-[#c1a067] text-[#c1a067] bg-black/20"
+                    : "border-transparent text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+                画图模型
+              </button>
             </div>
 
-            {/* Footer: cloud sync (P6) — above local import/export */}
-            <div className="px-5 pt-3 pb-1 bg-[#0c1410]">
-              <div className="grid grid-cols-2 gap-3">
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-5">
+              {activeTab === "chat" ? (
+                <>
+                  <ProviderDropdown<LlmProviderKind>
+                    label="对话模型供应商"
+                    value={settings.llm.provider}
+                    options={LLM_PROVIDERS}
+                    renderIcon={(k) => <LlmProviderIcon kind={k} size={18} />}
+                    renderLabel={(k) => LLM_PROVIDER_LABELS[k]}
+                    onChange={handleLlmProviderChange}
+                  />
+
+                  {settings.llm.provider === "qiny" && (
+                    <QinyHostRadio
+                      value={settings.llm.qinyHost ?? "com"}
+                      onChange={(host) =>
+                        setSettings((s) => ({ ...s, llm: { ...s.llm, qinyHost: host } }))
+                      }
+                    />
+                  )}
+
+                  {settings.llm.provider === "custom" && (
+                    <Field label="Base URL" hint="OpenAI 兼容路径，会自动归一为 .../v1 形式">
+                      <input
+                        type="text"
+                        value={settings.llm.customBaseUrl ?? ""}
+                        onChange={(e) =>
+                          setSettings((s) => ({
+                            ...s,
+                            llm: { ...s.llm, customBaseUrl: e.target.value },
+                          }))
+                        }
+                        onBlur={(e) =>
+                          setSettings((s) => ({
+                            ...s,
+                            llm: {
+                              ...s.llm,
+                              customBaseUrl: normalizeCustomBaseUrl(e.target.value),
+                            },
+                          }))
+                        }
+                        placeholder="https://your-endpoint.com"
+                        className="w-full bg-black/40 border border-[#183022] focus:border-[#10b981] outline-none rounded px-3 py-2 text-xs text-gray-200 font-mono"
+                      />
+                    </Field>
+                  )}
+
+                  <ApiKeyField
+                    label="对话 API Key"
+                    value={settings.llm.apiKey}
+                    onChange={(v) =>
+                      setSettings((s) => ({ ...s, llm: { ...s.llm, apiKey: v } }))
+                    }
+                    helpUrl={
+                      settings.llm.provider === "qiny"
+                        ? resolveQinyRegisterUrl(settings.llm.qinyHost)
+                        : undefined
+                    }
+                  />
+
+                  <ModelField
+                    label="对话模型"
+                    value={settings.llm.model}
+                    onChange={(v) =>
+                      setSettings((s) => ({ ...s, llm: { ...s.llm, model: v } }))
+                    }
+                    provider={settings.llm.provider}
+                    apiKey={settings.llm.apiKey}
+                    customBaseUrl={settings.llm.customBaseUrl}
+                    qinyHost={settings.llm.qinyHost}
+                  />
+                </>
+              ) : (
+                <>
+                  <ProviderDropdown<ImageProviderKind>
+                    label="画图模型供应商"
+                    value={settings.image.provider}
+                    options={IMAGE_PROVIDERS}
+                    renderIcon={(k) => <ImageProviderIcon kind={k} size={18} />}
+                    renderLabel={(k) => IMAGE_PROVIDER_LABELS[k]}
+                    onChange={handleImageProviderChange}
+                  />
+
+                  {settings.image.provider === "qiny" && (
+                    <QinyHostRadio
+                      value={settings.image.qinyHost ?? "com"}
+                      onChange={(host) =>
+                        setSettings((s) => ({ ...s, image: { ...s.image, qinyHost: host } }))
+                      }
+                    />
+                  )}
+
+                  <ApiKeyField
+                    label="画图 API Key"
+                    value={settings.image.apiKey}
+                    onChange={(v) =>
+                      setSettings((s) => ({ ...s, image: { ...s.image, apiKey: v } }))
+                    }
+                    helpUrl={
+                      settings.image.provider === "qiny"
+                        ? resolveQinyRegisterUrl(settings.image.qinyHost)
+                        : undefined
+                    }
+                  />
+
+                  <ModelField
+                    label="画图模型"
+                    value={settings.image.model}
+                    onChange={(v) =>
+                      setSettings((s) => ({ ...s, image: { ...s.image, model: v } }))
+                    }
+                    provider="qiny-image"
+                    apiKey={settings.image.apiKey}
+                    qinyHost={settings.image.qinyHost}
+                  />
+                </>
+              )}
+            </div>
+
+            {/* Footer: import/export + cloud sync */}
+            <div className="px-5 py-3 border-t border-[#183022] bg-[#0c1410]">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={handleFileChosen}
+              />
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  onClick={handleCloudDownload}
+                  disabled={cloudBusy}
+                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs bg-black/40 border border-gray-800 hover:border-[#10b981]/40 hover:text-gray-200 text-gray-400 rounded transition-all font-sans disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <CloudDownload className="w-3.5 h-3.5" />
+                  下载设置
+                </button>
                 <button
                   onClick={handleCloudUpload}
                   disabled={cloudBusy}
@@ -432,47 +473,20 @@ export default function ApiSettingsPanel({
                   上传设置
                 </button>
                 <button
-                  onClick={handleCloudDownload}
-                  disabled={cloudBusy}
-                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs bg-black/40 border border-gray-800 hover:border-[#10b981]/40 hover:text-gray-200 text-gray-400 rounded transition-all font-sans disabled:opacity-40 disabled:cursor-not-allowed"
+                  onClick={handleExport}
+                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs bg-black/40 border border-gray-800 hover:border-[#10b981]/40 hover:text-gray-200 text-gray-400 rounded transition-all font-sans"
                 >
-                  <CloudDownload className="w-3.5 h-3.5" />
-                  下载设置
+                  <Download className="w-3.5 h-3.5" />
+                  导出设置
+                </button>
+                <button
+                  onClick={handleImportClick}
+                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs bg-black/40 border border-gray-800 hover:border-[#10b981]/40 hover:text-gray-200 text-gray-400 rounded transition-all font-sans"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  导入设置
                 </button>
               </div>
-            </div>
-
-            {/* Footer actions */}
-            <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-[#183022] bg-[#0c1410]">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json,application/json"
-                className="hidden"
-                onChange={handleFileChosen}
-              />
-              <button
-                onClick={handleImportClick}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-black/40 border border-gray-800 hover:border-[#10b981]/40 hover:text-gray-200 text-gray-400 rounded transition-all font-sans"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                导入设置
-              </button>
-              <button
-                onClick={handleExport}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-black/40 border border-gray-800 hover:border-[#10b981]/40 hover:text-gray-200 text-gray-400 rounded transition-all font-sans"
-              >
-                <Download className="w-3.5 h-3.5" />
-                导出设置
-              </button>
-              <div className="flex-1" />
-              <button
-                onClick={handleSave}
-                className="flex items-center gap-1.5 px-4 py-1.5 text-xs bg-[#c1a067]/20 hover:bg-[#c1a067]/30 border border-[#c1a067] text-[#10b981] rounded transition-all font-bold tracking-widest font-sans"
-              >
-                <Save className="w-3.5 h-3.5" />
-                保存设置
-              </button>
             </div>
 
             {/* Toast */}
@@ -530,15 +544,6 @@ export default function ApiSettingsPanel({
         onCancel={() => { setPendingCloudOp(null); setCloudMeta(null); }}
       />
     </>
-  );
-}
-
-function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
-  return (
-    <div className="flex items-center gap-2 text-[#10b981]">
-      {icon}
-      <span className="text-xs font-bold tracking-widest font-mono">{title}</span>
-    </div>
   );
 }
 
