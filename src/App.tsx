@@ -38,6 +38,7 @@ import {
   Dices,
   Compass,
   Eye,
+  HardDrive,
   User,
   Settings,
   Image as ImageIcon,
@@ -48,6 +49,7 @@ import { motion, AnimatePresence } from "motion/react";
 
 import StartScreen from "./components/StartScreen";
 import MarkdownText from "./components/MarkdownText";
+import { estimateSaveStorage, CHAT_STORAGE_QUOTA } from "./lib/storageEstimate";
 import {
   saveGame,
   generateTimestamp,
@@ -256,6 +258,7 @@ export default function App() {
     "sheet" | "notebook" | null
   >(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [showApiSettings, setShowApiSettings] = useState<boolean>(false);
   const [showConsoleLog, setShowConsoleLog] = useState<boolean>(false);
@@ -2431,19 +2434,43 @@ export default function App() {
       character &&
       messages.length > 0
     ) {
-      saveGame({
-        id: activeSaveId,
-        moduleName: gameModuleName,
-        timestamp: saveTimestamp,
-        lastUpdated: Date.now(),
-        messages,
-        character,
-        clues,
-        enabledFeatures,
-        currentLocation,
-        gameMode,
-        scenarioState: scenarioState ?? undefined,
-      });
+      const doSave = async () => {
+        const saveObj = {
+          id: activeSaveId,
+          moduleName: gameModuleName,
+          timestamp: saveTimestamp,
+          lastUpdated: Date.now(),
+          messages,
+          character,
+          clues,
+          enabledFeatures,
+          currentLocation,
+          gameMode,
+          scenarioState: scenarioState ?? undefined,
+        };
+
+        try {
+          const currentUsage = await estimateSaveStorage();
+          const saveBytes = new Blob([JSON.stringify(saveObj)]).size;
+
+          // 超过 95% 配额时拒绝保存，通知用户
+          if (currentUsage + saveBytes > CHAT_STORAGE_QUOTA * 0.95) {
+            setStorageWarning(
+              "储存空间不足，自动保存已暂停。请清理旧存档或导出备份后继续。"
+            );
+            return;
+          }
+
+          // 容量足够的正常路径 — 同时清除之前的警告
+          if (storageWarning) setStorageWarning(null);
+          saveGame(saveObj);
+        } catch {
+          // 估算失败降级放行（不阻塞自动保存）
+          if (storageWarning) setStorageWarning(null);
+          saveGame(saveObj);
+        }
+      };
+      doSave();
     }
   }, [
     appMode,
@@ -2470,6 +2497,14 @@ export default function App() {
       sessionStorage.removeItem("keeper_active_save_id");
     }
   }, [activeSaveId]);
+
+  // 储存警告 8 秒后自动消失
+  useEffect(() => {
+    if (storageWarning) {
+      const timer = setTimeout(() => setStorageWarning(null), 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [storageWarning]);
 
   const markClueRead = (id: string) => {
     setClues((prev) =>
@@ -2563,6 +2598,14 @@ export default function App() {
               id="san-loss-screen-glitch"
               className="fixed inset-0 bg-purple-950/15 pointer-events-none z-50 animate-glitch"
             />
+          )}
+
+          {/* 储存空间不足警告 toast */}
+          {storageWarning && (
+            <div className="fixed top-4 right-4 z-50 bg-black/90 border border-amber-500 text-amber-300 px-4 py-3 rounded-lg shadow-2xl shadow-amber-500/10 text-sm animate-fade-in font-sans flex items-center gap-2 max-w-md">
+              <HardDrive className="w-4 h-4 shrink-0" />
+              <span>{storageWarning}</span>
+            </div>
           )}
 
           {/* Left panel: Narrative feed / Chat body */}

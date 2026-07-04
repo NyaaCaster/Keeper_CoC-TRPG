@@ -16,6 +16,12 @@ import {
   saveGame,
   validateSaveFormat,
 } from "../lib/saveManager";
+import {
+  estimateSaveStorage,
+  CHAT_STORAGE_QUOTA,
+  formatBytes,
+} from "../lib/storageEstimate";
+import { StorageBar } from "./StorageBar";
 import keeperImg from "../keeper.png";
 
 interface StartScreenProps {
@@ -35,6 +41,7 @@ export default function StartScreen({
   const [saves, setSaves] = useState<WebGameSave[]>([]);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [storageUsage, setStorageUsage] = useState(0);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -44,6 +51,7 @@ export default function StartScreen({
   useEffect(() => {
     if (view === "load") {
       setSaves(getAllSaves());
+      estimateSaveStorage().then(setStorageUsage).catch(() => {});
     }
   }, [view]);
 
@@ -57,6 +65,7 @@ export default function StartScreen({
     deleteSave(id);
     setSaves(getAllSaves());
     setDeleteConfirmId(null);
+    estimateSaveStorage().then(setStorageUsage).catch(() => {});
   };
 
   const cancelDelete = (e: React.MouseEvent) => {
@@ -68,18 +77,45 @@ export default function StartScreen({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Guard 1：单文件超过 100MB 直接拒绝
+    if (file.size > CHAT_STORAGE_QUOTA) {
+      showToast(
+        `文件过大（${formatBytes(file.size)}，上限 100 MB），无法导入。`
+      );
+      e.target.value = "";
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
         const data = JSON.parse(text);
         if (validateSaveFormat(data)) {
-          // If the save ID already exists, we might want to generate a new one, or just overwrite
-          // Here we just save it directly (overwrites if ID exists)
-          data.lastUpdated = Date.now(); // Put it at the top of the list
-          saveGame(data);
-          setSaves(getAllSaves());
-          showToast("记录上传成功。");
+          // Guard 2：预估导入后是否超过 95% 配额
+          const doImport = (used: number) => {
+            if (used + file.size * 2 > CHAT_STORAGE_QUOTA * 0.95) {
+              showToast(
+                `存储空间不足（已用 ${formatBytes(used)} / 100 MB），无法导入。请清理旧存档后重试。`
+              );
+              return;
+            }
+            // 容量足够，执行保存
+            data.lastUpdated = Date.now();
+            saveGame(data);
+            setSaves(getAllSaves());
+            estimateSaveStorage().then(setStorageUsage).catch(() => {});
+            showToast("记录上传成功。");
+          };
+
+          estimateSaveStorage().then(doImport).catch(() => {
+            // 估算失败不阻塞导入（降级放行）
+            data.lastUpdated = Date.now();
+            saveGame(data);
+            setSaves(getAllSaves());
+            estimateSaveStorage().then(setStorageUsage).catch(() => {});
+            showToast("记录上传成功。");
+          });
         } else {
           showToast("神秘的残页无法被解析，这并非有效的守密人记录。");
         }
@@ -179,6 +215,8 @@ export default function StartScreen({
               <X className="w-6 h-6" />
             </button>
           </div>
+
+          <StorageBar usage={storageUsage} quota={CHAT_STORAGE_QUOTA} />
 
           <div className="flex-1 w-full overflow-y-auto custom-scrollbar flex flex-col gap-3 pr-2">
             {saves.length === 0 ? (
