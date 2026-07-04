@@ -247,7 +247,7 @@ export default function AccountPanel({
       <ConfirmModal
         isOpen={showLogoutConfirm}
         title="退出登录"
-        message="确定要退出登录吗？退出后需要重新输入账号密码。"
+        message="确定要退出登录吗？退出登录会中断当前的调查并返回首页，调查进度已自动保留在你的记录中。"
         confirmLabel="确认退出"
         cancelLabel="取消"
         variant="danger"
