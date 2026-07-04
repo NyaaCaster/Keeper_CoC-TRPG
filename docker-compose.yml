@@ -27,6 +27,14 @@ services:
       # Docker bridge networks. Override only when the proxy hops sit on a
       # public range — see .docs/nginx-reverse-proxy.md.
       TRUST_PROXY: "${TRUST_PROXY:-loopback, linklocal, uniquelocal}"
+      # NyaaAcount credentials for unified account system (P3+).
+      # Leave empty until P5 (NyaaAcount provisioning); login returns 503
+      # when these are missing (fail-closed).
+      NYAAACOUNT_BASE_URL: "${NYAAACOUNT_BASE_URL:-}"
+      NYAAACOUNT_API_TOKEN: "${NYAAACOUNT_API_TOKEN:-}"
+      NYAAACOUNT_ENCRYPTION_KEY: "${NYAAACOUNT_ENCRYPTION_KEY:-}"
+      # SQLite database path inside the container.
+      KEEPER_DB_PATH: "/data/db/keeper.db"
     ports:
       # host:container — host port 3093 was selected by the user from the
       # free slots in 3090-3099. Container always listens on 3000.
@@ -35,6 +43,9 @@ services:
       # Persist the 30-day rolling image cache across container rebuilds so
       # generated clue photos remain reachable for their full TTL.
       - keeper_image_cache:/app/cache/images
+      # SQLite database + user storage (P3+ account system).
+      # Bind mount to E:\DockerRes per workspace Docker large-asset policy.
+      - E:\DockerRes\keeper-coc-trpg\db:/data/db
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s

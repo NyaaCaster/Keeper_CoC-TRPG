@@ -4,6 +4,7 @@
  */
 
 import express from "express";
+import { Router } from "express";
 import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
@@ -603,6 +604,123 @@ app.get("/api/models", async (req, res) => {
     return res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Account System (P3) — /api/account/*
+// ---------------------------------------------------------------------------
+import {
+  db,
+  getUser,
+  getUserByNyaaUid,
+  insertUser,
+  updateLastActive,
+  updateUsername,
+} from "./src/lib/db";
+import { verifyUser } from "./src/lib/nyaacount-client";
+import { requireAuth, createSession, destroySession } from "./src/lib/auth";
+
+const accountRouter = Router();
+
+// POST /api/account/login
+// 校验凭证（转发 NyaaAcount），JIT 建本地行，返回 session token
+accountRouter.post("/login", async (req, res) => {
+  const account = String(req.body?.account ?? "").trim();
+  const password = String(req.body?.password ?? "");
+
+  if (!account) {
+    return res.status(400).json({ ok: false, error: "invalid_account" });
+  }
+  if (!password || password.length < 6) {
+    return res.status(400).json({ ok: false, error: "invalid_password" });
+  }
+
+  const r = await verifyUser(account, password);
+
+  // 401 = 凭据错误（与 NyaaChat 一致，统一响应避免用户枚举）
+  if (r.status === 401) {
+    return res.status(401).json({ ok: false, error: "bad_credentials" });
+  }
+
+  // 0 = 网络失败或环境变量未配置 → fail-closed
+  if (!r.ok || !r.data?.uid) {
+    return res.status(503).json({ ok: false, error: "account_service_unavailable" });
+  }
+
+  const nyaaUid = r.data.uid as number;
+
+  // 按 nyaa_uid 定位本地用户行
+  let user = getUserByNyaaUid.get(nyaaUid) as any;
+
+  if (!user) {
+    // JIT 首登建号
+    let localAccount = r.data.username as string;
+    if (getUser.get(localAccount)) {
+      localAccount = `${r.data.username}_nyaa${nyaaUid}`;
+    }
+    const now = Date.now();
+    insertUser.run({
+      account: localAccount,
+      username: r.data.username,
+      created_at: now,
+      last_active: now,
+      nyaa_uid: nyaaUid,
+    });
+    user = getUser.get(localAccount) as any;
+  }
+
+  updateLastActive.run(Date.now(), user.account);
+  const token = createSession(user.account);
+
+  return res.json({
+    ok: true,
+    token,
+    profile: {
+      account: user.account,
+      username: user.username,
+      created_at: user.created_at,
+    },
+  });
+});
+
+// POST /api/account/logout
+accountRouter.post("/logout", requireAuth, (req, res) => {
+  destroySession(req.token!);
+  return res.json({ ok: true });
+});
+
+// GET /api/account/profile
+accountRouter.get("/profile", requireAuth, (req, res) => {
+  return res.json({
+    ok: true,
+    profile: {
+      account: req.user!.account,
+      username: req.user!.username,
+      created_at: req.user!.created_at,
+    },
+  });
+});
+
+// POST /api/account/rename
+accountRouter.post("/rename", requireAuth, (req, res) => {
+  const newName = String(req.body?.username ?? "").trim();
+  if (!newName || newName.length > 20) {
+    return res.status(400).json({ ok: false, error: "invalid_username" });
+  }
+  updateUsername.run(newName, req.user!.account);
+  return res.json({ ok: true, username: newName });
+});
+
+// GET /api/account/health — 数据库健康探针
+accountRouter.get("/health", (_req, res) => {
+  try {
+    db.prepare("SELECT 1").get();
+    res.json({ ok: true, db: "ok" });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, db: "error", error: String(e) });
+  }
+});
+
+app.use("/api/account", accountRouter);
 
 // Configure Vite or Serve SPA in production
 async function startServer() {

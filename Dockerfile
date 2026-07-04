@@ -3,6 +3,8 @@
 # Vite + esbuild + the React toolchain are available for the build stage.
 FROM node:20-alpine AS deps
 WORKDIR /app
+# better-sqlite3 requires native compilation toolchain
+RUN apk add --no-cache python3 make g++
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
