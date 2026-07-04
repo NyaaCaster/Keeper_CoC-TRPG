@@ -1,4 +1,4 @@
-// 调查记录储存容量估算 —— P2 储存计量条 + 100MB 边界限制。
+// 调查记录储存容量估算 —— P2 储存计量条 + 64MB 边界限制。
 // 手工按 IDB key 计量（不用 navigator.storage.estimate），确保与 saveManager / apiSettings
 // 的落盘 key 严格对应。参考 NyaaChat src/lib/storageEstimate.ts 的模式。
 
@@ -8,8 +8,8 @@ import { getItem } from "./idbStorage";
 // 配额常量
 // ---------------------------------------------------------------------------
 
-/** 调查记录本地上限 100 MB */
-export const CHAT_STORAGE_QUOTA = 100 * 1024 * 1024;
+/** 调查记录本地上限 64 MB */
+export const CHAT_STORAGE_QUOTA = 64 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // 与 saveManager / apiSettings 保持一致的 IDB key

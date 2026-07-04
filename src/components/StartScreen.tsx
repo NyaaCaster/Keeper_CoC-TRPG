@@ -204,10 +204,10 @@ export default function StartScreen({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Guard 1：单文件超过 100MB 直接拒绝
+    // Guard 1：单文件超过配额直接拒绝
     if (file.size > CHAT_STORAGE_QUOTA) {
       showToast(
-        `文件过大（${formatBytes(file.size)}，上限 100 MB），无法导入。`
+        `文件过大（${formatBytes(file.size)}，上限 ${formatBytes(CHAT_STORAGE_QUOTA)}），无法导入。`
       );
       e.target.value = "";
       return;
@@ -223,7 +223,7 @@ export default function StartScreen({
           const doImport = (used: number) => {
             if (used + file.size * 2 > CHAT_STORAGE_QUOTA * 0.95) {
               showToast(
-                `存储空间不足（已用 ${formatBytes(used)} / 100 MB），无法导入。请清理旧存档后重试。`
+                `存储空间不足（已用 ${formatBytes(used)} / ${formatBytes(CHAT_STORAGE_QUOTA)}），无法导入。请清理旧存档后重试。`
               );
               return;
             }

@@ -16,7 +16,7 @@
 - **本地存储 IndexedDB 化**：设置、调查记录（存档）本地存储从 localStorage 迁移到 IndexedDB。
 - **调查员账户系统**：接入 NyaaAcount 统一账号，支持用户名/邮箱登录，本地持久化登录状态。
 - **云端同步**：设置、调查记录可上传/下载到服务器，跨设备同步。
-- **储存边界**：调查记录本地上限 100MB，带占用计量条与超限保护。
+- **储存边界**：调查记录本地上限 64MB，带占用计量条与超限保护。
 
 ### 1.2 范围边界（不做）
 - ❌ 不做 NyaaChat 的「角色共享库」功能（共享角色/评分/猫粮经济）。云后端只存用户设置和调查记录。
@@ -35,7 +35,7 @@
 | 云端调查记录加密 | **沿用 NyaaChat E2E 加密（Nyaa-HMAC-XOR-V1）** | 客户端加密、服务端只存密文；密钥服务端持有、跨设备共享；免安全上下文（HTTP 可用）。 |
 | 账号接入模式 | 后端凭证转发 `verify` + 本地 session token + `nyaa_uid` 关联 + JIT 首登 + 弃存密码；**fail-closed** | 沿用 NyaaChat 三段式接入，本地不存密码。 |
 | NyaaAcount 凭证 | 后缀 **`KEEPER`**：`NYAAACOUNT_API_TOKEN_KEEPER` + `NYAAACOUNT_ENCRYPTION_KEY_KEEPER` | NyaaAcount 按环境变量名后缀识别项目，无需白名单表；后缀用纯字母避免连字符。纳入 P5。 |
-| 本地存储上限 | 调查记录 **100MB**（手工分类计量，非 `navigator.storage.estimate`） | 沿用 NyaaChat 分类配额条方案。 |
+| 本地存储上限 | 调查记录 **64MB**（手工分类计量，非 `navigator.storage.estimate`） | 沿用 NyaaChat 分类配额条方案。 |
 
 ### 2.1 新增依赖
 - 后端：`better-sqlite3`、`@noble/hashes`（HMAC-XOR 传输加密与 E2E 加密）。
@@ -74,7 +74,7 @@ KEEPER_USER_STORAGE_DIR=/data/user-storage    # 容器内用户存储目录
 | P | 主题 | 交付与验证 | 状态 |
 |---|---|---|---|
 | **P1** | 本地存储 localStorage → IndexedDB | 存档/设置读写走 IDB；老数据静默迁移（哨兵幂等）；lint+build 通过 | ✅ |
-| **P2** | 储存计量条 + 100MB 边界 | 调查记录档案界面显示占用计量条；导入/保存超限拦截；采用 Keeper 配色控件 | ✅ |
+| **P2** | 储存计量条 + 64MB 边界 | 调查记录档案界面显示占用计量条；导入/保存超限拦截；采用 Keeper 配色控件 | ✅ |
 | **P3** | 账号系统后端（内嵌 server.ts + sqlite） | users/sessions/user_settings 表；login/logout/profile/rename 路由；本地 session token；可本地冒烟 | ✅ |
 | **P4** | 账号系统前端 UI | 首页「调查员登录」选单（登录后才出现游戏选单）；顶栏「调查员账户」按钮（id-card）；账户二级界面；退出登录二次确认 | ✅ |
 | **P5** | NyaaAcount 凭证接入 + 真实登录联调 | NyaaAcount 侧配 KEEPER 凭证并重建；verify 转发 + JIT 首登 + 弃存密码；真账号 E2E 登录通过 | ✅ |
@@ -95,7 +95,7 @@ KEEPER_USER_STORAGE_DIR=/data/user-storage    # 容器内用户存储目录
 - 保留 `sanitizeForStorage` 图片 URL 白名单机制。
 
 ### 5.2 储存计量（P2）
-- 新增 `storageEstimate.ts`：`CHAT_STORAGE_QUOTA = 100*1024*1024`；`estimateSaveStorage()` 用 `new Blob([str]).size` 分类求和。
+- 新增 `storageEstimate.ts`：`CHAT_STORAGE_QUOTA = 64*1024*1024`；`estimateSaveStorage()` 用 `new Blob([str]).size` 分类求和。
 - 新增 `StorageBar` 组件（Keeper 配色：`#10b981` 绿 / `custom-scrollbar`），≥80% 转琥珀色告警。
 - 导入/保存守卫：预估 `used + size*2 > quota*0.95` 拒绝。
 
@@ -137,7 +137,7 @@ KEEPER_USER_STORAGE_DIR=/data/user-storage    # 容器内用户存储目录
 |---|---|
 | 2026-07-04 | 完成三项调研（NyaaChat idb 迁移、云同步、NyaaAcount 接入）；审计设计；确认 4 项关键决策；落盘本 SSOT；启动 P1。 |
 | 2026-07-05 | P1 完成：localStorage→IDB 迁移（缓存+hydrate+异步落盘+幂等哨兵）。lint+build 通过。 |
-| 2026-07-05 | P2 完成：储存计量条 + 100MB 边界。storageEstimate.ts + StorageBar.tsx + 导入/自动保存守卫。lint+build 通过。 |
+| 2026-07-05 | P2 完成：储存计量条 + 64MB 边界。storageEstimate.ts + StorageBar.tsx + 导入/自动保存守卫。lint+build 通过。 |
 | 2026-07-05 | P3 完成：账号系统后端。db.ts + nyaacount-client.ts (HMAC-XOR-V1) + auth.ts + /api/account/* 路由。lint+build+冒烟测试通过。 |
 | 2026-07-05 | P4 完成：账号系统前端 UI。idbAccount.ts + accountApi.ts + ConfirmModal.tsx + AccountPanel.tsx + StartScreen 登录选单 + App.tsx IdCard 顶栏。lint+build 通过。 |
 | 2026-07-05 | P5 完成：NyaaAcount KEEPER 凭证接入。NyaaAcount .env 配 KEEPER token+key 并 rebuild；Keeper .env 配 BASE_URL+token+key 并 rebuild；curl 全链路 E2E（login/profile/rename/logout/token 失效）通过；lint+build+49tests 全绿；测试数据已清理。 |
