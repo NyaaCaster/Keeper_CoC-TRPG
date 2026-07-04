@@ -34,7 +34,10 @@ services:
       NYAAACOUNT_API_TOKEN: "${NYAAACOUNT_API_TOKEN:-}"
       NYAAACOUNT_ENCRYPTION_KEY: "${NYAAACOUNT_ENCRYPTION_KEY:-}"
       # SQLite database path inside the container.
-      KEEPER_DB_PATH: "/data/db/keeper.db"
+      KEEPER_DB_PATH: "${KEEPER_DB_PATH:-/data/db/keeper.db}"
+      # Host directory for persistent data (DB, user storage).
+      # Set in .env to E:\DockerRes\keeper-coc-trpg per workspace policy.
+      KEEPER_DATA_DIR: "${KEEPER_DATA_DIR:-.}"
     ports:
       # host:container — host port 3093 was selected by the user from the
       # free slots in 3090-3099. Container always listens on 3000.
@@ -44,8 +47,8 @@ services:
       # generated clue photos remain reachable for their full TTL.
       - keeper_image_cache:/app/cache/images
       # SQLite database + user storage (P3+ account system).
-      # Bind mount to E:\DockerRes per workspace Docker large-asset policy.
-      - E:\DockerRes\keeper-coc-trpg\db:/data/db
+      # KEEPER_DATA_DIR is configured in .env; defaults to "." (current dir).
+      - ${KEEPER_DATA_DIR:-.}/db:/data/db
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
