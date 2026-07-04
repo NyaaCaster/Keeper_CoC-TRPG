@@ -76,7 +76,7 @@ KEEPER_USER_STORAGE_DIR=/data/user-storage    # 容器内用户存储目录
 | **P1** | 本地存储 localStorage → IndexedDB | 存档/设置读写走 IDB；老数据静默迁移（哨兵幂等）；lint+build 通过 | ✅ |
 | **P2** | 储存计量条 + 100MB 边界 | 调查记录档案界面显示占用计量条；导入/保存超限拦截；采用 Keeper 配色控件 | ✅ |
 | **P3** | 账号系统后端（内嵌 server.ts + sqlite） | users/sessions/user_settings 表；login/logout/profile/rename 路由；本地 session token；可本地冒烟 | ✅ |
-| **P4** | 账号系统前端 UI | 首页「调查员登录」选单（登录后才出现游戏选单）；顶栏「调查员账户」按钮（id-card）；账户二级界面；退出登录二次确认 | ⬜ |
+| **P4** | 账号系统前端 UI | 首页「调查员登录」选单（登录后才出现游戏选单）；顶栏「调查员账户」按钮（id-card）；账户二级界面；退出登录二次确认 | ✅ |
 | **P5** | NyaaAcount 凭证接入 + 真实登录联调 | NyaaAcount 侧配 KEEPER 凭证并重建；verify 转发 + JIT 首登 + 弃存密码；真账号 E2E 登录通过 | ⬜ |
 | **P6** | 云端设置同步 | 设置界面底部「下载设置/上传设置」按钮（在导入/导出之前）；覆盖式同步 + 时间戳 + 二次确认 | ⬜ |
 | **P7** | 云端调查记录同步（E2E 加密）+ 部署收尾 | 档案界面「下载记录/上传记录」按钮；Nyaa-HMAC-XOR-V1 加密；docker-compose bind mount E:\DockerRes；部署验证 | ⬜ |
@@ -139,3 +139,4 @@ KEEPER_USER_STORAGE_DIR=/data/user-storage    # 容器内用户存储目录
 | 2026-07-05 | P1 完成：localStorage→IDB 迁移（缓存+hydrate+异步落盘+幂等哨兵）。lint+build 通过。 |
 | 2026-07-05 | P2 完成：储存计量条 + 100MB 边界。storageEstimate.ts + StorageBar.tsx + 导入/自动保存守卫。lint+build 通过。 |
 | 2026-07-05 | P3 完成：账号系统后端。db.ts + nyaacount-client.ts (HMAC-XOR-V1) + auth.ts + /api/account/* 路由。lint+build+冒烟测试通过。 |
+| 2026-07-05 | P4 完成：账号系统前端 UI。idbAccount.ts + accountApi.ts + ConfirmModal.tsx + AccountPanel.tsx + StartScreen 登录选单 + App.tsx IdCard 顶栏。lint+build 通过。 |

@@ -8,6 +8,8 @@ import {
   X,
   PlusCircle,
   Plug,
+  Loader2,
+  LogIn,
 } from "lucide-react";
 import { WebGameSave } from "../types";
 import {
@@ -23,12 +25,17 @@ import {
 } from "../lib/storageEstimate";
 import { StorageBar } from "./StorageBar";
 import keeperImg from "../keeper.png";
+import type { AccountState } from "../lib/idbAccount";
+import { saveAccountState } from "../lib/idbAccount";
+import { login as loginApi } from "../lib/accountApi";
 
 interface StartScreenProps {
   onNewGame: () => void;
   onLoadGame: (save: WebGameSave) => void;
   onOpenApiSettings: () => void;
   apiConfigured: boolean;
+  accountState: AccountState | null;
+  onLoginSuccess: (state: AccountState) => void;
 }
 
 export default function StartScreen({
@@ -36,6 +43,8 @@ export default function StartScreen({
   onLoadGame,
   onOpenApiSettings,
   apiConfigured,
+  accountState,
+  onLoginSuccess,
 }: StartScreenProps) {
   const [view, setView] = useState<"main" | "load">("main");
   const [saves, setSaves] = useState<WebGameSave[]>([]);
@@ -43,9 +52,57 @@ export default function StartScreen({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [storageUsage, setStorageUsage] = useState(0);
 
+  // 登录表单状态
+  const [loginAccount, setLoginAccount] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  const isLoggedIn = accountState !== null;
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  /** 处理登录提交 */
+  const handleLogin = async () => {
+    const account = loginAccount.trim();
+    if (!account) {
+      setLoginError("请输入邮箱或用户名");
+      return;
+    }
+    if (!loginPassword || loginPassword.length < 6) {
+      setLoginError("密码需至少 6 个字符");
+      return;
+    }
+
+    setLoginLoading(true);
+    setLoginError(null);
+    const result = await loginApi(account, loginPassword);
+    setLoginLoading(false);
+
+    if (result.ok) {
+      await saveAccountState(result.data);
+      onLoginSuccess(result.data);
+    } else {
+      setLoginError(
+        result.error === "bad_credentials"
+          ? "账号或密码错误"
+          : result.error === "invalid_account"
+            ? "请输入有效的邮箱或用户名"
+            : result.error === "invalid_password"
+              ? "密码需至少 6 个字符"
+              : result.error === "account_service_unavailable"
+                ? "账号服务暂时不可用，请稍后重试"
+                : "网络连接失败，请检查网络后重试",
+      );
+    }
+  };
+
+  /** 登录表单键盘提交 */
+  const handleLoginKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !loginLoading) handleLogin();
   };
 
   useEffect(() => {
@@ -156,48 +213,140 @@ export default function StartScreen({
           <h1 className="text-5xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white via-emerald-500 to-emerald-900 tracking-widest mb-4 font-mono">
             守密人
           </h1>
-          <p className="text-gray-400 text-center text-sm md:text-base leading-relaxed mb-12 max-w-md font-sans">
+          <p className="text-gray-400 text-center text-sm md:text-base leading-relaxed mb-10 max-w-md font-sans">
             游走于理智与混沌的边缘
             <br />
             只有最坚韧的灵魂，才能窥见帷幕后的真实。
           </p>
 
+          {/* 登录表单 —— 未登录时显示 */}
+          {!isLoggedIn && (
+            <div className="w-full sm:w-3/4 mb-4">
+              <div className="bg-black/60 border border-emerald-500/30 rounded-lg p-5 space-y-4">
+                <h3 className="text-sm font-bold text-coc-gold tracking-widest font-mono text-center">
+                  调查员登录
+                </h3>
+
+                <input
+                  type="text"
+                  value={loginAccount}
+                  onChange={(e) => {
+                    setLoginAccount(e.target.value);
+                    setLoginError(null);
+                  }}
+                  onKeyDown={handleLoginKeyDown}
+                  placeholder="邮箱或用户名"
+                  autoComplete="username"
+                  disabled={loginLoading}
+                  className="w-full bg-[#121f18] border border-emerald-500/30 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                />
+
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => {
+                    setLoginPassword(e.target.value);
+                    setLoginError(null);
+                  }}
+                  onKeyDown={handleLoginKeyDown}
+                  placeholder="密码"
+                  autoComplete="current-password"
+                  disabled={loginLoading}
+                  className="w-full bg-[#121f18] border border-emerald-500/30 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                />
+
+                {loginError && (
+                  <p className="text-red-400 text-xs text-center">
+                    {loginError}
+                  </p>
+                )}
+
+                <button
+                  onClick={handleLogin}
+                  disabled={loginLoading}
+                  className="w-full py-2.5 bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-500 text-white font-bold text-sm rounded transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {loginLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      登录中…
+                    </>
+                  ) : (
+                    <>
+                      <LogIn className="w-4 h-4" />
+                      登录
+                    </>
+                  )}
+                </button>
+
+                <p className="text-xs text-gray-500 text-center">
+                  没有账号？{" "}
+                  <a
+                    href="http://h.nyaa.host:5110/?view=register"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-coc-gold hover:underline"
+                  >
+                    去注册
+                  </a>
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* 游戏按钮 —— 登录后显示 */}
           <div className="flex flex-col gap-4 w-full sm:w-3/4">
             <button
               onClick={onNewGame}
-              disabled={!apiConfigured}
-              title={apiConfigured ? undefined : "先完成虚空连接"}
+              disabled={!isLoggedIn || !apiConfigured}
+              title={
+                !isLoggedIn
+                  ? "请先登录"
+                  : !apiConfigured
+                    ? "先完成虚空连接"
+                    : undefined
+              }
               className={`group relative overflow-hidden w-full py-4 transition-all flex items-center justify-center gap-3 active:scale-95 ${
-                apiConfigured
+                isLoggedIn && apiConfigured
                   ? "bg-gradient-to-r from-emerald-500/10 via-emerald-500/20 to-emerald-500/10 border border-emerald-500/50 hover:border-emerald-400 text-emerald-100 shadow-[0_0_15px_rgba(16,185,129,0.1)] hover:shadow-[0_0_25px_rgba(16,185,129,0.3)]"
                   : "bg-gray-900/40 border border-gray-700 text-gray-600 cursor-not-allowed"
               }`}
             >
-              <PlusCircle className={`w-5 h-5 ${apiConfigured ? "group-hover:animate-pulse" : ""}`} />
+              <PlusCircle className={`w-5 h-5 ${isLoggedIn && apiConfigured ? "group-hover:animate-pulse" : ""}`} />
               <span className="font-bold tracking-widest">踏入全新的漩涡</span>
             </button>
             <button
               onClick={() => setView("load")}
-              disabled={!apiConfigured}
-              title={apiConfigured ? undefined : "先完成虚空连接"}
+              disabled={!isLoggedIn || !apiConfigured}
+              title={
+                !isLoggedIn
+                  ? "请先登录"
+                  : !apiConfigured
+                    ? "先完成虚空连接"
+                    : undefined
+              }
               className={`group w-full py-4 transition-all flex items-center justify-center gap-3 active:scale-95 ${
-                apiConfigured
+                isLoggedIn && apiConfigured
                   ? "bg-black/60 border border-gray-800 hover:border-gray-500 text-gray-300 hover:text-gray-100"
                   : "bg-gray-900/40 border border-gray-700 text-gray-600 cursor-not-allowed"
               }`}
             >
-              <RotateCcw className={`w-5 h-5 ${apiConfigured ? "group-hover:-rotate-90 transition-transform duration-500" : ""}`} />
+              <RotateCcw className={`w-5 h-5 ${isLoggedIn && apiConfigured ? "group-hover:-rotate-90 transition-transform duration-500" : ""}`} />
               <span className="tracking-widest">继续未完的调查</span>
             </button>
             <button
               onClick={onOpenApiSettings}
+              disabled={!isLoggedIn}
+              title={!isLoggedIn ? "请先登录" : undefined}
               className={`group w-full py-4 transition-all flex items-center justify-center gap-3 active:scale-95 bg-gradient-to-r from-emerald-500/5 via-emerald-500/15 to-emerald-500/5 border text-emerald-100 hover:shadow-[0_0_25px_rgba(16,185,129,0.3)] ${
-                apiConfigured
-                  ? "border-emerald-500/40 hover:border-emerald-400"
-                  : "border-emerald-400 animate-pulse"
+                isLoggedIn
+                  ? apiConfigured
+                    ? "border-emerald-500/40 hover:border-emerald-400"
+                    : "border-emerald-400 animate-pulse"
+                  : "border-gray-700 text-gray-600 cursor-not-allowed"
               }`}
             >
-              <Plug className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+              <Plug className={`w-5 h-5 ${isLoggedIn ? "group-hover:rotate-12 transition-transform" : ""}`} />
               <span className="tracking-widest">虚空连接的设置</span>
             </button>
           </div>

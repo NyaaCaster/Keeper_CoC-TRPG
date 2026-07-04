@@ -44,6 +44,7 @@ import {
   Image as ImageIcon,
   Loader2,
   ZoomIn,
+  IdCard,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -98,6 +99,15 @@ import {
   buildCancellationReport,
   isInternalSystemMarker,
 } from "./lib/rollCancellation";
+import ConfirmModal from "./components/ConfirmModal";
+import AccountPanel from "./components/AccountPanel";
+import type { AccountState } from "./lib/idbAccount";
+import {
+  loadAccountState,
+  saveAccountState,
+  clearAccountState,
+} from "./lib/idbAccount";
+import { logout as logoutApi } from "./lib/accountApi";
 
 /** 二阶段效果骰队列项 — 详见 .docs/two-stage-roll.md。 */
 type EffectKind = "damage" | "heal" | "mpCost" | "sanLoss";
@@ -264,6 +274,11 @@ export default function App() {
   const [showConsoleLog, setShowConsoleLog] = useState<boolean>(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => loadApiSettings());
+
+  // 账户系统状态
+  const [accountState, setAccountState] = useState<AccountState | null>(null);
+  const [showAccountPanel, setShowAccountPanel] = useState(false);
+  const [accountHydrated, setAccountHydrated] = useState(false);
 
   // Ring buffer for console logs — cap at 500 entries to avoid render slowdowns.
   const addLog = React.useCallback(
@@ -2498,6 +2513,45 @@ export default function App() {
     }
   }, [activeSaveId]);
 
+  // 账户状态水合：mount 时从 IDB 恢复登录态
+  useEffect(() => {
+    loadAccountState().then((state) => {
+      if (state) {
+        setAccountState(state);
+      }
+      setAccountHydrated(true);
+    });
+  }, []);
+
+  /** 登录成功回调 —— 由 StartScreen 调用 */
+  const handleLoginSuccess = (state: AccountState) => {
+    setAccountState(state);
+  };
+
+  /** 退出登录 —— 由 AccountPanel 调用 */
+  const handleAccountLogout = async () => {
+    // 尝试通知服务端销毁 session（fire-and-forget）
+    if (accountState?.token) {
+      logoutApi(accountState.token).catch(() => {});
+    }
+    await clearAccountState();
+    setAccountState(null);
+    setShowAccountPanel(false);
+    // 如果当前在游戏中，同时退出调查
+    if (appMode === "game") {
+      setActiveSaveId(null);
+      setCharacter(null);
+      setMessages([]);
+      setClues([]);
+      setAppMode("start");
+    }
+  };
+
+  /** profile 更新回调 —— 由 AccountPanel 改名成功后调用 */
+  const handleProfileUpdate = (state: AccountState) => {
+    setAccountState(state);
+  };
+
   // 储存警告 8 秒后自动消失
   useEffect(() => {
     if (storageWarning) {
@@ -2573,6 +2627,8 @@ export default function App() {
           onLoadGame={handleLoadGame}
           onOpenApiSettings={() => setShowApiSettings(true)}
           apiConfigured={isApiConfigured(apiSettings)}
+          accountState={accountState}
+          onLoginSuccess={handleLoginSuccess}
         />
       ) : appMode === "creation" ? (
         <div
@@ -2638,6 +2694,18 @@ export default function App() {
               </a>
 
               <div className="flex items-center gap-2">
+                {/* Account Panel Toggle */}
+                <button
+                  id="toggle-account-btn"
+                  type="button"
+                  onClick={() => setShowAccountPanel(true)}
+                  className="p-1 px-2 border rounded transition-all bg-black/40 border-gray-800 text-gray-400 hover:text-gray-200"
+                  title="调查员账户"
+                  aria-label="调查员账户"
+                >
+                  <IdCard className="w-3.5 h-3.5" />
+                </button>
+
                 {/* Character Sidebar Toggle Shortcut */}
                 <button
                   id="toggle-sheet-btn"
@@ -3427,42 +3495,6 @@ export default function App() {
               );
             })()}
 
-            {showExitConfirm && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 font-sans"
-              >
-                <motion.div
-                  initial={{ scale: 0.95 }}
-                  animate={{ scale: 1 }}
-                  exit={{ scale: 0.95 }}
-                  className="bg-[#181a1c] border border-gray-800 rounded-lg p-6 max-w-sm w-full shadow-2xl relative"
-                >
-                  <h3 className="text-xl font-bold text-red-500 mb-2 font-mono">
-                    退出调查
-                  </h3>
-                  <p className="text-gray-300 text-sm mb-6">
-                    确定要退出当前的调查吗？进度已自动保留在你的记录中。
-                  </p>
-                  <div className="flex justify-end gap-3">
-                    <button
-                      onClick={() => setShowExitConfirm(false)}
-                      className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded transition-colors"
-                    >
-                      取消 (Cancel)
-                    </button>
-                    <button
-                      onClick={confirmExitInvestigation}
-                      className="px-4 py-2 bg-red-900/80 hover:bg-red-700 border border-red-800 text-white font-bold text-sm rounded transition-colors"
-                    >
-                      确认退出
-                    </button>
-                  </div>
-                </motion.div>
-              </motion.div>
-            )}
           </AnimatePresence>
         </div>
       )}
@@ -3490,6 +3522,27 @@ export default function App() {
         onOpenConsoleLog={() => setShowConsoleLog(true)}
         canDownload={appMode === "game" && !!activeSaveId && !!character}
         canExit={appMode === "game"}
+      />
+
+      {/* 退出调查确认 */}
+      <ConfirmModal
+        isOpen={showExitConfirm}
+        title="退出调查"
+        message="确定要退出当前的调查吗？进度已自动保留在你的记录中。"
+        confirmLabel="确认退出"
+        cancelLabel="取消 (Cancel)"
+        variant="danger"
+        onConfirm={confirmExitInvestigation}
+        onCancel={() => setShowExitConfirm(false)}
+      />
+
+      {/* 调查员账户面板 */}
+      <AccountPanel
+        isOpen={showAccountPanel}
+        onClose={() => setShowAccountPanel(false)}
+        accountState={accountState}
+        onLogout={handleAccountLogout}
+        onProfileUpdate={handleProfileUpdate}
       />
     </div>
   );
