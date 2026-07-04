@@ -101,6 +101,7 @@ import {
 } from "./lib/rollCancellation";
 import ConfirmModal from "./components/ConfirmModal";
 import AccountPanel from "./components/AccountPanel";
+import LoginForm from "./components/LoginForm";
 import type { AccountState } from "./lib/idbAccount";
 import {
   loadAccountState,
@@ -278,6 +279,7 @@ export default function App() {
   // 账户系统状态
   const [accountState, setAccountState] = useState<AccountState | null>(null);
   const [showAccountPanel, setShowAccountPanel] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const [accountHydrated, setAccountHydrated] = useState(false);
 
   // Ring buffer for console logs — cap at 500 entries to avoid render slowdowns.
@@ -2698,7 +2700,13 @@ export default function App() {
                 <button
                   id="toggle-account-btn"
                   type="button"
-                  onClick={() => setShowAccountPanel(true)}
+                  onClick={() => {
+                    if (accountState) {
+                      setShowAccountPanel(true);
+                    } else {
+                      setShowLoginModal(true);
+                    }
+                  }}
                   className="p-1 px-2 border rounded transition-all bg-black/40 border-gray-800 text-gray-400 hover:text-gray-200"
                   title="调查员账户"
                   aria-label="调查员账户"
@@ -3544,6 +3552,36 @@ export default function App() {
         onLogout={handleAccountLogout}
         onProfileUpdate={handleProfileUpdate}
       />
+
+      {/* 未登录容错：登录弹窗 */}
+      <AnimatePresence>
+        {showLoginModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 font-sans"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setShowLoginModal(false);
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="bg-[#0c1410] border border-emerald-500/30 rounded-lg p-6 max-w-sm w-full shadow-2xl"
+            >
+              <LoginForm
+                onLoginSuccess={(state) => {
+                  setAccountState(state);
+                  setShowLoginModal(false);
+                }}
+                onCancel={() => setShowLoginModal(false)}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
