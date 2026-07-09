@@ -23,7 +23,7 @@
 ## 服务地址
 
 ```
-http://h.hony-wen.com:3094/mcp
+http://h.nyaa.host:3094/mcp
 ```
 
 公开开放，**Streamable HTTP** 协议（MCP 2025-03-26 标准）。
@@ -41,7 +41,7 @@ Authorization: Bearer xxxxxx
 请求示例：
 
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -62,7 +62,7 @@ HTTP 401
 设置 → MCP 服务器 → 添加 → 类型选 **Streamable HTTP**：
 
 ```
-URL:     http://h.hony-wen.com:3094/mcp
+URL:     http://h.nyaa.host:3094/mcp
 Headers: Authorization: Bearer xxxxxx
 ```
 
@@ -85,7 +85,7 @@ Authorization: Bearer xxxxxx
 不需要鉴权，可用于先验证 URL 可达：
 
 ```
-GET http://h.hony-wen.com:3094/health
+GET http://h.nyaa.host:3094/health
 → {"status":"ok","name":"nyaachat-mcp","version":"0.1.0"}
 ```
 
@@ -169,7 +169,7 @@ Current time in America/New_York (UTC-04:00):
 
 **调用示例：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -195,7 +195,7 @@ D&D 5e d20 检定 / 豁免 / 攻击骰。
 
 **调用示例（祝福术下的优势攻击 vs DC 15）：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -255,7 +255,7 @@ CoC 7e 百分骰技能检定（**点数越低越好**）。
 
 **调用示例（技能 60，1 个奖励骰）：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -297,7 +297,7 @@ CoC 技能检定（技能值 60，奖励骰 ×1）
 
 **调用示例（5 枚硬币）：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -325,7 +325,7 @@ curl -X POST http://h.hony-wen.com:3094/mcp \
 
 **调用示例：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -364,7 +364,7 @@ curl -X POST http://h.hony-wen.com:3094/mcp \
 
 **调用示例（三张牌阵带问题）：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -404,7 +404,7 @@ curl -X POST http://h.hony-wen.com:3094/mcp \
 
 **调用示例：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \

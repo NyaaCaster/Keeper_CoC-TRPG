@@ -418,7 +418,7 @@ app.post("/api/keeper/roll", async (req, res) => {
     push({ direction: "info", content: `/api/keeper/roll → 本地兜底骰(MCP 未配置)`, meta: { skill, bonus, penalty } });
     return res.json({ success: true, text: localCocRoll(skill, bonus, penalty), fallback: true, _serverLogs: logs });
   }
-  const mcpUrl = "http://h.hony-wen.com:3094/mcp";
+  const mcpUrl = "http://h.nyaa.host:3094/mcp";
 
   try {
     const rpcPayload = {
@@ -520,7 +520,7 @@ function localCocRoll(skill: any, bonus: any, penalty: any): string {
 //   GET /api/mcp/status → { ok: boolean, reason?: string }
 //   The frontend Settings panel uses this to render a green/grey status dot.
 app.get("/api/mcp/status", async (_req, res) => {
-  const mcpUrl = "http://h.hony-wen.com:3094/mcp";
+  const mcpUrl = "http://h.nyaa.host:3094/mcp";
   const bearerToken = process.env.NYAACHAT_MCP_TOKEN || "";
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 5000);

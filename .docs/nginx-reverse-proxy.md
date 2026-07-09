@@ -161,7 +161,7 @@ curl -I https://keeper.example.com/cache/images/<some-sha>.png
 | LLM 请求 504 / 502 | nginx 默认 `proxy_read_timeout` 是 60s，长 LLM 思考会被掐 | 按 §2.1 把 `proxy_read_timeout / proxy_send_timeout` 调到 600s |
 | 画图 b64 上传 / 大存档导出 413 Payload Too Large | nginx `client_max_body_size` 默认 1m，本项目服务端是 10m | `client_max_body_size 12m;` |
 | 子路径反代后白屏 / 资源 404 | Vite 构建出来的 asset 引用是 `/assets/xxx.js`，被打到子路径外 | 改用独立子域（见 §2.2） |
-| 进游戏一切正常但 `/api/mcp/status` 卡 5s 超时 | NyaaChat-MCP 服务（`h.hony-wen.com:3094`）从你的服务器出不去 | 这条不影响游戏，本地兜底骰会接管；想用真随机骰要确保容器有出网到 MCP 的能力 |
+| 进游戏一切正常但 `/api/mcp/status` 卡 5s 超时 | NyaaChat-MCP 服务（`h.nyaa.host:3094`）从你的服务器出不去 | 这条不影响游戏，本地兜底骰会接管；想用真随机骰要确保容器有出网到 MCP 的能力 |
 | `req.ip` 全是 `127.0.0.1` / `::ffff:127.0.0.1` | nginx 在同机但你设了 `TRUST_PROXY=false`，X-Forwarded-* 不被信任 | 留空走默认值，或者明确写 `TRUST_PROXY=1` |
 
 ---
