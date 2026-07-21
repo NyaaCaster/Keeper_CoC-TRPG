@@ -123,7 +123,16 @@ export function extractJsonObject(s: string): string {
   const stripped = stripCodeFence(s);
   if (stripped.startsWith("{") || stripped.startsWith("[")) return stripped;
   const start = stripped.indexOf("{");
-  if (start < 0) return stripped;
+  if (start < 0) {
+    // 模型返回了纯文本，未包含任何 JSON 结构 — 抛特定错误供上层识别并重试
+    if (stripped.trim()) {
+      throw new Error(
+        `模型返回了非 JSON 文本（以 "${stripped.trim().slice(0, 80)}" 开头）。` +
+        `这通常表示模型忽略了 JSON 输出指令，直接输出了对话/叙事内容。`,
+      );
+    }
+    return stripped; // 空串照旧返回
+  }
   let depth = 0, inStr = false, escape = false;
   for (let i = start; i < stripped.length; i++) {
     const ch = stripped[i];
@@ -142,6 +151,16 @@ export function extractJsonObject(s: string): string {
 
 function schemaToPromptDescription(schema: any): string {
   return `\n\n你必须严格按以下 JSON 结构输出，不输出任何额外文本（不要 markdown 代码块）：\n${JSON.stringify(schema, null, 2)}\n\nrequired 字段必须存在；无值的可选字段使用 null。`;
+}
+
+/**
+ * 提取 + 预检 JSON：先调用 extractJsonObject 清洗，再 JSON.parse 验证。
+ * 验证通过则返回清洗后的 JSON 字符串；失败则将错误抛给上层处理（如重试）。
+ */
+function extractAndValidate(raw: string): string {
+  const extracted = extractJsonObject(raw);
+  JSON.parse(extracted); // 预检，失败则抛出
+  return extracted;
 }
 
 export function humanizeLlmError(e: any): string {
@@ -253,7 +272,14 @@ function buildMessagesWithTailSystem(input: DispatchInput): LlmChatMessage[] {
     { role: "user", content: input.prompt.latestUser },
   ];
   const rules = formatSessionRules(input.prompt.dynamicRules);
-  if (rules) messages.push({ role: "system", content: rules });
+  if (rules) {
+    messages.push({
+      role: "system",
+      content:
+        rules +
+        "\n\n[系统指令] 你必须输出纯 JSON 对象。不要输出任何对话文本、解释或 Markdown。",
+    });
+  }
   return messages;
 }
 
@@ -449,5 +475,49 @@ async function dispatchOpenAiCompat(
   const data: any = await resp.json();
   const raw: string | undefined = data?.choices?.[0]?.message?.content;
   if (!raw) throw new Error(`供应商 ${provider} 返回结构异常。`);
-  return extractJsonObject(raw);
+
+  // 预检 JSON 有效性；命中"非 JSON 文本"错误时自动重试一次
+  try {
+    return extractAndValidate(raw);
+  } catch (firstError) {
+    if (!(firstError instanceof Error && firstError.message.includes("非 JSON 文本"))) {
+      throw firstError;
+    }
+    // 重试：强 JSON 约束 system 消息 + 低温
+    const retryMessages = [
+      ...messages.slice(0, -1),
+      {
+        role: "system" as const,
+        content:
+          "【重要指令 — 你必须严格遵守】你上一轮回复不是合法 JSON。现在你必须**仅输出一个 JSON 对象**。" +
+          "不要输出任何对话文本、解释文字、角色扮演、或 Markdown 代码块。" +
+          "你的整个回复必须是可以被 JSON.parse() 直接解析的有效 JSON。如果你再次输出非 JSON 文本，系统将拒绝并报错。",
+      },
+      messages[messages.length - 1],
+    ];
+    const retryBody = {
+      ...body,
+      messages: retryMessages,
+      temperature: 0.3,
+    };
+
+    const retryResp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(retryBody),
+      referrerPolicy: "no-referrer",
+      signal,
+    });
+    if (!retryResp.ok) {
+      const errText = await retryResp.text().catch(() => "");
+      throw new LlmHttpError(retryResp.status, errText);
+    }
+    const retryData = await retryResp.json();
+    const retryRaw: string | undefined = retryData?.choices?.[0]?.message?.content;
+    if (!retryRaw) throw new Error(`供应商 ${provider} 重试返回结构异常。`);
+    return extractAndValidate(retryRaw);
+  }
 }
