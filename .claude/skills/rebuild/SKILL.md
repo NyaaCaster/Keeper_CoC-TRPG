@@ -48,7 +48,7 @@ python rebuild.py --skip-push
 本地 `rebuild.py` 构建推送后，**必须**推送 `.env` 到 macmini 并重启容器：
 
 ```bash
-scp .env U-MacMini-1:/root/DockerContainer/keeper-coc-trpg/.env && ssh U-MacMini-1 "export PATH=\$PATH:/snap/bin && cd /root/DockerContainer/keeper-coc-trpg && python3 restart.py"
+scp .env macmini:/root/DockerContainer/keeper-coc-trpg/.env && ssh macmini "export PATH=\$PATH:/snap/bin && cd /root/DockerContainer/keeper-coc-trpg && python3 restart.py"
 ```
 
 ### .env 变更强制推送规则
@@ -56,7 +56,7 @@ scp .env U-MacMini-1:/root/DockerContainer/keeper-coc-trpg/.env && ssh U-MacMini
 **只要 `.env` 中发生了影响 macmini 发布侧运行时行为的变更（如 `NYAACHAT_MCP_URL`、`NYAAACOUNT_BASE_URL`、`NYAACHAT_MCP_TOKEN`、`PRIVATE_DOCKER_REGISTRY_*` 等容器内通过 `process.env` 读取的变量），即使本次不需要 rebuild，也必须单独推送 `.env` 并重启 macmini 容器：**
 
 ```bash
-scp .env U-MacMini-1:/root/DockerContainer/keeper-coc-trpg/.env && ssh U-MacMini-1 "export PATH=\$PATH:/snap/bin && cd /root/DockerContainer/keeper-coc-trpg && python3 restart.py"
+scp .env macmini:/root/DockerContainer/keeper-coc-trpg/.env && ssh macmini "export PATH=\$PATH:/snap/bin && cd /root/DockerContainer/keeper-coc-trpg && python3 restart.py"
 ```
 
 `restart.py` 流程：pull → down → up -d → prune → status。
