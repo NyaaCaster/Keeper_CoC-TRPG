@@ -89,7 +89,7 @@ def registry_health(registry_url: str, secrets: list[str]) -> bool:
 # build
 # ---------------------------------------------------------------------------
 
-def docker_build(host: str, sha: str, no_cache: bool, secrets: list[str]):
+def docker_build(host: str, sha: str, no_cache: bool, secrets: list[str], env: dict):
     """docker build with double tags (sha + latest)."""
     tags = [f"{host}/{IMAGE}:{sha}", f"{host}/{IMAGE}:latest"]
     cmd = ["docker", "build", "-f", "Dockerfile"]
@@ -97,6 +97,12 @@ def docker_build(host: str, sha: str, no_cache: bool, secrets: list[str]):
         cmd.append("--no-cache")
     for t in tags:
         cmd += ["-t", t]
+    # Public build-time config for the frontend bundle. Value is read from
+    # .env (uncommitted) — same pattern as AVG rebuild.py's build args.
+    public_url = env.get("NYAAACOUNT_BASE_URL", "")
+    if public_url:
+        cmd += ["--build-arg", f"NYAAACOUNT_BASE_URL={public_url}"]
+        secrets.append(public_url)
     cmd.append(".")
     cp = run(cmd, secrets)
     if cp.returncode != 0:
@@ -251,7 +257,7 @@ def main():
         registry_health(url, secrets)
 
     # 2. build
-    docker_build(host, sha, args.no_cache, secrets)
+    docker_build(host, sha, args.no_cache, secrets, env)
 
     if args.skip_push:
         print("--skip-push: done (local build only)")

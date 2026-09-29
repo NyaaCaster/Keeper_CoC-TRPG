@@ -31,6 +31,9 @@ services:
       # Leave empty until P5 (NyaaAcount provisioning); login returns 503
       # when these are missing (fail-closed).
       NYAAACOUNT_BASE_URL: "${NYAAACOUNT_BASE_URL:-}"
+      # LAN fallback key — the client falls back to this when BASE_URL is
+      # unset (local deployments point it at the LAN http entry).
+      NYAAACOUNT_BASE_URL_LAN: "${NYAAACOUNT_BASE_URL_LAN:-}"
       NYAAACOUNT_API_TOKEN: "${NYAAACOUNT_API_TOKEN:-}"
       NYAAACOUNT_ENCRYPTION_KEY: "${NYAAACOUNT_ENCRYPTION_KEY:-}"
       # SQLite database path inside the container.

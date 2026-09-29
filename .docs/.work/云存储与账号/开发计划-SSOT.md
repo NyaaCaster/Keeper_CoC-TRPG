@@ -42,8 +42,8 @@
 - 前端 IndexedDB 层：**零依赖**（原生 `indexedDB` API，沿用 NyaaChat 手写封装）。
 
 ### 2.2 服务地址与端点（NyaaAcount）
-- 生产入口：`http://h.nyaa.host:5110`，接入端点 `/api/project/{verify,register,uid,password}`。
-- 注册跳转：`http://h.nyaa.host:5110/?view=register`；账号管理：`http://h.nyaa.host:5110/`。
+- 生产入口：`https://h.nyaa.host:45110`，接入端点 `/api/project/{verify,register,uid,password}`。
+- 注册跳转：`https://h.nyaa.host:45110/?view=register`；账号管理：`https://h.nyaa.host:45110/`。
 - 凭证仅存 Keeper 服务端 `.env`，**绝不下发浏览器**。传输加密 Nyaa-HMAC-XOR-V1，仅加密 POST/PUT 请求体。
 
 ---
@@ -57,7 +57,8 @@ IMAGE_PUBLIC_BASE_URL=        # 线索图公网前缀
 TRUST_PROXY=loopback, linklocal, uniquelocal
 
 # 新增（云存储 + 账号）
-NYAAACOUNT_BASE_URL=http://h.nyaa.host:5110   # NyaaAcount 平台地址
+NYAAACOUNT_BASE_URL_LAN=http://192.168.31.141:5110   # NyaaAcount 平台地址（局域网，服务端优先）
+NYAAACOUNT_BASE_URL=https://h.nyaa.host:45110        # 公网 https 入口（前端 bundle 构建注入同读此键）
 NYAAACOUNT_API_TOKEN=                         # Keeper 专属 project token（KEEPER 后缀，base64url）
 NYAAACOUNT_ENCRYPTION_KEY=                    # Keeper 专属传输密钥（hex 32 字节）
 KEEPER_DB_PATH=/data/db/keeper.db             # 容器内 sqlite 路径（bind mount 到 E:\DockerRes）

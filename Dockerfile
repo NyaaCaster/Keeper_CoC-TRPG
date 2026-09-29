@@ -14,6 +14,12 @@ RUN npm ci --no-audit --no-fund
 FROM node:20-alpine AS builder
 WORKDIR /app
 ENV NODE_ENV=production
+# Public, non-secret build-time config (frontend bundle inlines it):
+# NyaaAcount platform public https entry. Value comes from rebuild.py
+# --build-arg, which reads NYAAACOUNT_BASE_URL from .env (never committed;
+# same pattern as AVG's AVG_DATABASE_API_URL build-arg).
+ARG NYAAACOUNT_BASE_URL
+ENV NYAAACOUNT_BASE_URL=${NYAAACOUNT_BASE_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json tsconfig.json vite.config.ts index.html ./
 COPY public ./public

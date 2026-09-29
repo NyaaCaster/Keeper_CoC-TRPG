@@ -222,7 +222,7 @@ export default function AccountPanel({
               {/* 操作按钮区 */}
               <div className="space-y-3 pt-4 border-t border-emerald-500/20">
                 <a
-                  href="http://h.nyaa.host:5110/"
+                  href={`${__NYAACOUNT_BASE_URL__}/`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-100 rounded text-sm transition-colors"

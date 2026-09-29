@@ -131,7 +131,7 @@ export default function LoginForm({ onLoginSuccess, onCancel }: LoginFormProps) 
       <p className="text-xs text-gray-500 text-center">
         没有账号？{" "}
         <a
-          href="http://h.nyaa.host:5110/?view=register"
+          href={`${__NYAACOUNT_BASE_URL__}/?view=register`}
           target="_blank"
           rel="noopener noreferrer"
           className="text-coc-gold hover:underline"

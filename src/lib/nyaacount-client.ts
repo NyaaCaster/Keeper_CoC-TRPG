@@ -6,7 +6,8 @@
 //   - 响应：明文 JSON（与 NyaaAcount 项目间端点约定一致）
 //
 // 环境变量（经 docker-compose.yml 注入）：
-//   NYAAACOUNT_BASE_URL       — 平台地址，如 http://h.nyaa.host:5110
+//   NYAAACOUNT_BASE_URL_LAN   — 平台地址，局域网 http 入口，服务端优先（值见 .env）
+//   NYAAACOUNT_BASE_URL       — 平台地址，公网 https 入口，回退键（值见 .env）
 //   NYAAACOUNT_API_TOKEN      — 本项目（Keeper）的 project token
 //   NYAAACOUNT_ENCRYPTION_KEY — 本项目的 32 字节 hex 传输密钥
 //
@@ -21,7 +22,8 @@
 
 import { createHmac, randomBytes } from "node:crypto";
 
-const BASE_URL = (process.env.NYAAACOUNT_BASE_URL || "").replace(/\/+$/, "");
+// 服务端服务器间调用优先走局域网入口（不绕路由器回环）；无 _LAN 键时回退公网。
+const BASE_URL = (process.env.NYAAACOUNT_BASE_URL_LAN || process.env.NYAAACOUNT_BASE_URL || "").replace(/\/+$/, "");
 const API_TOKEN = process.env.NYAAACOUNT_API_TOKEN || "";
 const KEY_HEX = process.env.NYAAACOUNT_ENCRYPTION_KEY || "";
 
@@ -105,7 +107,7 @@ async function callNyaaAcount(
       ok: false,
       status: 0,
       data: null,
-      error: "NyaaAcount 环境变量未配置（NYAAACOUNT_BASE_URL / API_TOKEN / ENCRYPTION_KEY）",
+      error: "NyaaAcount 环境变量未配置（NYAAACOUNT_BASE_URL / BASE_URL_LAN / API_TOKEN / ENCRYPTION_KEY）",
     };
   }
 
